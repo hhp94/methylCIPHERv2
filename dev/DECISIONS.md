@@ -12,6 +12,41 @@ second-guessed; do not restate rules already stated in the migration / detail pl
 
 ---
 
+## 2026-07-22 -- the `[[` rule is enforced by data provenance, not by file
+
+**Decision.** The `[[`-not-`$` invariant now covers every read of an
+**upstream-owned** structure, repo-wide: the seven remaining `clock_impute(id)$policy`
+sites, `clock_group_bundle(id)$group_id`, the GrimAgeV2 `comp$file` / `$intercept` /
+`$covariates` component reads, all pack payload reads (`pack$cpgs`, `$organs`,
+`$systems`, `$age`, `$impute`, `$coefficient_matrix`), the asset/provenance rows in
+`R/mc_data.R`, the `mc_index` data-frame columns, and ~230 sites in `data-raw/sync.R`,
+which parses the meta JSON directly. Package-internal lists keep `$`.
+
+**Why the boundary is provenance and not "all of `R/`".** The bug this prevents is an
+upstream rename silently resolving to a longer sibling field. That can only happen where
+the field names are set by a repo we do not control. `cpgs$score_present`,
+`lp$cpg_contrib`, `design$sample_miss` and friends are containers this package builds and
+consumes a few lines later; renaming one is a local refactor a test catches immediately,
+and converting them buys nothing while adding noise to every scorer. Environments are
+excluded outright -- `$` does not partial-match on an environment.
+
+**Why `sync.R` mattered most.** It is the only code that reads raw upstream JSON, so it
+is where a contract rename lands first, and it is *not* covered by the test suite. Its
+sweep was verified three ways: the in-memory build diff (all 129 scoring panels, all 37
+group tensor sets, `mc_index` and `mc_groups` bit-identical to the committed
+`R/sysdata.rda`), an old-vs-new build diff (whole-object identical), and a static proof
+that the file's entire diff reduces to the `$` <-> `[["..."]]` rewrite -- which also
+covers the pack-encoding, lockfile and upload paths the dry-run never calls.
+
+**Not currently a live bug anywhere.** Every field set was checked for prefix collisions
+and none exists today (`imputation` is `{policy, ref}`; components are
+`{name, file, row_key, col_key, intercept, covariates}`; packs are
+`{cpgs, coefficient_matrix, organs, systems, age, impute, tensors}`). This is a
+prospective guard: `covariates` on a component is one upstream `covariates_required`
+away from replaying the exact FitAge failure.
+
+---
+
 ## 2026-07-22 -- sex-routed aliases are minted package-side; coverage never lands on one
 
 **Decision.** The un-suffixed stems (`DNAmFitAge`, `DNAmGrip_wAge`, ... -- 7 of them) come back as

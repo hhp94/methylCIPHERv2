@@ -103,7 +103,9 @@ clock_routing <- function(id) {
 sex_routed_members <- function() {
   sex <- character(0)
   alias <- character(0)
-  aliases <- mc_index$clock_id[mc_index$computation_type == "sex_routed"]
+  aliases <- mc_index[["clock_id"]][
+    mc_index[["computation_type"]] == "sex_routed"
+  ]
   for (cid in aliases) {
     route <- clock_routing(cid)
     for (sx in names(route)) {

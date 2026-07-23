@@ -59,10 +59,10 @@ score_systemsage_group <- function(
   out <- vector("list", length(ids))
   names(out) <- ids
 
-  # Organ sub-clocks: plain linear over pack$organs.
+  # Organ sub-clocks: plain linear over the pack's `organs` matrix.
   if (length(organs_req)) {
-    Mo <- pack$organs
-    rownames(Mo) <- pack$cpgs
+    Mo <- pack[["organs"]]
+    rownames(Mo) <- pack[["cpgs"]]
     O <- pack_linpred(design, Mo, organs_req)
     for (org in organs_req) {
       out[[org]] <- record(
@@ -76,9 +76,9 @@ score_systemsage_group <- function(
   # Composites share the age-linear front L.
   if (length(composites)) {
     Ma <- matrix(
-      as.numeric(pack$age),
+      as.numeric(pack[["age"]]),
       ncol = 1L,
-      dimnames = list(pack$cpgs, "age")
+      dimnames = list(pack[["cpgs"]], "age")
     )
     age_matmul <- as.numeric(pack_linpred(design, Ma, "age"))
 
@@ -101,8 +101,8 @@ score_systemsage_group <- function(
 
       order <- systemsage_stack_order(id)
       organs_pca <- setdiff(order, "Age_prediction")
-      Ms <- pack$systems
-      rownames(Ms) <- pack$cpgs
+      Ms <- pack[["systems"]]
+      rownames(Ms) <- pack[["cpgs"]]
       S <- sweep(
         pack_linpred(design, Ms, organs_pca),
         2L,

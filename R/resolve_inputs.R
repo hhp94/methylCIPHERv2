@@ -160,8 +160,8 @@ resolve_clocks <- function(clocks) {
     .var.name = "clocks"
   )
 
-  members <- split(mc_index$clock_id, mc_index$group_id)
-  clock_ids <- mc_index$clock_id
+  members <- split(mc_index[["clock_id"]], mc_index[["group_id"]])
+  clock_ids <- mc_index[["clock_id"]]
 
   # A routed member is one sex's model; scoring it directly would return a
   # plausible number for every sample of the other sex. It stays internal
@@ -214,7 +214,7 @@ resolve_clocks <- function(clocks) {
 # Transitive depends_on_clocks closure, deps before dependents.
 resolve_clocks_sequence <- function(clocks) {
   st <- new.env(parent = emptyenv())
-  st$out <- character(length(mc_index$clock_id))
+  st$out <- character(length(mc_index[["clock_id"]]))
   st$n <- 0L
   st$seen <- new.env(parent = emptyenv())
 

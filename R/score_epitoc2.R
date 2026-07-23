@@ -38,7 +38,7 @@ score_epitoc2 <- function(id, cpgs, DNAm, partial_cache = NULL) {
 
   coverage <- list(
     clock_id = id,
-    policy = clock_impute(id)$policy,
+    policy = clock_impute(id)[["policy"]],
     score_needed = length(cpgs$score_needed),
     score_present = length(present),
     score_used = length(lp$used_cols),

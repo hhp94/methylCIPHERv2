@@ -5,13 +5,13 @@ MC_DEFAULT_RELEASE_REPO <- "hhp94/methylCIPHERv2"
 # registry
 
 mc_external_groups <- function() {
-  assets <- mc_provenance$external_assets
+  assets <- mc_provenance[["external_assets"]]
   if (is.null(assets)) character(0) else names(assets)
 }
 
 # One provenance row for an external group.
 mc_asset <- function(group_id) {
-  row <- mc_provenance$external_assets[[group_id]]
+  row <- mc_provenance[["external_assets"]][[group_id]]
   if (is.null(row)) {
     stop(
       "Not an external clock group: ",
@@ -42,8 +42,8 @@ mc_asset_url <- function(row) {
   sprintf(
     "https://github.com/%s/releases/download/%s/%s",
     repo,
-    row$release_tag,
-    row$file
+    row[["release_tag"]],
+    row[["file"]]
   )
 }
 
@@ -84,7 +84,7 @@ mc_cached_files <- function(groups = "all", assets = NULL) {
   dir <- mc_cache_dir(assets)
   files <- vapply(
     groups,
-    function(g) file.path(dir, mc_asset(g)$file),
+    function(g) file.path(dir, mc_asset(g)[["file"]]),
     character(1)
   )
   files[file.exists(files)]
@@ -96,7 +96,7 @@ mc_cached_files <- function(groups = "all", assets = NULL) {
 mc_fetch <- function(row, dir) {
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
   url <- mc_asset_url(row)
-  dest <- file.path(dir, row$file)
+  dest <- file.path(dir, row[["file"]])
   tmp <- paste0(dest, ".part")
   on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
 
@@ -115,7 +115,7 @@ mc_fetch <- function(row, dir) {
     error = function(e) {
       stop(
         "Download failed for ",
-        row$group_id,
+        row[["group_id"]],
         ": ",
         conditionMessage(e),
         "\nURL: ",
@@ -136,12 +136,14 @@ mc_consent <- function(rows, dir, ask) {
   }
   labels <- vapply(
     rows,
-    function(r) sprintf("%s (%s)", r$group_id, mc_bytes(r$size_bytes)),
+    function(r) {
+      sprintf("%s (%s)", r[["group_id"]], mc_bytes(r[["size_bytes"]]))
+    },
     character(1)
   )
   total <- mc_bytes(sum(vapply(
     rows,
-    function(r) as.numeric(r$size_bytes),
+    function(r) as.numeric(r[["size_bytes"]]),
     numeric(1)
   )))
   if (!interactive()) {
@@ -166,7 +168,7 @@ mc_consent <- function(rows, dir, ask) {
     stop(
       "Download declined for ",
       paste(
-        vapply(rows, function(r) r$group_id, character(1)),
+        vapply(rows, function(r) r[["group_id"]], character(1)),
         collapse = ", "
       ),
       ".",
@@ -181,7 +183,7 @@ mc_data_download <- function(groups = "all", assets = NULL, ask = TRUE) {
   groups <- mc_resolve_groups(groups)
   dir <- mc_cache_dir(assets)
   rows <- lapply(groups, mc_asset)
-  files <- vapply(rows, function(r) file.path(dir, r$file), character(1))
+  files <- vapply(rows, function(r) file.path(dir, r[["file"]]), character(1))
   missing <- !file.exists(files)
   if (any(missing)) {
     mc_consent(rows[missing], dir, ask)
@@ -205,9 +207,9 @@ mc_canonicalize_assets <- function(assets) {
     }
     return(assets)
   }
-  is_pack <- function(x) is.list(x) && !is.null(x$group_id)
+  is_pack <- function(x) is.list(x) && !is.null(x[["group_id"]])
   if (is_pack(assets)) {
-    return(stats::setNames(list(assets), assets$group_id))
+    return(stats::setNames(list(assets), assets[["group_id"]]))
   }
   if (
     is.list(assets) &&
@@ -216,7 +218,7 @@ mc_canonicalize_assets <- function(assets) {
   ) {
     return(stats::setNames(
       assets,
-      vapply(assets, function(p) as.character(p$group_id), character(1))
+      vapply(assets, function(p) as.character(p[["group_id"]]), character(1))
     ))
   }
   stop(
@@ -267,7 +269,7 @@ load_mc_assets <- function(groups, assets = NULL, ask = TRUE) {
   closed <- !is.null(canon)
   dir <- mc_cache_dir(canon)
   rows <- lapply(groups, mc_asset)
-  files <- vapply(rows, function(r) file.path(dir, r$file), character(1))
+  files <- vapply(rows, function(r) file.path(dir, r[["file"]]), character(1))
   missing <- !file.exists(files)
 
   if (any(missing)) {

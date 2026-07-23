@@ -2,7 +2,7 @@
 
 # Shared design over a pack CpG panel: subset matrix, present/absent, vendor ref.
 pack_design <- function(pack, usable, DNAm, partial_cache) {
-  panel <- pack$cpgs
+  panel <- pack[["cpgs"]]
   hit <- match(panel, usable, 0L) > 0L
   present <- panel[hit]
   absent <- panel[!hit]
@@ -32,7 +32,7 @@ pack_design <- function(pack, usable, DNAm, partial_cache) {
     cached = cached,
     used = c(cached, raw),
     X = X,
-    ref = stats::setNames(as.numeric(pack$impute), pack$cpgs),
+    ref = stats::setNames(as.numeric(pack[["impute"]]), pack[["cpgs"]]),
     sample_miss = sample_miss
   )
 }
@@ -144,7 +144,7 @@ score_linear_pack <- function(
 ) {
   pack <- clock_pack(ids[[1]], packs)
   for (id in ids) {
-    if (!identical(clock_impute(id)$policy, "vendor_mean")) {
+    if (!identical(clock_impute(id)[["policy"]], "vendor_mean")) {
       stop(
         "score_linear_pack(): '",
         id,
@@ -157,8 +157,8 @@ score_linear_pack <- function(
     }
   }
 
-  M <- pack$coefficient_matrix
-  rownames(M) <- pack$cpgs
+  M <- pack[["coefficient_matrix"]]
+  rownames(M) <- pack[["cpgs"]]
   design <- pack_design(pack, usable, DNAm, partial_cache)
 
   linpred <- sweep(

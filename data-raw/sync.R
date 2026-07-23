@@ -140,12 +140,12 @@ prune_fixture <- function(fx) {
   if (is.null(fx) || !is.list(fx)) {
     return(NULL)
   }
-  parity <- fx$parity %||% list()
+  parity <- fx[["parity"]] %||% list()
   stub <- list(
-    expected = fx$expected %||% NULL,
-    oracle = fx$oracle %||% NULL,
-    parity_policy = parity$policy %||% NULL,
-    parity_metric = parity$metric %||% NULL
+    expected = fx[["expected"]] %||% NULL,
+    oracle = fx[["oracle"]] %||% NULL,
+    parity_policy = parity[["policy"]] %||% NULL,
+    parity_metric = parity[["metric"]] %||% NULL
   )
   stub <- stub[!vapply(stub, is.null, logical(1L))]
   if (!length(stub)) NULL else stub
@@ -160,22 +160,28 @@ prune_clock_meta <- function(meta) {
     return(list())
   }
   if ("imputation" %in% names(out)) {
-    out$imputation <- keep_fields(out$imputation, IMPUTATION_FIELDS)
+    out[["imputation"]] <- keep_fields(out[["imputation"]], IMPUTATION_FIELDS)
   }
   if ("components" %in% names(out)) {
-    out$components <- keep_fields_each(out$components, COMPONENT_FIELDS)
+    out[["components"]] <- keep_fields_each(
+      out[["components"]],
+      COMPONENT_FIELDS
+    )
   }
   if ("shared" %in% names(out)) {
-    out$shared <- keep_fields_each(out$shared, SHARED_FIELDS)
+    out[["shared"]] <- keep_fields_each(out[["shared"]], SHARED_FIELDS)
   }
   if ("probe_sets" %in% names(out)) {
-    out$probe_sets <- keep_fields_each(out$probe_sets, PROBE_SET_FIELDS)
+    out[["probe_sets"]] <- keep_fields_each(
+      out[["probe_sets"]],
+      PROBE_SET_FIELDS
+    )
   }
   if ("external" %in% names(out)) {
-    out$external <- keep_fields(out$external, EXTERNAL_FIELDS)
+    out[["external"]] <- keep_fields(out[["external"]], EXTERNAL_FIELDS)
   }
   if ("recipe" %in% names(out)) {
-    out$recipe <- prune_recipe(out$recipe)
+    out[["recipe"]] <- prune_recipe(out[["recipe"]])
   }
   out
 }
@@ -194,7 +200,7 @@ read_papers_csv <- function(repo_path) {
     colClasses = "character"
   )
   list(
-    bib_key = stats::setNames(trimws(df$bib_key), trimws(df$pmid)),
+    bib_key = stats::setNames(trimws(df[["bib_key"]]), trimws(df[["pmid"]])),
     n = nrow(df)
   )
 }
@@ -345,24 +351,24 @@ extract_covariates <- function(meta) {
     nms[grepl("covariates$", nms)]
   }
 
-  covs <- flatten_names(meta$covariates)
-  for (step in meta$recipe %||% list()) {
+  covs <- flatten_names(meta[["covariates"]])
+  for (step in meta[["recipe"]] %||% list()) {
     for (k in covariate_keys(step)) {
       covs <- c(covs, flatten_names(step[[k]]))
     }
-    if (identical(step$op, "linear_sex")) {
+    if (identical(step[["op"]], "linear_sex")) {
       covs <- c(covs, "Female")
     }
   }
 
-  for (sp in meta$sex_params %||% list()) {
-    covs <- c(covs, flatten_names(sp$covariates))
+  for (sp in meta[["sex_params"]] %||% list()) {
+    covs <- c(covs, flatten_names(sp[["covariates"]]))
   }
-  if (isTRUE(meta$sex_stratified)) {
+  if (isTRUE(meta[["sex_stratified"]])) {
     covs <- c(covs, "Female")
   }
 
-  ref <- meta$imputation$ref
+  ref <- meta[["imputation"]][["ref"]]
   if (is.list(ref) && any(c("female", "male") %in% names(ref))) {
     covs <- c(covs, "Female")
   }
@@ -373,8 +379,8 @@ extract_covariates <- function(meta) {
 # Ops where subset scores != subset of full-cohort scores.
 extract_batch_ops <- function(meta) {
   ops <- vapply(
-    meta$recipe %||% list(),
-    function(s) as.character(s$op %||% NA_character_),
+    meta[["recipe"]] %||% list(),
+    function(s) as.character(s[["op"]] %||% NA_character_),
     character(1L)
   )
   intersect(ops[!is.na(ops)], c("cohort_zscore", "sample_scale"))
@@ -399,15 +405,18 @@ build_catalog <- function(repo_path, manifest) {
   groups <- list()
   for (gp in files$group) {
     gmeta <- jsonlite::fromJSON(gp, simplifyVector = FALSE)
-    gid <- as.character(gmeta$group_id %||% NA_character_)
+    gid <- as.character(gmeta[["group_id"]] %||% NA_character_)
     entry <- prune_group_meta(gmeta)
-    if (!is.null(entry$members)) {
-      entry$members <- unlist(entry$members, use.names = FALSE)
+    if (!is.null(entry[["members"]])) {
+      entry[["members"]] <- unlist(entry[["members"]], use.names = FALSE)
     }
-    if (!is.null(entry$shared_tensors)) {
-      entry$shared_tensors <- unlist(entry$shared_tensors, use.names = FALSE)
+    if (!is.null(entry[["shared_tensors"]])) {
+      entry[["shared_tensors"]] <- unlist(
+        entry[["shared_tensors"]],
+        use.names = FALSE
+      )
     }
-    entry$path <- rel_from_repo(gp, repo_path)
+    entry[["path"]] <- rel_from_repo(gp, repo_path)
     groups[[gid]] <- entry
   }
 
@@ -416,10 +425,10 @@ build_catalog <- function(repo_path, manifest) {
   clocks <- list()
   for (mp in files$clock) {
     meta <- jsonlite::fromJSON(mp, simplifyVector = FALSE)
-    cid <- as.character(meta$clock_id %||% NA_character_)
-    gid <- as.character(meta$group_id %||% NA_character_)
+    cid <- as.character(meta[["clock_id"]] %||% NA_character_)
+    gid <- as.character(meta[["group_id"]] %||% NA_character_)
 
-    wf <- as.character(meta$weights_format %||% NA_character_)
+    wf <- as.character(meta[["weights_format"]] %||% NA_character_)
     batch_ops <- extract_batch_ops(meta)
     covs <- extract_covariates(meta)
 
@@ -428,34 +437,39 @@ build_catalog <- function(repo_path, manifest) {
 
     entry <- prune_clock_meta(meta)
 
-    if (!is.null(entry$normalization)) {
-      entry$normalization <- unlist(entry$normalization, use.names = FALSE)
-    }
-    entry$output_transform <- as.character(
-      entry$output_transform %||% "identity"
-    )
-    if (!is.null(entry$computation_type)) {
-      entry$computation_type <- as.character(entry$computation_type)
-    }
-    if (!is.null(entry$depends_on_clocks)) {
-      entry$depends_on_clocks <- unlist(
-        entry$depends_on_clocks,
+    if (!is.null(entry[["normalization"]])) {
+      entry[["normalization"]] <- unlist(
+        entry[["normalization"]],
         use.names = FALSE
       )
     }
-    entry$pmid <- as.character(entry$pmid %||% NA_character_)
-    entry$bib_key <- unname(papers$bib_key[entry$pmid])
-
-    entry$imputation_policy <- as.character(
-      entry$imputation$policy %||% meta$imputation$policy %||% NA_character_
+    entry[["output_transform"]] <- as.character(
+      entry[["output_transform"]] %||% "identity"
     )
-    entry$covariates_required <- covs
-    entry$batch_ops <- batch_ops
-    entry$batch_dependent <- length(batch_ops) > 0L
-    entry$external_group <- gid %in% EXTERNAL_GROUPS
-    entry$fixture <- prune_fixture(meta$fixture)
-    entry$meta_path <- rel_from_repo(mp, repo_path)
-    entry$coef_path <- if (
+    if (!is.null(entry[["computation_type"]])) {
+      entry[["computation_type"]] <- as.character(entry[["computation_type"]])
+    }
+    if (!is.null(entry[["depends_on_clocks"]])) {
+      entry[["depends_on_clocks"]] <- unlist(
+        entry[["depends_on_clocks"]],
+        use.names = FALSE
+      )
+    }
+    entry[["pmid"]] <- as.character(entry[["pmid"]] %||% NA_character_)
+    entry[["bib_key"]] <- unname(papers$bib_key[entry[["pmid"]]])
+
+    entry[["imputation_policy"]] <- as.character(
+      entry[["imputation"]][["policy"]] %||%
+        meta[["imputation"]][["policy"]] %||%
+        NA_character_
+    )
+    entry[["covariates_required"]] <- covs
+    entry[["batch_ops"]] <- batch_ops
+    entry[["batch_dependent"]] <- length(batch_ops) > 0L
+    entry[["external_group"]] <- gid %in% EXTERNAL_GROUPS
+    entry[["fixture"]] <- prune_fixture(meta[["fixture"]])
+    entry[["meta_path"]] <- rel_from_repo(mp, repo_path)
+    entry[["coef_path"]] <- if (
       identical(wf, "cpg_coefficient") && has_default_coef
     ) {
       default_coef
@@ -470,7 +484,7 @@ build_catalog <- function(repo_path, manifest) {
     clocks = clocks,
     groups = groups,
     source_git_sha = NA_character_,
-    schema_version = manifest$schema_version,
+    schema_version = manifest[["schema_version"]],
     n_clocks = length(clocks)
   )
 }
@@ -518,11 +532,11 @@ collect_weights_refs <- function(x) {
 }
 
 collect_file_refs <- function(entry, repo_path) {
-  meta_abs <- resolve_repo_rel(repo_path, entry$meta_path)
+  meta_abs <- resolve_repo_rel(repo_path, entry[["meta_path"]])
   raw <- jsonlite::fromJSON(meta_abs, simplifyVector = FALSE)
   paths <- collect_weights_refs(raw)
-  if (!is.null(entry$coef_path)) {
-    paths <- c(paths, entry$coef_path)
+  if (!is.null(entry[["coef_path"]])) {
+    paths <- c(paths, entry[["coef_path"]])
   }
   unique(paths[nzchar(paths) & !is.na(paths)])
 }
@@ -598,8 +612,8 @@ custom_group_tensors <- function(gid, repo_path) {
 attach_custom_components <- function(clocks) {
   for (spec in CUSTOM_GROUPS) {
     for (cid in names(spec$components)) {
-      clocks[[cid]]$components <- c(
-        clocks[[cid]]$components,
+      clocks[[cid]][["components"]] <- c(
+        clocks[[cid]][["components"]],
         spec$components[[cid]]
       )
     }
@@ -618,7 +632,7 @@ SEX_SUFFIX <- c(female = "_Female", male = "_Male")
 
 # {stem: {female = id, male = id}} for one group; empty when it does not route.
 group_sex_routes <- function(gside) {
-  routing <- gside$routing$sex
+  routing <- gside[["routing"]][["sex"]]
   if (is.null(routing)) {
     return(list())
   }
@@ -660,10 +674,10 @@ group_sex_routes <- function(gside) {
 # coverage record, which is the point: its members' panels are disjoint over
 # samples, so any union would describe no sample.
 attach_sex_routed_aliases <- function(catalog) {
-  for (gid in names(catalog$groups)) {
-    routes <- group_sex_routes(catalog$groups[[gid]])
+  for (gid in names(catalog[["groups"]])) {
+    routes <- group_sex_routes(catalog[["groups"]][[gid]])
     for (stem in names(routes)) {
-      if (!is.null(catalog$clocks[[stem]])) {
+      if (!is.null(catalog[["clocks"]][[stem]])) {
         stop(
           "sex-routed alias '",
           stem,
@@ -671,27 +685,27 @@ attach_sex_routed_aliases <- function(catalog) {
           call. = FALSE
         )
       }
-      donor <- catalog$clocks[[routes[[stem]]$female]]
-      catalog$clocks[[stem]] <- list(
+      donor <- catalog[["clocks"]][[routes[[stem]]$female]]
+      catalog[["clocks"]][[stem]] <- list(
         clock_id = stem,
         group_id = gid,
         weights_format = "routed",
         computation_type = "sex_routed",
         output_transform = "identity",
-        normalization = donor$normalization,
+        normalization = donor[["normalization"]],
         routing = routes[[stem]],
         depends_on_clocks = c(routes[[stem]]$female, routes[[stem]]$male),
         covariates_required = "Female",
-        imputation_policy = donor$imputation_policy,
-        pmid = donor$pmid,
-        bib_key = donor$bib_key,
-        license = donor$license,
+        imputation_policy = donor[["imputation_policy"]],
+        pmid = donor[["pmid"]],
+        bib_key = donor[["bib_key"]],
+        license = donor[["license"]],
         batch_dependent = FALSE,
         external_group = FALSE
       )
     }
   }
-  catalog$n_clocks <- length(catalog$clocks)
+  catalog[["n_clocks"]] <- length(catalog[["clocks"]])
   catalog
 }
 
@@ -701,21 +715,21 @@ attach_sex_routed_aliases <- function(catalog) {
 build_group_bundles <- function(repo_path, catalog, group_ids) {
   bundles <- list()
   for (gid in group_ids) {
-    member_ids <- names(catalog$clocks)[
+    member_ids <- names(catalog[["clocks"]])[
       vapply(
-        catalog$clocks,
-        function(c) identical(c$group_id, gid),
+        catalog[["clocks"]],
+        function(c) identical(c[["group_id"]], gid),
         logical(1L)
       )
     ]
-    members <- catalog$clocks[member_ids]
+    members <- catalog[["clocks"]][member_ids]
     rels <- character()
     for (entry in members) {
       rels <- c(rels, collect_file_refs(entry, repo_path))
     }
-    gside <- catalog$groups[[gid]]
-    if (!is.null(gside$shared_tensors)) {
-      rels <- c(rels, collect_weights_refs(gside$shared_tensors))
+    gside <- catalog[["groups"]][[gid]]
+    if (!is.null(gside[["shared_tensors"]])) {
+      rels <- c(rels, collect_weights_refs(gside[["shared_tensors"]]))
     }
 
     tensors <- list()
@@ -779,50 +793,60 @@ tensor_row_keys <- function(t) {
 materialize_probe_set <- function(ps, tensors, cid = NA_character_) {
   where <- paste0(
     "probe_set '",
-    ps$name %||% "?",
+    ps[["name"]] %||% "?",
     "' (role ",
-    ps$role %||% "?",
+    ps[["role"]] %||% "?",
     ") of clock ",
     cid
   )
-  if (is.null(ps$file) || !nzchar(as.character(ps$file))) {
+  if (is.null(ps[["file"]]) || !nzchar(as.character(ps[["file"]]))) {
     stop(where, " has no `file` pointer.", call. = FALSE)
   }
-  if (is.null(tensors[[ps$file]])) {
+  if (is.null(tensors[[ps[["file"]]]])) {
     stop(
       where,
       " points at a tensor absent from the bundle: ",
-      ps$file,
+      ps[["file"]],
       call. = FALSE
     )
   }
-  cpgs <- tensor_row_keys(tensors[[ps$file]])
+  cpgs <- tensor_row_keys(tensors[[ps[["file"]]]])
   if (!length(cpgs)) {
-    stop(where, " resolved to zero CpGs from ", ps$file, call. = FALSE)
+    stop(where, " resolved to zero CpGs from ", ps[["file"]], call. = FALSE)
   }
   if (anyDuplicated(cpgs)) {
-    stop(where, " contains duplicate CpG id(s): ", ps$file, call. = FALSE)
+    stop(
+      where,
+      " contains duplicate CpG id(s): ",
+      ps[["file"]],
+      call. = FALSE
+    )
   }
   # `file` rides along so accessors can fetch the tensor's values, not just its
   # row keys (Dunedin's QN target means).
-  list(name = ps$name, role = ps$role, file = ps$file, cpgs = cpgs)
+  list(
+    name = ps[["name"]],
+    role = ps[["role"]],
+    file = ps[["file"]],
+    cpgs = cpgs
+  )
 }
 
 # Union of a clock's own cpg-keyed components.
 own_component_cpgs <- function(entry, tensors) {
   cpgs <- character()
-  for (comp in entry$components %||% list()) {
-    if (!identical(comp$row_key, "cpg")) {
+  for (comp in entry[["components"]] %||% list()) {
+    if (!identical(comp[["row_key"]], "cpg")) {
       next
     }
-    cpgs <- c(cpgs, tensor_row_keys(tensors[[comp$file]]))
+    cpgs <- c(cpgs, tensor_row_keys(tensors[[comp[["file"]]]]))
   }
   unique(cpgs[nzchar(cpgs) & !is.na(cpgs)])
 }
 
 # Group shared_tensors entry that is a bare one-column probe list.
 group_shared_cpg_list <- function(gside, tensors) {
-  for (rel in gside$shared_tensors %||% character()) {
+  for (rel in gside[["shared_tensors"]] %||% character()) {
     t <- tensors[[rel]]
     if (is.character(t) && is.null(dim(t)) && length(t) > 0L) {
       return(as.character(t))
@@ -834,24 +858,27 @@ group_shared_cpg_list <- function(gside, tensors) {
 # Scoring CpGs already on an entry, or character(0).
 resolved_scoring_cpgs <- function(entry) {
   hits <- Filter(
-    function(p) identical(p$role, "scoring") && length(p$cpgs) > 0L,
-    entry$probe_sets %||% list()
+    function(p) identical(p[["role"]], "scoring") && length(p[["cpgs"]]) > 0L,
+    entry[["probe_sets"]] %||% list()
   )
-  unique(unlist(lapply(hits, function(p) p$cpgs), use.names = FALSE)) %||%
+  unique(unlist(
+    lapply(hits, function(p) p[["cpgs"]]),
+    use.names = FALSE
+  )) %||%
     character()
 }
 
 add_scoring_probe_set <- function(entry, cpgs) {
   c(
-    entry$probe_sets %||% list(),
+    entry[["probe_sets"]] %||% list(),
     list(list(name = "scoring_derived", role = "scoring", cpgs = unique(cpgs)))
   )
 }
 
 # Tiers a clock can resolve without any other clock being resolved first.
 own_scoring_cpgs <- function(entry, tensors) {
-  if (!is.null(entry$coef_path)) {
-    cpgs <- tensor_row_keys(tensors[[entry$coef_path]])
+  if (!is.null(entry[["coef_path"]])) {
+    cpgs <- tensor_row_keys(tensors[[entry[["coef_path"]]]])
     if (length(cpgs)) {
       return(cpgs)
     }
@@ -866,24 +893,24 @@ own_scoring_cpgs <- function(entry, tensors) {
 # prep panel instead of what they actually consume.
 resolve_group_scoring_probe_sets <- function(catalog, bundles) {
   for (gid in names(bundles)) {
-    tensors <- bundles[[gid]]$tensors
-    for (cid in bundles[[gid]]$clocks) {
-      entry <- catalog$clocks[[cid]]
-      if (length(entry$probe_sets)) {
-        catalog$clocks[[cid]]$probe_sets <- lapply(
-          entry$probe_sets,
+    tensors <- bundles[[gid]][["tensors"]]
+    for (cid in bundles[[gid]][["clocks"]]) {
+      entry <- catalog[["clocks"]][[cid]]
+      if (length(entry[["probe_sets"]])) {
+        catalog[["clocks"]][[cid]][["probe_sets"]] <- lapply(
+          entry[["probe_sets"]],
           materialize_probe_set,
           tensors = tensors,
           cid = cid
         )
       }
-      if (length(resolved_scoring_cpgs(catalog$clocks[[cid]]))) {
+      if (length(resolved_scoring_cpgs(catalog[["clocks"]][[cid]]))) {
         next
       }
-      cpgs <- own_scoring_cpgs(catalog$clocks[[cid]], tensors)
+      cpgs <- own_scoring_cpgs(catalog[["clocks"]][[cid]], tensors)
       if (length(cpgs)) {
-        catalog$clocks[[cid]]$probe_sets <- add_scoring_probe_set(
-          catalog$clocks[[cid]],
+        catalog[["clocks"]][[cid]][["probe_sets"]] <- add_scoring_probe_set(
+          catalog[["clocks"]][[cid]],
           cpgs
         )
       }
@@ -895,11 +922,14 @@ resolve_group_scoring_probe_sets <- function(catalog, bundles) {
   # are deliberately excluded: DNAmFitAge_{Sex} reads GrimAgeV1, but GrimAgeV1
   # is scored as its own column with its own coverage row, and folding its 1030
   # probes in here would both double-count and swamp the family's own 172/190.
-  ids <- unlist(lapply(bundles, function(b) b$clocks), use.names = FALSE)
+  ids <- unlist(
+    lapply(bundles, function(b) b[["clocks"]]),
+    use.names = FALSE
+  )
   repeat {
     progressed <- FALSE
     for (cid in ids) {
-      entry <- catalog$clocks[[cid]]
+      entry <- catalog[["clocks"]][[cid]]
       if (length(resolved_scoring_cpgs(entry))) {
         next
       }
@@ -907,14 +937,17 @@ resolve_group_scoring_probe_sets <- function(catalog, bundles) {
       # 14), so it describes the group, not what this clock reads. Where a
       # clock declares real inputs, those win; `covers` stays the fallback for
       # clocks that declare none.
-      inputs <- as.character(entry$depends_on_clocks %||% character())
+      inputs <- as.character(entry[["depends_on_clocks"]] %||% character())
       if (!length(inputs)) {
-        inputs <- as.character(entry$covers %||% character())
+        inputs <- as.character(entry[["covers"]] %||% character())
       }
       inputs <- setdiff(unique(inputs), cid)
       inputs <- Filter(
         function(d) {
-          identical(catalog$clocks[[d]]$group_id, entry$group_id)
+          identical(
+            catalog[["clocks"]][[d]][["group_id"]],
+            entry[["group_id"]]
+          )
         },
         inputs
       )
@@ -923,12 +956,15 @@ resolve_group_scoring_probe_sets <- function(catalog, bundles) {
       }
       cpgs <- unique(unlist(
         lapply(inputs, function(d) {
-          resolved_scoring_cpgs(catalog$clocks[[d]] %||% list())
+          resolved_scoring_cpgs(catalog[["clocks"]][[d]] %||% list())
         }),
         use.names = FALSE
       ))
       if (length(cpgs)) {
-        catalog$clocks[[cid]]$probe_sets <- add_scoring_probe_set(entry, cpgs)
+        catalog[["clocks"]][[cid]][["probe_sets"]] <- add_scoring_probe_set(
+          entry,
+          cpgs
+        )
         progressed <- TRUE
       }
     }
@@ -938,15 +974,18 @@ resolve_group_scoring_probe_sets <- function(catalog, bundles) {
   }
 
   for (gid in names(bundles)) {
-    gside <- catalog$groups[[gid]]
-    for (cid in bundles[[gid]]$clocks) {
-      entry <- catalog$clocks[[cid]]
+    gside <- catalog[["groups"]][[gid]]
+    for (cid in bundles[[gid]][["clocks"]]) {
+      entry <- catalog[["clocks"]][[cid]]
       if (length(resolved_scoring_cpgs(entry))) {
         next
       }
-      cpgs <- group_shared_cpg_list(gside, bundles[[gid]]$tensors)
+      cpgs <- group_shared_cpg_list(gside, bundles[[gid]][["tensors"]])
       if (length(cpgs)) {
-        catalog$clocks[[cid]]$probe_sets <- add_scoring_probe_set(entry, cpgs)
+        catalog[["clocks"]][[cid]][["probe_sets"]] <- add_scoring_probe_set(
+          entry,
+          cpgs
+        )
       }
     }
   }
@@ -1061,7 +1100,7 @@ residual_tensors <- function(tensors, used_rels) {
 }
 
 encode_pcclocks <- function(bundle) {
-  tensors <- bundle$tensors
+  tensors <- bundle[["tensors"]]
   gid <- "PCClocks"
   resolved <- pack_canonical_cpgs(tensors, gid)
   cpgs <- resolved$cpgs
@@ -1085,16 +1124,16 @@ encode_pcclocks <- function(bundle) {
   }
 
   used <- c(coef_rels, impute_rel, resolved$drop_lists)
-  bundle$cpgs <- cpgs
-  bundle$coefficient_matrix <- cbind_aligned(
+  bundle[["cpgs"]] <- cpgs
+  bundle[["coefficient_matrix"]] <- cbind_aligned(
     tensors,
     coef_rels,
     cpgs,
     col_names
   )
-  bundle$impute <- align_double(tensors[[impute_rel]], cpgs, impute_rel)
-  bundle$tensors <- residual_tensors(tensors, used)
-  bundle$encoding <- "canonical_matrices"
+  bundle[["impute"]] <- align_double(tensors[[impute_rel]], cpgs, impute_rel)
+  bundle[["tensors"]] <- residual_tensors(tensors, used)
+  bundle[["encoding"]] <- "canonical_matrices"
   bundle
 }
 
@@ -1114,7 +1153,7 @@ SYSTEMSAGE_ORGANS <- c(
 )
 
 encode_systemsage <- function(bundle) {
-  tensors <- bundle$tensors
+  tensors <- bundle[["tensors"]]
   gid <- "SystemsAge"
   resolved <- pack_canonical_cpgs(tensors, gid)
   cpgs <- resolved$cpgs
@@ -1150,18 +1189,28 @@ encode_systemsage <- function(bundle) {
     cpgs_rel,
     resolved$drop_lists
   )
-  bundle$cpgs <- cpgs
-  bundle$organs <- cbind_aligned(tensors, organ_rels, cpgs, SYSTEMSAGE_ORGANS)
-  bundle$systems <- cbind_aligned(tensors, system_rels, cpgs, SYSTEMSAGE_ORGANS)
-  bundle$age <- align_double(tensors[[age_rel]], cpgs, age_rel)
-  bundle$impute <- align_double(tensors[[impute_rel]], cpgs, impute_rel)
-  bundle$tensors <- residual_tensors(tensors, used)
-  bundle$encoding <- "canonical_matrices"
+  bundle[["cpgs"]] <- cpgs
+  bundle[["organs"]] <- cbind_aligned(
+    tensors,
+    organ_rels,
+    cpgs,
+    SYSTEMSAGE_ORGANS
+  )
+  bundle[["systems"]] <- cbind_aligned(
+    tensors,
+    system_rels,
+    cpgs,
+    SYSTEMSAGE_ORGANS
+  )
+  bundle[["age"]] <- align_double(tensors[[age_rel]], cpgs, age_rel)
+  bundle[["impute"]] <- align_double(tensors[[impute_rel]], cpgs, impute_rel)
+  bundle[["tensors"]] <- residual_tensors(tensors, used)
+  bundle[["encoding"]] <- "canonical_matrices"
   bundle
 }
 
 encode_pcbrainage <- function(bundle) {
-  tensors <- bundle$tensors
+  tensors <- bundle[["tensors"]]
   gid <- "PCBrainAge"
   resolved <- pack_canonical_cpgs(tensors, gid)
   cpgs <- resolved$cpgs
@@ -1175,23 +1224,23 @@ encode_pcbrainage <- function(bundle) {
   }
 
   used <- c(coef_rel, impute_rel, resolved$drop_lists)
-  bundle$cpgs <- cpgs
-  bundle$coefficient_matrix <- cbind_aligned(
+  bundle[["cpgs"]] <- cpgs
+  bundle[["coefficient_matrix"]] <- cbind_aligned(
     tensors,
     coef_rel,
     cpgs,
     "PCBrainAge"
   )
-  bundle$impute <- align_double(tensors[[impute_rel]], cpgs, impute_rel)
-  bundle$tensors <- residual_tensors(tensors, used)
-  bundle$encoding <- "canonical_matrices"
+  bundle[["impute"]] <- align_double(tensors[[impute_rel]], cpgs, impute_rel)
+  bundle[["tensors"]] <- residual_tensors(tensors, used)
+  bundle[["encoding"]] <- "canonical_matrices"
   bundle
 }
 
 encode_external_asset <- function(bundle) {
-  gid <- bundle$group_id %||% NA_character_
-  if (length(bundle$tensors)) {
-    names(bundle$tensors) <- gsub("\\\\", "/", names(bundle$tensors))
+  gid <- bundle[["group_id"]] %||% NA_character_
+  if (length(bundle[["tensors"]])) {
+    names(bundle[["tensors"]]) <- gsub("\\\\", "/", names(bundle[["tensors"]]))
   }
   if (identical(gid, "PCClocks")) {
     encode_pcclocks(bundle)
@@ -1208,15 +1257,16 @@ encode_external_asset <- function(bundle) {
 # filename (<group>-<payload_hash>.qs2), so it is not repeated as a field.
 external_asset_registry_row <- function(a) {
   list(
-    group_id = a$group_id,
+    group_id = a[["group_id"]],
     # release_tag is <group>-<hash>; bare 64-hex tags are rejected by GitHub.
-    release_tag = a$release_tag %||% sub("\\.qs2$", "", a$file %||% ""),
-    file = a$file,
-    size_bytes = a$size_bytes,
-    encoding = a$encoding,
-    encoding_version = a$encoding_version,
-    n_clocks = a$n_clocks,
-    n_cpgs = a$n_cpgs
+    release_tag = a[["release_tag"]] %||%
+      sub("\\.qs2$", "", a[["file"]] %||% ""),
+    file = a[["file"]],
+    size_bytes = a[["size_bytes"]],
+    encoding = a[["encoding"]],
+    encoding_version = a[["encoding_version"]],
+    n_clocks = a[["n_clocks"]],
+    n_cpgs = a[["n_cpgs"]]
   )
 }
 
@@ -1224,7 +1274,7 @@ external_asset_registry_row <- function(a) {
 
 # Flat per-clock index for list_clocks() filters.
 build_index <- function(catalog) {
-  clocks <- catalog$clocks
+  clocks <- catalog[["clocks"]]
   ids <- names(clocks)
 
   scal <- function(field, default = NA_character_) {
@@ -1256,7 +1306,7 @@ build_index <- function(catalog) {
     row.names = NULL
   )
   idx$covariates_required <- unname(lapply(clocks, function(e) {
-    as.character(e$covariates_required %||% character())
+    as.character(e[["covariates_required"]] %||% character())
   }))
   idx$n_covariates <- lengths(idx$covariates_required)
 
@@ -1268,14 +1318,14 @@ build_index <- function(catalog) {
 # elements, and the only other place they could drift from the weights.
 drop_external_probe_cpgs <- function(clocks) {
   for (cid in names(clocks)) {
-    if (!isTRUE(clocks[[cid]]$external_group)) {
+    if (!isTRUE(clocks[[cid]][["external_group"]])) {
       next
     }
-    ps <- clocks[[cid]]$probe_sets
+    ps <- clocks[[cid]][["probe_sets"]]
     for (k in seq_along(ps)) {
-      ps[[k]]$cpgs <- NULL
+      ps[[k]][["cpgs"]] <- NULL
     }
-    clocks[[cid]]$probe_sets <- ps
+    clocks[[cid]][["probe_sets"]] <- ps
   }
   clocks
 }
@@ -1291,14 +1341,14 @@ build_sysdata <- function(
     length(ship_groups),
     " groups..."
   )
-  catalog$clocks <- attach_custom_components(catalog$clocks)
+  catalog[["clocks"]] <- attach_custom_components(catalog[["clocks"]])
   bundles <- build_group_bundles(repo_path, catalog, ship_groups)
   catalog <- resolve_group_scoring_probe_sets(catalog, bundles)
   catalog <- attach_sex_routed_aliases(catalog)
-  catalog$clocks <- trim_build_only_fields(catalog$clocks)
+  catalog[["clocks"]] <- trim_build_only_fields(catalog[["clocks"]])
 
-  mc_catalog <- drop_external_probe_cpgs(catalog$clocks)
-  mc_groups <- catalog$groups
+  mc_catalog <- drop_external_probe_cpgs(catalog[["clocks"]])
+  mc_groups <- catalog[["groups"]]
   mc_bundles <- bundles
   mc_index <- build_index(catalog)
   ext_reg <- NULL
@@ -1306,9 +1356,9 @@ build_sysdata <- function(
     ext_reg <- lapply(external_assets, external_asset_registry_row)
   }
   mc_provenance <- list(
-    source_git_sha = catalog$source_git_sha,
-    schema_version = catalog$schema_version,
-    n_clocks = catalog$n_clocks,
+    source_git_sha = catalog[["source_git_sha"]],
+    schema_version = catalog[["schema_version"]],
+    n_clocks = catalog[["n_clocks"]],
     n_ship_groups = length(ship_groups),
     ship_groups = ship_groups,
     external_groups = EXTERNAL_GROUPS,
@@ -1360,30 +1410,30 @@ stable_external_payload <- function(bundle) {
     bundle[[f]] <- NULL
   }
 
-  tensors <- bundle$tensors %||% list()
+  tensors <- bundle[["tensors"]] %||% list()
   if (length(tensors) && !is.null(names(tensors))) {
     tensors <- tensors[sort(names(tensors))]
   }
 
-  clocks <- as.character(bundle$clocks %||% character())
+  clocks <- as.character(bundle[["clocks"]] %||% character())
   if (length(clocks)) {
     clocks <- sort(unique(clocks))
   }
 
   out <- list(
     encoding_version = as.integer(
-      bundle$encoding_version %||% EXTERNAL_ENCODING_VERSION
+      bundle[["encoding_version"]] %||% EXTERNAL_ENCODING_VERSION
     ),
-    encoding = as.character(bundle$encoding %||% "canonical_matrices"),
-    group_id = as.character(bundle$group_id %||% NA_character_),
+    encoding = as.character(bundle[["encoding"]] %||% "canonical_matrices"),
+    group_id = as.character(bundle[["group_id"]] %||% NA_character_),
     clocks = clocks,
-    schema_version = bundle$schema_version,
-    cpgs = bundle$cpgs,
-    coefficient_matrix = bundle$coefficient_matrix,
-    organs = bundle$organs,
-    systems = bundle$systems,
-    age = bundle$age,
-    impute = bundle$impute,
+    schema_version = bundle[["schema_version"]],
+    cpgs = bundle[["cpgs"]],
+    coefficient_matrix = bundle[["coefficient_matrix"]],
+    organs = bundle[["organs"]],
+    systems = bundle[["systems"]],
+    age = bundle[["age"]],
+    impute = bundle[["impute"]],
     tensors = if (length(tensors)) tensors else NULL
   )
   out[!vapply(out, is.null, logical(1L))]
@@ -1510,12 +1560,12 @@ upload_external_assets <- function(assets) {
   target <- package_release_target_commitish()
 
   items <- lapply(assets, function(a) {
-    fpath <- a$path %||% file.path(asset_dir, a$file)
+    fpath <- a[["path"]] %||% file.path(asset_dir, a[["file"]])
     list(
-      group_id = as.character(a$group_id %||% ""),
-      tag = as.character(a$release_tag %||% ""),
+      group_id = as.character(a[["group_id"]] %||% ""),
+      tag = as.character(a[["release_tag"]] %||% ""),
       path = as.character(fs::path_real(fpath)),
-      name = as.character(a$file %||% basename(fpath))
+      name = as.character(a[["file"]] %||% basename(fpath))
     )
   })
 
@@ -1584,8 +1634,8 @@ build_external_assets <- function(repo_path, catalog, external_groups) {
       stats::setNames(list(raw_bundle), gid)
     )
     bundle <- encode_external_asset(raw_bundle)
-    bundle$schema_version <- catalog$schema_version
-    bundle$encoding_version <- EXTERNAL_ENCODING_VERSION
+    bundle[["schema_version"]] <- catalog[["schema_version"]]
+    bundle[["encoding_version"]] <- EXTERNAL_ENCODING_VERSION
 
     payload <- stable_external_payload(bundle)
     phash <- payload_hash_of(payload)
@@ -1602,7 +1652,7 @@ build_external_assets <- function(repo_path, catalog, external_groups) {
     )
 
     sz <- file.info(fpath)$size
-    n_cpgs <- length(payload$cpgs %||% character())
+    n_cpgs <- length(payload[["cpgs"]] %||% character())
     message(sprintf(
       "sync: wrote %s (%.2f MB; payload_hash=%s; n_cpgs=%s)",
       fpath,
@@ -1617,18 +1667,18 @@ build_external_assets <- function(repo_path, catalog, external_groups) {
       payload_hash = phash,
       release_tag = rtag,
       size_bytes = as.integer(sz),
-      n_clocks = length(payload$clocks %||% character()),
+      n_clocks = length(payload[["clocks"]] %||% character()),
       n_cpgs = n_cpgs,
-      encoding = payload$encoding %||% "canonical_matrices",
+      encoding = payload[["encoding"]] %||% "canonical_matrices",
       encoding_version = as.integer(
-        payload$encoding_version %||% EXTERNAL_ENCODING_VERSION
+        payload[["encoding_version"]] %||% EXTERNAL_ENCODING_VERSION
       )
     )
   }
 
   # Prune superseded local staging packs; published releases are untouched.
   for (gid in external_groups) {
-    keep <- as.character(assets[[gid]]$file %||% "")
+    keep <- as.character(assets[[gid]][["file"]] %||% "")
     siblings <- list.files(
       asset_dir,
       pattern = paste0("^", tolower(gid), "-[0-9a-f]+\\.qs2$")
@@ -1661,7 +1711,7 @@ lockfile_hit <- function(lock, current_sha) {
   }
   files <- vapply(
     lock$assets %||% list(),
-    function(a) as.character(a$file %||% ""),
+    function(a) as.character(a[["file"]] %||% ""),
     character(1L)
   )
   length(files) > 0L &&
@@ -1686,14 +1736,18 @@ sync <- function(source_git_sha = NULL, upload = FALSE, force = FALSE) {
 
   message("sync: building catalog @ ", current_sha)
   catalog <- build_catalog(src$path, read_manifest(src$path))
-  catalog$source_git_sha <- current_sha
+  catalog[["source_git_sha"]] <- current_sha
 
-  gids <- unique(vapply(catalog$clocks, function(c) c$group_id, character(1L)))
+  gids <- unique(vapply(
+    catalog[["clocks"]],
+    function(c) c[["group_id"]],
+    character(1L)
+  ))
   external <- sort(intersect(gids, EXTERNAL_GROUPS))
   ship <- sort(setdiff(gids, EXTERNAL_GROUPS))
   message(
     "sync: ",
-    catalog$n_clocks,
+    catalog[["n_clocks"]],
     " clocks; ship groups=",
     length(ship),
     "; external=",
@@ -1710,21 +1764,21 @@ sync <- function(source_git_sha = NULL, upload = FALSE, force = FALSE) {
     assets <- lock$assets
     # Restore external resolved probe sets from the lockfile.
     for (cid in names(lock$ext_clocks)) {
-      catalog$clocks[[cid]] <- lock$ext_clocks[[cid]]
+      catalog[["clocks"]][[cid]] <- lock$ext_clocks[[cid]]
     }
   } else {
     ext <- build_external_assets(src$path, catalog, external)
     assets <- ext$assets
     # Adopt catalog with resolved external probe sets.
     catalog <- ext$catalog
-    ext_ids <- names(catalog$clocks)[
+    ext_ids <- names(catalog[["clocks"]])[
       vapply(
-        catalog$clocks,
-        function(e) as.character(e$group_id %||% "") %in% external,
+        catalog[["clocks"]],
+        function(e) as.character(e[["group_id"]] %||% "") %in% external,
         logical(1L)
       )
     ]
-    write_lockfile(current_sha, assets, catalog$clocks[ext_ids])
+    write_lockfile(current_sha, assets, catalog[["clocks"]][ext_ids])
   }
 
   sys <- build_sysdata(src$path, catalog, ship, external_assets = assets)
@@ -1743,7 +1797,7 @@ sync <- function(source_git_sha = NULL, upload = FALSE, force = FALSE) {
   message("sync: done @ ", current_sha)
   invisible(list(
     source_git_sha = current_sha,
-    n_clocks = catalog$n_clocks,
+    n_clocks = catalog[["n_clocks"]],
     ship_groups = ship,
     external_groups = external,
     sysdata = sys,

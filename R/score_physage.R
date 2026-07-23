@@ -86,7 +86,7 @@ score_physage <- function(id, cpgs, DNAm, partial_cache = NULL) {
 
   coverage <- list(
     clock_id = id,
-    policy = clock_impute(id)$policy,
+    policy = clock_impute(id)[["policy"]],
     score_needed = length(cpgs$score_needed),
     score_present = length(cpgs$score_present),
     score_used = length(cpgs$score_needed),

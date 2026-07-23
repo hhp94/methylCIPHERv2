@@ -86,7 +86,7 @@ linear_score <- function(
   packs = NULL
 ) {
   id <- cpgs$clock_id
-  policy <- clock_impute(id)$policy
+  policy <- clock_impute(id)[["policy"]]
   reduction <- clock_reduction(id)
   coef <- clock_coefs(id, packs)
   sample_id <- rownames(DNAm)

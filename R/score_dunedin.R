@@ -112,7 +112,7 @@ score_dunedin <- function(
 
   coverage <- list(
     clock_id = id,
-    policy = clock_impute(id)$policy,
+    policy = clock_impute(id)[["policy"]],
     score_needed = length(model_needed),
     score_present = length(model_present),
     score_used = length(model_needed),

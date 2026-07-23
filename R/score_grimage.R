@@ -11,7 +11,7 @@ score_grimage <- function(
   sample_id <- rownames(DNAm)
   n <- nrow(DNAm)
 
-  group_id <- clock_group_bundle(id)$group_id
+  group_id <- clock_group_bundle(id)[["group_id"]]
   cox <- grimage_cox_coef(id)
   comps <- clock_components(id)
   stack_names <- names(cox)
@@ -37,7 +37,7 @@ score_grimage <- function(
       X[, nm] <- as.numeric(pheno[[nm]])
     } else if (startsWith(nm, "_internal_")) {
       # V2 surrogate scored inline; absent CpGs dropped.
-      comp <- Filter(function(c) identical(c$name, nm), comps)
+      comp <- Filter(function(c) identical(c[["name"]], nm), comps)
       if (length(comp) != 1L) {
         stop(
           "score_grimage(): ",
@@ -49,12 +49,12 @@ score_grimage <- function(
         )
       }
       comp <- comp[[1]]
-      coef <- bundle_tensor(group_id, comp$file)
-      intercept <- if (is.null(comp$intercept)) 0 else comp$intercept
+      coef <- bundle_tensor(group_id, comp[["file"]])
+      intercept <- if (is.null(comp[["intercept"]])) 0 else comp[["intercept"]]
       lp <- linear_predictor(
         coef = coef,
         intercept = intercept,
-        cov_coefs = covariate_coefs_from(comp$covariates),
+        cov_coefs = covariate_coefs_from(comp[["covariates"]]),
         score_present = intersect(names(coef), usable),
         DNAm = DNAm,
         partial_cache = partial_cache,
@@ -101,7 +101,7 @@ score_grimage <- function(
 
   coverage <- list(
     clock_id = id,
-    policy = clock_impute(id)$policy,
+    policy = clock_impute(id)[["policy"]],
     score_needed = length(cpgs$score_needed),
     score_present = length(cpgs$score_present),
     score_used = length(cpgs$score_present),
