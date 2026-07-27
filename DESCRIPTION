@@ -17,6 +17,8 @@ Imports:
     checkmate,
     cli,
     fs,
+    grDevices,
+    graphics,
     matrixStats,
     qs2,
     slideimp,

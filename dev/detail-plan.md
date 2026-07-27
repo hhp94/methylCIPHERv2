@@ -24,6 +24,7 @@ their history lives solely in [`DECISIONS.md`](DECISIONS.md).
 | `calc_clocks(DNAm, clocks, pheno = NULL, ...)` | Main scorer |
 | `clocks_coverage(x)` | Per-clock coverage data.frame (wide) from the result record |
 | `samples_coverage(x)` | Per-(sample, clock, panel) coverage data.frame (long) from the result record |
+| `report(DNAm = NULL, result = NULL, ...)` | One QC report over the DNAm input, an `mc_result`, or both; writes a PDF (sec 4.3) |
 | `augment(scores, data, ...)` | Join scores to analysis / pheno tables |
 | `clear_mc_cache()` | Report cached external packs; consent-gated removal (never auto-deletes) |
 | `mc_data_download()` | Explicit pre-fetch (cache dir overridden by `options(mc.cache_dir=)`) |
@@ -545,6 +546,60 @@ NA-bearing columns (clean columns add 0 to every sample). Store only the partial
 tier 1's absent scalar at render (`observed_fraction[i,c] = (score_needed − absent − sample_miss[i,c])
 / score_needed`). Optional future hook: a soft policy that flags/`NA`s a cell below a coverage
 threshold reads this matrix — default stays record-and-report.
+
+### 4.3 `report()` -- one QC entry point (DNAm input and/or scores)
+
+`report()` is the paper's `qc(DNAm)` and `report(result)` collapsed into a **single verb that routes
+on what it is handed**: a DNAm matrix (input QC), an `mc_result` (score QC), or both (both). A bare
+`mc_result` in the first position is auto-routed to `result`, so `report(res)` works. At least one of
+the two is required; neither is an error. It builds a structured `mc_report` (S3 over `list`), prints
+headline problems to the console immediately (format, out-of-range betas, low-coverage clocks), and
+writes a **PDF** (base `grDevices::pdf()` + base graphics -- no rmarkdown/LaTeX/pandoc, no new hard
+deps, CRAN-safe and offline). Computation and rendering are split: `report_dnam.R` / `report_score()`
+return data; `report_render.R` draws it. Tests assert the `mc_report`, never the PDF pixels.
+
+- **DNAm input QC** (`report_dnam.R`). Reuses the scoring machinery rather than re-deriving it:
+  `report_check_dnam()` (structural gate -- aborts on a non-matrix / missing dim names, records
+  softer issues like a transposed matrix); `detect_array()` (nearest-size guess over cg-probe count
+  vs `MC_ARRAY_SIZES`, with an EPICv2 replicate-suffix override -- a heuristic, never a hard identity,
+  since array is **not** a catalog field); `check_beta_range()` (whole-matrix range, count of values
+  `<0` / `>1`, NaN/Inf, offending probes via `matrixStats::colRanges`, a scale note for
+  M-values/percentages); missingness split partial-NA vs fully-missing vs absent-from-matrix, straight
+  off `scan_missing_cpgs()`; a **per-sample** block (`report_samples()`: per-sample NA fraction,
+  mean/median beta, middle-band fraction, MAD-outlier flags, near-identical-pair detection via
+  correlation, and compact per-sample beta density curves); and a per-clock coverage table from
+  `clock_panels()` + `resolve_cpgs()` over `resolve_clocks(clocks)` (default `"all"`). Bimodality is
+  judged from each sample's density **shape** (center-density / flanking-mode ratio; ~0.1 for real
+  methylation, ~1 for flat/mis-scaled) -- **not** a middle-band fraction, which real data (lots of
+  intermediate CpGs) drives to ~0.5 even when clearly bimodal. Sample-level flags are all **relative
+  to the cohort** (a sample unlike its peers); a whole cohort that is not bimodal is a separate
+  one-off signal (`cohort_bimodal_ok`), not a flag on every sample. External-pack
+  clocks are assessed **only when their pack is already cached or `assets=` is passed** -- `report()`
+  never triggers a surprise download; skipped groups are named in the report.
+- **Score QC** (`report_score()`). Per-clock distribution summary (mean/sd/min/median/max, NA count),
+  the samples that failed to score (NA/non-finite), a clock-clock correlation matrix (internal
+  consistency), and `clocks_coverage(result)`. The score-distribution **reference is not in yet**:
+  `mc_score_reference()` returns `NULL`; the comparison is wired to consume a `data.frame(clock_id,
+  ref_mean, ref_sd, expect_lo, expect_hi)` -- `ref_mean`/`ref_sd` drive `|z|>2` mean flags,
+  `expect_lo`/`expect_hi` drive out-of-(training-)range flags -- lit up by `mc_score_reference()` or
+  the `score_reference=` arg, and otherwise a "no reference yet" note.
+- **Age/sex association check** (`score_associations()`, needs `pheno` with `Age`). Recomputes each
+  clock's age correlation in the user's data and compares it to a **shipped, meta-analytic
+  expectation** (`inst/extdata/clock_reference.csv`, read by `mc_clock_reference()`): per clock, the
+  pooled age correlation + a 95% prediction interval across ~136 public datasets (built by
+  `data-raw/build_clock_reference.R`; see DECISIONS 2026-07-27). A clock outside its interval, or with
+  the wrong sign, is surfaced -- but **advisory only**: age correlation shrinks with a narrow cohort
+  age range, so it never enters the verdict, and the section states the cohort's age span as a caveat.
+- **Verdict.** `report_verdict()` grades each section PASS/WARN/FAIL and takes the worst as the
+  overall verdict (stored in `$meta$verdict`, shown in `print()` and atop the PDF).
+- **Rendering** (`report_render.R`). Base `pdf()` text/table pages plus base-graphics plot pages:
+  per-clock coverage histogram, overlaid per-sample beta densities (flagged samples in red), score
+  histograms (small multiples), and a clock-clock correlation heatmap. Default output is
+  `methylCIPHER-report.pdf` in the **working directory** (findable, not a temp dir); pass `file=`
+  for elsewhere. The record is returned invisibly; the important flags (verdict + actionable issues)
+  print to the console via `cli` on every run.
+
+See DECISIONS 2026-07-27.
 
 ---
 

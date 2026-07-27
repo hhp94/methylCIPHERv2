@@ -12,6 +12,135 @@ second-guessed; do not restate rules already stated in the migration / detail pl
 
 ---
 
+## 2026-07-27 -- `report()` unifies `qc()` + `report()`; base-PDF; array is a heuristic; score reference deferred
+
+**Decision.** Added the result-record verb layer's first member: a single `report()` function
+(`R/report.R`, `R/report_dnam.R`, `R/report_render.R`, `tests/testthat/test-report.R`), exported and
+registered by hand in `NAMESPACE` (no roxygen). Four choices worth recording:
+
+**1. One `report()`, not `qc()` + `report()`.** The paper's Figure 2 draws two functions --
+`qc(DNAm)` for input QC and `report(result)` for a score report. We collapsed them into one verb that
+routes on its arguments (`report(DNAm)`, `report(result)`, `report(DNAm, result)`; a bare
+`mc_result` first-positional auto-routes to `result`). One name is less to learn and the "both"
+case falls out for free. The paper's `qc`/`report` split should be reconciled to this on the next
+draft pass. This deliberately does **not** revive `summary()` for coverage -- `clocks_coverage()` /
+`samples_coverage()` stay the coverage surface (DECISIONS 2026-07-23); `report()` *reuses* them.
+
+**2. Base `pdf()` device, not rmarkdown/LaTeX.** Output is a PDF drawn with `grDevices::pdf()` + base
+graphics through a small paginating text/table writer. Rejected rmarkdown+LaTeX (prettier, but a
+runtime LaTeX toolchain + heavy Suggests, a portability/CRAN hazard) and rmarkdown+HTML (needs
+pandoc). The base device adds **no new hard deps beyond `grDevices`/`graphics`** (now declared in
+DESCRIPTION Imports since all base-graphics calls are namespace-qualified), is fully offline, and
+passes `R CMD check` unassisted -- the same "lightweight, no network, CRAN" bar the rest of the
+package holds. Computation is split from rendering so tests assert the `mc_report` object, never the
+PDF.
+
+**3. Array detection is a probe-count heuristic, not a catalog fact.** Array/platform is **not** a
+catalog field, so `detect_array()` guesses from the cg-probe count against approximate full-array
+sizes (`MC_ARRAY_SIZES`) with an EPICv2 replicate-suffix (`cg####_XX##`) override, and says
+"subset/unknown" when the count is far from any full array. It is annotation only -- never used to
+gate scoring or resolve probes. A manifest-based identity (e.g. `slideimp.extra`) was considered and
+declined for v1: another dependency and bundled manifests for a cosmetic field.
+
+**4. Score reference deferred, comparison pre-wired.** The per-clock mean+SD reference "will be
+supplied later," so `mc_score_reference()` returns `NULL` today. The `report_score()` comparison
+already consumes a `data.frame(clock_id, ref_mean, ref_sd)` and flags `|z|>2`; landing the reference
+is a data-only change (populate `mc_score_reference()` or pass `score_reference=`), no code path to
+add. Until then the score section reports distributions with a "no reference yet" note.
+
+**One friction worth noting for collaborators:** external-pack clocks (SystemsAge, PCClocks,
+PCBrainAge) are assessed by `report()` **only when their pack is already cached or `assets=` is
+passed** -- a QC report must never trigger a surprise pack download, so uncached externals are named
+as skipped rather than fetched.
+
+**5. Second pass -- per-sample QC, plots, and a verdict (same day).** Extended both halves:
+
+- **DNAm gets a sample axis** (`report_samples()`): per-sample NA fraction, mean/median beta,
+  middle-band fraction, near-identical-pair detection (correlation over a bounded column subsample),
+  and compact per-sample beta density curves for the classic "bad distribution" overlay. **No sex
+  check** (would need a sex-predictor probe set the package does not carry).
+- **Cohort-wide vs per-sample distribution is a deliberate split.** Per-sample flags are strictly
+  *relative* (a sample unlike the cohort); a whole cohort that is not bimodal is one
+  `cohort_bimodal_ok` signal, **not** a flag on every sample. This surfaced immediately in testing:
+  `sim_DNAm()` draws **uniform** betas (genuinely non-bimodal), so a per-sample absolute threshold
+  flagged all N -- when everything is flagged, nothing is.
+- **Bimodality is a density-shape ratio, not a middle-band fraction (corrected).** The first cut
+  measured the fraction of betas in the (0.2, 0.8) middle band and flagged a cohort above ~0.40. That
+  is **wrong**: real methylation carries substantial intermediate methylation, so a genuinely bimodal
+  450K dataset sits at a middle fraction of ~0.5 -- the same place a flat/uniform distribution sits --
+  and got falsely flagged (caught on a real user dataset, ~485K probes x 174 samples, visibly bimodal).
+  Replaced with a shape metric off each sample's density curve: `center-density / min(flanking-mode)`,
+  ~0.1 for real bimodal data and ~1 for flat/mis-scaled, flagged at >= 0.6. This keys on the trough
+  that actually distinguishes the two, and is regression-tested with constructed bimodal data.
+- **Score QC gains** an NA-scored-samples list, a clock-clock correlation matrix, and out-of-range
+  flags **folded into the same reference table** (`expect_lo`/`expect_hi` columns alongside
+  `ref_mean`/`ref_sd`) rather than a second "supplied later" object.
+- **Verdict** (`report_verdict()`): per-section PASS/WARN/FAIL, overall = worst.
+- **Plots stay base-graphics** on the same `pdf()` device (coverage histogram, per-sample density
+  overlay, score histograms, correlation heatmap) -- still no new plotting dependency.
+
+Out-of-(training-)range flags depend on per-clock plausible ranges; the mechanism is done and tested
+against a supplied table, but the **age-range/units metadata is not in the catalog** (only in the meta
+repo CSV), so it stays dark until a sync change lands it -- the same deferral as the mean+SD reference.
+
+**6. Third pass -- the public API is now actually exported (bug), and two report fixes.**
+
+- **`NAMESPACE` was missing the public surface.** `calc_clocks`, `list_clocks`, `list_tags`,
+  `sim_DNAm`, `mc_data_download`, `clear_mc_cache` all existed but were never exported, so an
+  **installed** build (`install.packages(type="source")` + `library()`) could not find them --
+  `calc_clocks` failed with "could not find function". It only worked in dev because
+  `devtools::load_all()` attaches everything regardless of `NAMESPACE`, which is exactly why the test
+  suite passed while the installed package was unusable. Exported all of them plus a new
+  `print.mc_result` (the record had no print method and dumped a raw list). NAMESPACE stays
+  hand-managed. (The rest of the verb layer -- `as.data.frame`, `augment`, ... -- is still unbuilt.)
+- **Distribution/bimodality QC now runs over the whole array, not the clock subset.** It was scoped to
+  `present_needed` (the requested clocks' CpGs). Clock CpGs are age-selected and less sharply bimodal,
+  so a genuinely bimodal dataset got flagged non-bimodal (caught on a real user 450K dataset whose
+  genome-wide density was textbook bimodal). Data quality is a whole-array property; `report_samples()`
+  now assesses the full matrix (columns subsampled for cost).
+- **Bimodality metric itself was also wrong first (see point 5's correction):** middle-band fraction
+  -> density-trough ratio. Both fixes were needed -- right metric *and* right scope.
+
+**7. Age/sex association reference (the paper's "expected associations" QC).** `report(result, pheno)`
+now checks whether each clock actually tracks age the way it should, against a shipped meta-analytic
+expectation.
+
+- **Source and build.** `data-raw/build_clock_reference.R` reads the TranslAGE AgeSexAssociations
+  per-dataset table (`clock ~ cAGE + cFEMALE` on raw clock values, ~141 datasets x ~1800 predictors),
+  keeps only the ~69 methylCIPHER catalog clocks, and pools each metric with a **DerSimonian-Laird
+  random-effects meta-analysis** (age correlation on the Fisher-z scale; slope / sex / age-x-sex by
+  inverse-variance), storing the pooled estimate plus a **95% prediction interval** (the plausible
+  range for a new dataset) and aggregate counts. Datasets with n < 20 are dropped as noise.
+- **Unidentifiable by construction.** Only per-clock pooled numbers + `k_datasets` / `total_n`; no
+  dataset names, no per-dataset values. The raw 74 MB input stays out of the repo (script reads a
+  local path via `MC_AGESEX_CSV`). Output `inst/extdata/clock_reference.csv` (~8 KB) ships with the
+  package and is read at runtime by `mc_clock_reference()` via `system.file` -- **not** baked into
+  `sysdata.rda`, so no `sync.R` change.
+- **Advisory, not a verdict input (deliberate).** Age correlation is confounded by the cohort's age
+  spread (restriction of range) -- a narrow-age dataset shows low r for *every* clock. So an
+  out-of-range or wrong-sign clock is reported (console note + PDF section stating the cohort age
+  span) but never moves PASS/WARN/FAIL. The prediction intervals are wide for the same reason. It
+  still cleanly separates a broken age clock (r~=0 or wrong sign) from a working one, and correctly
+  does **not** flag pace-of-aging clocks (DunedinPACE expected r~=0.2) or the clocks that fall with
+  age (gait/grip/telomere-length, expected r < 0).
+- **Scope: associations, not score distributions.** This input has age/sex regressions, not raw score
+  means/SDs, and the latter cannot be recovered from regression coefficients without per-dataset age
+  moments. So "is my DunedinPACE ~1" stays a separate, still-unbuilt distribution reference; the
+  `score_reference` (`ref_mean`/`ref_sd`/`expect_lo`/`expect_hi`) hook from point 4 is where it lands.
+
+**8. Coverage verdict is graded by fraction, and plots are sized down.**
+
+- **Coverage: partial != fail.** The verdict marked coverage FAIL if *any* clock dropped below 0.5, so
+  a handful of EPIC-only clocks on 450K data failed the whole section even when almost everything was
+  covered. Regraded by fraction: FAIL only when the data is *broadly* broken (>50% of clocks under
+  0.5, i.e. wrong array / bad data), WARN when some clocks are under 0.75, PASS otherwise.
+- **Plots no longer fill the page.** Base-graphics plot pages (`rp_plot_page`) now confine each plot to
+  a sub-region (NDC `fig` box, top ~half) instead of stretching to the full 8.5x11 page. Two
+  base-graphics gotchas were load-bearing and are commented in the code: (1) `fig` and `mar` must be
+  set **before** `plot.new()` (the text writer leaves `mar = 0`, which otherwise defeats `fig`), and
+  (2) setting `mfrow` in the same `par()` call **resets `fig`**, so `mfrow` is cleared first, then
+  `fig`/`mar` set. The score-histogram grid uses outer margins (`omi`) to the same end.
+
 ## 2026-07-24 -- always-on tier trimmed to one golden per scoring path; sim-smoke kept for its configuration, not its clock list
 
 **Decision.** Cut ~114 lines of duplicated always-on tests, and restate why `test-sim-smoke.R`
