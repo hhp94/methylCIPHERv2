@@ -909,6 +909,24 @@ group_sex_routes <- function(gside) {
   stems
 }
 
+# earliest cross-sample step over an alias's members, NA if neither reduces.
+# A row is scored by exactly one member, so the alias is chunk-safe only where
+# both members are, and streaming must stop at the earliest step either of them
+# reduces over the cohort. Positions are not comparable across two recipes, so
+# the min is the conservative reading: the first index past which the alias
+# cannot be assumed per-sample.
+alias_cross_sample_at <- function(members) {
+  at <- vapply(
+    members,
+    function(m) {
+      v <- m[["cross_sample_at"]]
+      if (is.null(v) || !length(v)) NA_integer_ else as.integer(v)[[1L]]
+    },
+    integer(1L)
+  )
+  if (all(is.na(at))) NA_integer_ else min(at, na.rm = TRUE)
+}
+
 # mint one alias clock per routed stem (no panel of its own)
 attach_sex_routed_aliases <- function(catalog) {
   for (gid in names(catalog[["groups"]])) {
@@ -953,6 +971,10 @@ attach_sex_routed_aliases <- function(catalog) {
         )
       }
       donor <- catalog[["clocks"]][[routes[[stem]]$female]]
+      members <- catalog[["clocks"]][c(
+        routes[[stem]]$female,
+        routes[[stem]]$male
+      )]
       catalog[["clocks"]][[stem]] <- list(
         clock_id = stem,
         group_id = gid,
@@ -971,7 +993,10 @@ attach_sex_routed_aliases <- function(catalog) {
         # its own; citations resolve through the donor.
         donor_clock_id = donor[["clock_id"]],
         license = donor[["license"]],
-        cross_sample_at = NA_integer_,
+        # derived from the members like every other alias field -- assuming NA
+        # here would tell a chunked engine an alias is per-sample when a member
+        # is not, which is a wrong score rather than a missing one
+        cross_sample_at = alias_cross_sample_at(members),
         external_group = FALSE
       )
     }

@@ -98,7 +98,7 @@ pack_groups_needed <- function(clock_sequence) {
 #' @param min_clocks_coverage x
 #' @param min_samples_coverage x
 #' @param normalize x
-#' @param assets x
+#' @param from x
 #' @param ask x
 #'
 #' @returns x
@@ -111,142 +111,32 @@ calc_clocks <- function(
   min_clocks_coverage = 0.75,
   min_samples_coverage = 0.75,
   normalize = NULL,
-  assets = NULL,
+  from = NULL,
   ask = TRUE
 ) {
-  clock_ids <- resolve_clocks(clocks)
-  clock_sequence <- resolve_clocks_sequence(clock_ids)
-  normalize <- resolve_normalize(normalize, clock_sequence)
-  # routed members are internal machinery: scored, but never a score column
-  output_ids <- drop_routed_members(c(
-    clock_ids,
-    setdiff(clock_sequence, clock_ids)
-  ))
   checkmate::assert_number(min_samples_coverage, lower = 0, upper = 1)
 
-  # sample ids are the DNAm rownames -- mandatory, enforced by check_DNAm().
-  check_DNAm(DNAm)
-  sample_id <- rownames(DNAm)
-  resolve_DNAm_extra(clock_sequence)
+  spec <- mc_spec(clocks, pheno_id, normalize, from, ask)
+  facts <- mc_cohort(DNAm, spec, pheno, min_clocks_coverage)
+  scored <- score_cohort(DNAm, spec, facts)
+  # one block, so assembly is the identity -- but the reduction still runs
+  # here rather than in the loop, so both front ends share this step
+  scores <- finalize_cross_sample(scored$scores, scored$pending)
 
-  # the one covariate union: gates the pheno check, narrows the carried
-  # pheno, and is stamped as provenance
-  extra_columns <- unique(unlist(lapply(
-    clock_sequence,
-    clock_covariates_required
-  )))
-  if (is.null(extra_columns)) {
-    extra_columns <- character(0)
-  }
-  if (length(extra_columns) && is.null(pheno)) {
-    cli::cli_abort(
-      c(
-        "These clocks need {cli::qty(extra_columns)} pheno column{?s}
-         {.field {extra_columns}}, but {.arg pheno} is missing.",
-        "i" = "Pass a pheno table with {cli::qty(extra_columns)}
-               {?that/those} column{?s}."
-      ),
-      call = NULL
-    )
-  }
-  check_pheno(
-    pheno,
-    ID = pheno_id,
-    extra_columns = extra_columns,
-    sample_id = sample_id
-  )
-  pheno <- resolve_pheno(DNAm, pheno, pheno_id, extra_columns)
-
-  packs <- load_mc_assets(pack_groups_needed(clock_sequence), assets, ask)
-
-  panels <- clock_panels(clock_sequence, packs, normalize)
-  mna <- scan_missing_cpgs(DNAm, panels_union(panels))
-  cpg_list <- resolve_cpgs(mna$usable_cols, panels)
-  check_coverage(cpg_list, min_clocks_coverage)
-  partial_cache <- build_partial_cache(
-    DNAm,
-    intersect(cpg_list$present_needed_union, mna$partial_na_cols)
-  )
-
-  # coverage/QC needs no score: compute it once, keyed by clock id
-  coverage <- compute_coverage(
-    clock_sequence,
-    cpg_list,
-    DNAm,
-    partial_cache,
-    pheno
-  )
-  # row-gate every clock actually computed (including routed members)
-  check_row_coverage(coverage, min_samples_coverage)
-
-  # scoring loop returns score matrices only -- coverage was computed above
-  results <- vector("list", length(clock_sequence))
-  names(results) <- clock_sequence
-
-  is_pack <- vapply(clock_sequence, is_pack_scored, logical(1))
-  if (any(is_pack)) {
-    pack_ids <- clock_sequence[is_pack]
-    pgroups <- vapply(pack_ids, clock_group_id, character(1))
-    for (g in unique(pgroups)) {
-      grp <- score_pack_group(
-        g,
-        pack_ids[pgroups == g],
-        mna$usable_cols,
-        DNAm,
-        partial_cache,
-        pheno,
-        packs
-      )
-      results[names(grp)] <- grp
-    }
-  }
-
-  for (p in clock_sequence[!is_pack]) {
-    cpgs <- cpg_list$per_clock[[p]]
-    results[[p]] <- switch(
-      score_type(p),
-      linear = linear_score(cpgs, DNAm, partial_cache, pheno, packs),
-      GrimAge = score_GrimAge(
-        p,
-        results,
-        mna$usable_cols,
-        DNAm,
-        partial_cache,
-        pheno
-      ),
-      DNAmFitAge = score_DNAmFitAge(p, results, DNAm),
-      PhysAge = score_PhysAge(p, cpgs, DNAm, partial_cache),
-      Dunedin = score_Dunedin(p, cpgs, DNAm, partial_cache),
-      normalized = score_normalized(
-        p,
-        cpgs,
-        DNAm,
-        partial_cache,
-        pheno,
-        packs
-      ),
-      EpiTOC2 = score_EpiTOC2(p, cpgs, DNAm, partial_cache),
-      MiAge = score_MiAge(p, cpgs, DNAm, partial_cache),
-      Zhang2019 = score_Zhang2019(p, cpgs, DNAm, partial_cache),
-      sex_routed = score_sex_routed(p, results, DNAm, pheno),
-      cli::cli_abort(
-        "No dispatch branch for score_type {.val {score_type(p)}}
-         (clock {.val {p}}).",
-        call = NULL
-      )
-    )
-  }
+  # row-gate every clock actually computed (including routed members). Warn
+  # only, so it reads assembled counts and runs after scoring.
+  check_row_coverage(scored$coverage, min_samples_coverage)
 
   construct_mc_result(
-    results,
-    coverage,
-    output_ids,
-    clock_ids,
-    sample_id,
-    pheno = pheno,
+    scores,
+    scored$coverage,
+    spec$output_ids,
+    spec$clock_ids,
+    facts$sample_id,
+    pheno = facts$pheno,
     pheno_id = pheno_id,
-    covariates_used = extra_columns,
-    normalized = names(normalize)[normalize]
+    covariates_used = spec$covariates,
+    normalized = names(spec$normalize)[spec$normalize]
   )
 }
 

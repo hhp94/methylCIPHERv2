@@ -2,21 +2,47 @@
 using namespace Rcpp;
 
 // [[Rcpp::export]]
-NumericMatrix col_stats(NumericMatrix obj) {
-  NumericMatrix result(2, obj.ncol());
-
-  for (int j = 0; j < obj.ncol(); ++j) {
+List col_stats(NumericMatrix obj)
+{
+  const int nc = obj.ncol(), nr = obj.nrow();
+  NumericMatrix stats(2, nc);
+  bool any_lt0 = false, any_gt1 = false;
+  for (int j = 0; j < nc; ++j)
+  {
     double sum = 0.0;
-    double n_valid = 0.0;
-    for (int i = 0; i < obj.nrow(); ++i) {
+    double n_obs = 0.0;
+    for (int i = 0; i < nr; ++i)
+    {
       double x = obj(i, j);
-      if (R_finite(x)) {
+      if (R_finite(x))
+      {
         sum += x;
-        n_valid += 1.0;
+        n_obs += 1.0;
+        if (x < 0.0)
+          any_lt0 = true;
+        else if (x > 1.0)
+          any_gt1 = true;
+      }
+      else if (!ISNAN(x))
+      {
+        // not finite and not NA/NaN, so +/-Inf: bail out and report the
+        // position; R aborts through cli, this kernel never throws
+        return List::create(
+            _["stats"] = R_NilValue,
+            _["any_lt0"] = any_lt0,
+            _["any_gt1"] = any_gt1,
+            _["inf_at"] = IntegerVector::create(i + 1, j + 1));
       }
     }
-    result(0, j) = sum;
-    result(1, j) = n_valid;
+    stats(0, j) = sum;
+    stats(1, j) = n_obs;
   }
-  return result;
+  stats.attr("dimnames") = List::create(
+      CharacterVector::create("sum", "n_obs"),
+      R_NilValue);
+  return List::create(
+      _["stats"] = stats,
+      _["any_lt0"] = any_lt0,
+      _["any_gt1"] = any_gt1,
+      _["inf_at"] = R_NilValue);
 }

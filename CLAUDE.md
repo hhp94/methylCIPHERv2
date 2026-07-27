@@ -21,16 +21,30 @@ contribute.
 # from the package root, in R:
 install.packages("pak")
 pak::local_install_deps(dependencies = TRUE)  # reads DESCRIPTION incl. GitHub-only Remotes
-devtools::load_all()   # attach for interactive work (no document() -- roxygen deferred)
+pkgbuild::compile_dll(".", force = TRUE)  # only after editing src/*.cpp -- load_all() reuses a stale dll
+devtools::load_all()   # attach for interactive work
+devtools::document()   # regenerates NAMESPACE + man/ from tags; needed for the Rcpp wiring
 devtools::test()       # always-on tiers (cohort parity auto-skips if not staged)
-devtools::check()      # full R CMD check
 ```
+
+`devtools::check()` / `R CMD check` is **maintainer-on-demand only** -- see the invariant below.
+
+The package has compiled code (`src/`), so a working toolchain is required -- Rtools on Windows.
 
 Soft deps (`betanorm`, `duckdb`, `DBI`) back specific paths only; tests skip when absent.
 
 ## Non-negotiable invariants
 
 Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
+
+- **Never run `R CMD check` / `devtools::check()`. It is on-demand, maintainer-only.** It hangs in
+  this environment: the check re-runs the full suite in a fresh install, and the suite is currently
+  bloated enough that the run does not finish in a usable time. An agent that starts one blocks the
+  session on something it cannot resolve. **Verify a change with `devtools::test()`** (always-on
+  tiers) and say plainly that check was not run. This is the same rule as the parity tier -- see
+  "Testing" -- and for the same reason: minutes-to-hours of maintainer wall-clock is the
+  maintainer's call, not the agent's. Do not reach for it via `Rscript`, `pkgbuild`, or a background
+  shell either; the prohibition is on the work, not on one entry point.
 
 - **One engine + a finite, closed branch set.** Every work unit routes on the catalog pair
   `(weights_format, computation_type)` to shared `linear_score()` or a named branch (pre-transform,
@@ -40,7 +54,13 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   catalog entry or `stop()`s naming the clock's group / `weights_format` / `computation_type`.
   There is no `"unsupported"` tag and nothing filters on one: a sync that adds a routing pair no
   branch claims must fail the always-on tier, never silently shrink it (see DECISIONS 2026-07-23).
-- **A branch returns only its score** (`<n x 1 matrix>`), never a coverage record. Coverage/QC
+- **A branch returns only its score** (`<n x 1 matrix>`), never a coverage record. The one exception
+  is declared, not per-branch: a clock the catalog marks cohort-reducing (`cross_sample_at`, today
+  only the two `DNAmPhysAge` clocks) returns its **per-sample intermediate** instead, which the
+  scoring loop routes into `pending` rather than `scores`. `finalize_cross_sample()` performs the
+  reduction once, after assembly, and every front end calls it unconditionally -- it is a no-op when
+  `pending` is empty. Nothing tests for a clock id or for whether the run was chunked; the routing
+  reads `spec$cross_sample` (DECISIONS 2026-07-27, "Phase 3"). Coverage/QC
   depends on no score, so it is computed once upstream of the scoring loop by `compute_coverage()`
   (`R/coverage.R`), keyed by clock id, and merged in `construct_mc_result()`. Per-sample miss is
   counted **once per distinct panel** (FitAge/GrimAge reuse panels) and kept **per panel role**:
@@ -111,16 +131,27 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   relative, both, taken as a `max` -- so one bad sample fails the test. The same reasoning bans
   `median`/`mean` as the reducer over per-element differences: any statistic that averages away a
   minority of arbitrarily-wrong samples is the same bug wearing a different name.
-- **No roxygen yet.** Do not write roxygen blocks or run `devtools::document()`; use short `#`
-  comments (see "Comments"). Turning roxygen on is a human-decided override tied to the alpha --
-  no automatic trigger.
-- **Never edit `NAMESPACE` or `man/*.Rd`, and never regenerate them.** The maintainer owns the
-  package's exported surface and handles it by hand. A new export or S3 method gets a bare
-  `#' @export` tag beside the function (existing precedent in `R/generics.R`) and nothing else --
-  then say in your summary which `export()` / `S3method()` entries the change implies, and stop.
-  Note that until those entries exist, S3 dispatch works inside `testthat` (tests run in the
-  package namespace) but **not** from a user session, so a green test tier is not evidence the
-  method is reachable.
+- **Roxygen is on only where compiled code forces it; prose docs are still deferred.** The package
+  went Rcpp, and `useDynLib` has no route into `NAMESPACE` except a roxygen tag -- so roxygen is
+  enabled, `NAMESPACE` and `man/*.Rd` are **generated files**, and `devtools::document()` is a
+  normal part of the workflow. That is the whole of the override: keep writing short `#` comments
+  (see "Comments") and do **not** start authoring real `@param` / `@return` prose. `calc_clocks()`
+  carries a placeholder block whose params are literally `x`; leave it that way until a human says
+  otherwise (DECISIONS 2026-07-27).
+- **Never hand-edit `NAMESPACE` or `man/*.Rd` -- own the tags, not the files.** They carry roxygen's
+  "do not edit by hand" header and `document()` rewrites them from tags, **silently dropping**
+  anything added by hand. This has bitten once: a hand-added
+  `useDynLib(methylCIPHERv2, .registration = TRUE)` vanished on the next `document()` and took every
+  compiled kernel down with it (`.Call()` -> "not available for .Call() for package"). So a new
+  export or S3 method gets a bare `#' @export` beside the function (precedent in `R/generics.R`),
+  and package-level wiring -- `@useDynLib`, `@importFrom` -- lives in
+  `R/methylCIPHERv2-package.R`. Then run `document()` and check the diff is only what you intended.
+  The maintainer still owns the exported *surface*: say in your summary which `export()` /
+  `S3method()` entries a change implies rather than quietly widening it.
+- **A `.cpp` edit needs an explicit rebuild.** `devtools::load_all()` happily reuses a stale
+  `src/*.dll`, so a changed or newly added kernel silently does not exist. Run
+  `pkgbuild::compile_dll(".", force = TRUE)` first; symptom of skipping it is the same
+  "not available for .Call()" error above.
 
 ## sync.R workflow (`data-raw/sync.R`)
 
@@ -361,7 +392,8 @@ Every user-facing error, warning and note goes through `cli` (`cli_abort` / `cli
 
 ## Comments
 
-- Plain `#` comments are the only in-source docs right now -- no roxygen (see invariants).
+- Plain `#` comments are the only in-source docs right now. Roxygen is enabled but reserved for
+  machinery -- `@export`, `@useDynLib`, `@importFrom` -- not for prose (see invariants).
 - Keep them **short**: 1-2 sentences on *what* the code does, not a rationale essay.
 - The *why*, and every decision or reversal, goes only in `dev/DECISIONS.md`.
 
@@ -389,7 +421,8 @@ Local-only (gitignored): `dev/legacy/` (frozen pre-rewrite sources), `dev/scratc
 ## Contributing
 
 - Branch off `main` and open a PR; do not push to `main`.
-- Run `devtools::test()` before pushing. Do **not** run `devtools::document()` (no roxygen yet).
+- Run `devtools::test()` before pushing. Run `devtools::document()` when you add or change a roxygen
+  tag, and commit the regenerated `NAMESPACE` / `man/` alongside it.
 - Reversing or second-guessing a design? Add a dated, newest-first `dev/DECISIONS.md` entry.
 - Keep new or edited content ASCII.
 

@@ -2,10 +2,10 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 col_stats <- function(obj) {
-    .Call('_methylCIPHERv2_col_stats', PACKAGE = 'methylCIPHERv2', obj)
+    .Call(`_methylCIPHERv2_col_stats`, obj)
 }
 
 fill_imp_col <- function(obj, mean_vec) {
-    invisible(.Call('_methylCIPHERv2_fill_imp_col', PACKAGE = 'methylCIPHERv2', obj, mean_vec))
+    invisible(.Call(`_methylCIPHERv2_fill_imp_col`, obj, mean_vec))
 }
 

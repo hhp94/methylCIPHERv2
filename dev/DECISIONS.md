@@ -12,7 +12,229 @@ second-guessed; do not restate rules already stated in the migration / detail pl
 
 ---
 
-## 2026-07-27 (latest) -- `normalize=` is an argument, not `prep()`; BMIQ defaults off and drops where QN fills
+## 2026-07-27 (latest) -- value gates ride the `col_stats()` sweep; the `anyNA()` short-circuit was hiding an `Inf`
+
+**The defect, found in an audit of the Phase 5 diff.** `scan_missing_cpgs()` returned early on
+`!anyNA(DNAm)`. `anyNA()` does not see `+/-Inf`, but the new `col_stats()` kernel treats every
+non-finite value as missing -- so whether an `Inf` got filled depended on whether an **unrelated** NA
+existed somewhere else in the matrix. Measured on one Hannum request: the same `Inf` scored `-Inf`
+with no NA present, and a plausible `60.00852` once an NA was added in a different column. The
+pre-Phase-5 `slideimp::mat_miss()` counted only NA, so the old code was consistently the former;
+Phase 5 introduced the *inconsistency*, and it was silent and data-dependent, which is the bad kind.
+
+**Decision.** The panel scan runs **unconditionally**, and `col_stats()` returns a list rather than a
+statistics matrix: `stats` (2 x ncol, named rows `sum` / `n_obs`), the global flags `any_lt0` /
+`any_gt1`, and `inf_at`. Only the row half (the all-NA-sample abort) stays behind `anyNA()`, because
+it scans the full matrix width rather than the needed panel and is genuinely skippable when there is
+nothing missing.
+
+**Fail fast on `Inf`, and make the caller's obligation explicit.** The scan stops at the first
+`+/-Inf` and returns its 1-based `c(row, col)`; `stats` is then `NULL` and the range flags cover only
+the prefix scanned. Nothing in the shape of the list enforces that, so it is a stated contract:
+`check_col_values()` tests `inf_at` first and reads nothing else in that branch. Cheaper than
+finishing a traversal whose result is about to be thrown away, and it is what lets the abort name the
+exact sample and CpG.
+
+**Asymmetry in what the gates report, on purpose.** The abort carries a position; the warnings carry
+none -- not a column list, not the observed range. An `Inf` is a point defect worth locating and the
+scan is already stopping there. Out-of-range values are a property of the whole matrix, where naming
+ten columns out of 866k is noise rather than information, so two booleans suffice and the per-column
+`min`/`max` an earlier cut carried was dropped. Two flags, not one: a matrix can be out of range on
+both sides and neither implies the other, so they warn separately.
+
+**Missing and bad are counted apart.** NA and NaN are "not observed" and fill from the cohort mean.
+`+/-Inf` is bad data that no fill can repair, so it gets its own counter and its own outcome: an
+abort. Folding it into the NA count -- which is what the kernel was effectively doing -- means
+silently imputing over a number that is wrong rather than absent.
+
+**The kernel reports; R decides.** `col_stats()` raises nothing. `check_col_values()` (R) issues both
+messages, so they go through cli with `call = NULL` per the CLI rule, and can name the offending
+columns. `Rcpp::stop()` would have been fewer lines and the wrong shape.
+
+**Range: warn, do not stop, and let 0 and 1 through.** A value outside [0, 1] is the beta-vs-M-value
+tell -- `check_DNAm()` checks `mode = "double"` but not the range, so an M-value matrix scores
+plausible garbage today. It is strong evidence rather than a definition, so it warns and still
+returns scores. Exactly 0 and exactly 1 pass: those are ordinary saturated betas, and rejecting them
+would be a false positive on real data.
+
+**`n_obs == 0` is answered by classification, not by a new error.** The instruction to guard the
+all-missing case explicitly was taken as "make it impossible and say so" rather than "abort": an
+all-NA column is an ordinary expected case that lands in `all_na_cols`, leaves `usable_cols`, and
+takes the clock's vendored ref or the drop policy -- the standing imputation invariant. Only
+`partial` columns are divided and `n_obs > 0` holds for every one by construction, so `0/0` never
+arises. Aborting instead would refuse any matrix missing a single probe and would contradict
+CLAUDE.md's imputation rule.
+
+**`fill_imp_col()`'s Inf branch is now unreachable and stays anyway.** `col_stats()` scans the same
+columns earlier and aborts on the first `Inf`, so only NA/NaN reach the kernel through the supported
+path. The `!R_finite` test is kept: filling is the right response to NaN, and narrowing it would make
+the kernel's correctness depend on a gate in another file. Its comment says so; the in-place mutation
+contract and the fresh-allocation requirement are untouched.
+
+**Also dropped: `scan_missing_cpgs()$has_na`.** Set on every call and read by nothing.
+
+**Not verified against parity.** The always-on tiers are green with **zero** warnings, so no
+synthetic input trips the range gate. Real cohort betas should not either (0 and 1 are allowed), but
+if a staged fixture carries an out-of-range value the parity run will now emit a warning where it
+previously ran clean.
+
+---
+
+## 2026-07-27 -- Phase 3: the cohort reduction leaves the scoring loop, and `rbind` still must not redo it
+
+**Decision.** `score_PhysAge()` split at its `cohort_zscore` step (recipe position 11) into
+`physage_raws()` -- the per-sample surrogate matrix, computed in the scoring loop -- and
+`finalize_PhysAge()` -- the reduction, run once after assembly. `score_cohort()` gained a third
+return element, `pending`, and both front ends end in `finalize_cross_sample()`.
+
+**The loop routes on the catalog, not on a tag or a clock id.** A branch's output goes to `pending`
+instead of `scores` iff the clock is in `spec$cross_sample`, which `mc_spec()` derives from the
+declared `cross_sample_at`. So the `switch` over `score_type()` stays total and unchanged in shape,
+no branch decides its own deferral, and a clock that starts declaring `cohort_zscore` upstream defers
+with no downstream edit. This is the amendment to CLAUDE.md's "a branch returns only its score": a
+declared cohort-reducing clock returns its per-sample intermediate instead.
+
+**`finalize_cross_sample()` is called unconditionally, which is the whole point.** `pending` is empty
+for 127 of 129 clocks, so it is a no-op for a typical request. That is what keeps the public surface
+magical: `calc_clocks()` and (later) `calc_clocks_chunked()` return the same number, and nothing
+anywhere -- not a branch, not a front end, not the record -- tests whether the run was chunked.
+
+**Carry the raws; do not stream sufficient statistics.** Per-surrogate `(sum, sumsq, n)` accumulated
+per block would let the first z-score stream, but the raws are 8 doubles per sample (~640 KB at
+n = 10,000), so carrying them costs nothing and avoids a second accumulator that would have to keep
+bit-agreeing with the first. Decisive point: it would not have worked anyway for
+`DNAmPhysAge_years`, whose **second** `cohort_zscore` reduces over `phys`, itself a function of the
+first reduction -- not streamable, trivial with the raws in hand.
+
+**The `n >= 2` guard moved to the finalize.** It was in the branch, where it would have rejected any
+1-row block under chunking. It is a statement about the *cohort*, so it now sits where the cohort is
+whole: a 1-row block scores its raws fine, a 1-row cohort still errors.
+
+**Rejected: re-finalizing at `rbind`.** The natural-sounding "after rbinding, PhysAge is recalculated
+over the combined statistics" is right for chunk assembly and wrong for `rbind.mc_result`, and they
+are different layers. Chunk blocks are one cohort whose reduction has not run yet -- finalizing after
+assembly is the *only* calculation, not a recalculation. Bound records are several cohorts that each
+already finalized and whose numbers the user has already seen; re-reducing over the union would
+silently rewrite them and would standardize across batches that were deliberately imputed
+differently. So assembly (Phase 6, fragments, sums coverage) and `rbind` (Phase 4, records, keeps
+coverage per record) do not share an implementation, and `rbind` binds and labels exactly as sec 8
+said. Corrected on the way: `dev/id-streaming-plan.md` sec 8 claimed "after Phase 3 no score column
+is cohort-dependent", which was never true and contradicted its own closing paragraph -- Phase 3
+relocates the reduction within a run, it does not make the column batch-independent.
+
+**Phase 6 does not depend on Phase 4.** The chunked front end never calls `rbind.mc_result`, so
+`rbind` can go on refusing while chunking ships.
+
+**Measured, both bit-exact.** A 3-block split now finalizes to the single-pass answer for both
+PhysAge clocks -- previously off by 2.8 and **11 years** respectively, purely from re-standardizing
+against 10 rows instead of 30. And single-pass output is `identical()` to the pre-Phase-3
+implementation, so the standing parity run is undisturbed and does not need repeating for this
+change. The chunk-invariance test now compares **every** clock with no exclusion, and asserts
+`length(spec$cross_sample) > 0` so it cannot quietly stop exercising the deferred path.
+
+---
+
+## 2026-07-27 -- Phase 2: a sex-routed alias derives its sample axis instead of assuming it
+
+**The defect.** `attach_sex_routed_aliases()` (`data-raw/sync.R`) minted every alias with a literal
+`cross_sample_at = NA_integer_`. Every *other* alias field is derived -- `normalization`,
+`imputation_policy`, `pmid`, `license` from the donor, `clock_inputs` from routing -- so this one
+constant was the only assumption in the block, and it asserted the strongest possible claim about
+the members without consulting them.
+
+**Why it matters more than it looks.** `batch_dependent` is `!is.na(cross_sample_at)`, so a
+cross-sample member under a per-sample alias would tell a chunked engine the alias may be scored
+block by block. That is a **wrong score, not a missing one**, and it cannot be caught downstream:
+the alias's rows would look complete and plausible. Phase 2 is the point where the engine starts
+trusting the field, which converts a latent hole into a live one.
+
+**Fix:** `alias_cross_sample_at(members)` -- the min over the two members, NA when neither reduces.
+Positions are not comparable across two different recipes, so the min is read as "the first index
+past which the alias cannot be assumed per-sample" rather than as a step pointer.
+
+**No data moved.** All 14 routed members are `DNAmFitAge` and per-sample, so the derived value equals
+the old constant for all 7 aliases and `R/sysdata.rda` needs no regeneration. Verified against the
+built catalog, not assumed. The rest of the sync-side classification was audited at the same time and
+is correct: `cohort_zscore` is the only cross-sample op in the whole upstream corpus (3 occurrences,
+2 clocks); `sample_scale` (Zhang2019) is a within-sample z-score; and `center_scale` (SystemsAge)
+reads vendored `systems_pca_center` / `systems_pca_scale` tensors, so it is per-sample too.
+
+**Package side, no clock lists anywhere.** `clock_cross_sample_at()` / `clock_is_cross_sample()`
+read the declared field, `split_cross_sample()` partitions a compute sequence, and `mc_spec()` stores
+the reducing half as `spec$cross_sample`. The chunk-invariance test excludes exactly that vector
+instead of a literal, so it empties itself when Phase 3 lands; a census test walks
+`resolve_clocks("all")` and asserts the partition is total and that each alias matches its members.
+That last assertion is the standing guard against this decision being quietly reversed -- it compares
+an alias to its members rather than to a constant, so re-hardcoding NA fails the always-on tier.
+
+---
+
+## 2026-07-27 -- Phase 5: the seam is cut, `partial_fill` is the channel, and `fill_imp_col()` stays in place
+
+**Decision.** `calc_clocks()` is now `mc_spec()` + `mc_cohort()` + `score_cohort()` +
+`construct_mc_result()` (`R/score_cohort.R`), split by what each depends on, per
+`dev/id-streaming-plan.md` sec 4. Nothing about the public surface moved.
+
+**`facts` carries `partial_fill` (cohort means), not a prebuilt cache.** The alternative -- having
+`mc_cohort()` build the filled sub-matrix once and hand it to `score_cohort()` -- is a smaller diff
+and carries zero numeric risk, but it makes `score_cohort()` take a whole-cohort object, which is
+exactly the thing Phase 6 would then have to re-cut. A seam that a later phase must re-cut is not a
+seam. So `score_cohort()` builds its own cache per call from the means, which is what lets Phase 6
+add a front end and two adapters instead of reopening this. The names of `partial_fill` are the
+column classification, not just a lookup key: a block must never re-derive which columns are
+cohort-partial, because a column that is partial cohort-wide can be entirely NA inside one block.
+
+**Consequence: `slideimp::mean_imp_col()` is out of this path.** Splitting mean-computation from
+filling means the mean has to be available on its own, so `scan_missing_cpgs()` now runs the
+package's own `col_stats()` -- one traversal returning per-column `(sum, n_obs)` -- and derives
+`all_na_cols`, `partial_na_cols`, `usable_cols` and the fill values from that single sweep. Two
+slideimp calls collapse into one, and the classification and the fill can no longer disagree because
+they come off the same pass. `slideimp::mat_miss(col = FALSE)` keeps the row half (the all-NA-sample
+abort), which is per row and correct against any block. Semantic change worth knowing: `col_stats()`
+skips non-finite values, so NaN and +/-Inf count as missing where `mat_miss()` counted only NA. A
+beta matrix has none of the three, and an Inf in one would be bad data worth filling anyway.
+**Parity was not run** -- this moves the numeric path for every clock with partial NAs, so it should
+be run before merge.
+
+**`fill_imp_col()` stays in-place and void, reversing sec 5.2.** The plan said the kernel "must slice
+and fill in one traversal, returning a new matrix", on the grounds that an in-place kernel that ever
+sees the caller's `DNAm` corrupts it invisibly. That risk is real but it is bounded by one caller:
+`build_partial_cache()` always passes a fresh `DNAm[, cols, drop = FALSE]`, and R matrix subsetting
+always allocates, so the caller's matrix is never reachable from the kernel. Making the kernel copy
+would allocate the slice twice for a guarantee the single call site already provides. Accepted cost:
+the safety property is now a **caller contract rather than a kernel property**, so it is written down
+in `src/fill_imp_col.cpp` and at the call site, and a second caller must re-establish it. Revisit if
+one ever appears.
+
+**Two orderings moved, both deliberate.** `check_row_coverage()` runs after the scoring loop now
+(sec 4.1: warn-only, reads assembled counts). And `load_mc_assets()` is in the data-independent tier,
+so it precedes `check_DNAm()` and the pheno checks -- a caller asking for an external pack with a
+malformed matrix gets the download prompt first and the error second. That is a genuine small
+regression, accepted because hoisting resolution out of the per-block path is the point of the tier
+split; the fix would need a pre-check that does not re-warn when `mc_cohort()` repeats it.
+
+**The Rcpp wiring lives in a roxygen block, not in NAMESPACE.** Calling a compiled kernel from R
+needs `useDynLib(methylCIPHERv2, .registration = TRUE)`; without it the kernels build fine and
+`.Call()` fails with "not available for .Call() for package". Adding it by hand to NAMESPACE does not
+survive -- NAMESPACE now carries roxygen2's "do not edit by hand" header and `document()` regenerates
+it from tags, silently dropping anything hand-added (observed: a hand-added pair vanished on the next
+`document()` and took the whole compiled path down with it). So the two lines come from
+`R/methylCIPHERv2-package.R` (`@useDynLib` + `@importFrom Rcpp sourceCpp`), the standard
+`usethis::use_rcpp()` block. This partially reverses CLAUDE.md's "no roxygen yet" and "never edit or
+regenerate NAMESPACE": roxygen is on for whatever Rcpp requires, and NAMESPACE is now a generated
+file, so the maintainer owns the **tags**, not the file. CLAUDE.md still states the old rule.
+
+**Measured, and better than the doc promised: bit-exact chunk invariance.** Sec 4.2 only claimed
+"equal, not identical", expecting the mean's association order to move the last bit. Over a 3-block
+split of a cohort carrying all three missingness shapes, every chunk-safe clock agrees exactly --
+because Phase 5 computes each mean once and every block reads the same number, so there is no
+re-summation to reassociate. This does **not** carry to Phase 6, where pass 1 accumulates block by
+block; the doc's warning stands for that. `DNAmPhysAge` is the sole non-invariant clock (~1.1 off),
+exactly as sec 6 predicts, and Phase 3 is what fixes it.
+
+---
+
+## 2026-07-27 -- `normalize=` is an argument, not `prep()`; BMIQ defaults off and drops where QN fills
 
 **Decision.** Per-clock normalization is controlled by `normalize=`, a named logical argument on
 `calc_clocks()` and `sim_DNAm()` -- `normalize = c(Horvath1 = TRUE)`, or a bare scalar policy.

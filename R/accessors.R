@@ -191,6 +191,27 @@ clock_routing <- function(id) {
   clock_entry(id)[["routing"]]
 }
 
+# 1-based position of the clock's first cohort-reducing recipe step, NA when
+# every step is per-sample. Declared by sync from a closed op vocabulary.
+clock_cross_sample_at <- function(id) {
+  v <- optional_field(id, "cross_sample_at", NA_integer_)
+  if (!length(v)) NA_integer_ else as.integer(v)[[1L]]
+}
+
+# does this clock's score depend on the other samples in the matrix? A TRUE
+# clock is not chunk-safe: scoring a row subset does not reproduce the rows a
+# whole-cohort run gives, because the reduction is still inside the branch.
+clock_is_cross_sample <- function(id) {
+  !is.na(clock_cross_sample_at(id))
+}
+
+# split a compute sequence on the sample axis. The one place the kind-1 /
+# kind-2 partition is derived, so nothing downstream carries a clock list.
+split_cross_sample <- function(clock_ids) {
+  hit <- vapply(clock_ids, clock_is_cross_sample, logical(1L))
+  list(per_sample = clock_ids[!hit], cross_sample = clock_ids[hit])
+}
+
 # member clock_id -> sex and alias (callable-pool source)
 sex_routed_members <- function() {
   sex <- character(0)

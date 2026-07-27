@@ -11,7 +11,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // col_stats
-NumericMatrix col_stats(NumericMatrix obj);
+List col_stats(NumericMatrix obj);
 RcppExport SEXP _methylCIPHERv2_col_stats(SEXP objSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
