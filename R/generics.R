@@ -22,6 +22,59 @@ print.mc_result <- function(x, n = 6L, k = 4L, ...) {
   invisible(x)
 }
 
+# scores as a plain n x k double matrix
+#' @export
+as.matrix.mc_result <- function(x, ...) {
+  x[["scores"]]
+}
+
+# scores as a data.frame: the id column plus one column per clock. No pheno --
+# that stays on $pheno / augment(), so it cannot leak into an analysis by accident.
+#' @export
+as.data.frame.mc_result <- function(x, ...) {
+  s <- x[["scores"]]
+  id <- x[["provenance"]][["pheno_id"]]
+  out <- data.frame(
+    .id = rownames(s),
+    s,
+    check.names = FALSE,
+    stringsAsFactors = FALSE,
+    row.names = NULL
+  )
+  names(out)[1L] <- id
+  out
+}
+
+# analysis-ready table: scores + id + the aligned covariates the record carries
+# (Age/Female/...), plus an optional user data.frame joined by the id column.
+# This is the covariate-appended view for downstream modelling -- e.g.
+# lm(Horvath1 ~ Age + Female, data = augment(res)).
+#' @export
+augment <- function(x, data = NULL, ...) {
+  check_mc_result(x)
+  id <- x[["provenance"]][["pheno_id"]]
+  out <- as.data.frame(x)
+
+  pheno <- x[["pheno"]]
+  if (!is.null(pheno) && ncol(pheno) > 1L) {
+    out <- merge(out, pheno, by = id, all.x = TRUE, sort = FALSE)
+  }
+  if (!is.null(data)) {
+    data <- as.data.frame(data)
+    if (!id %in% names(data)) {
+      cli::cli_abort(
+        c(
+          "{.arg data} must have the id column {.field {id}} to join on.",
+          "i" = "It is joined to the scores by sample id."
+        ),
+        call = NULL
+      )
+    }
+    out <- merge(out, data, by = id, all.x = TRUE, sort = FALSE)
+  }
+  out
+}
+
 # rbind is refused -- re-run calc_clocks() on the combined DNAm instead
 #' @export
 rbind.mc_result <- function(...) {

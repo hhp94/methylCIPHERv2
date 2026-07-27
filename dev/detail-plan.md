@@ -65,11 +65,16 @@ methods so no operation loses data:
 | `[` | subset rows/cols of `$scores` **and** the matching pheno/coverage/provenance -> `mc_result` |
 | `cbind` | bind score columns; require equal `sample_id` sets (read straight off `$provenance$sample_id`) |
 | `rbind` | **refuses** -- stacking samples leaves any cohort-dependent score computed against the wrong cohort. Score per cohort, bind the `as.data.frame()` outputs |
-| `augment` | join `$scores` to a table by sample id (generic imported from `generics`) |
+| `augment` | analysis-ready table: `as.data.frame()` + the record's aligned covariates (`$pheno`) + an optional user `data` joined by sample id. Plain exported function, not a `broom` generic (avoids the clash). Built. |
+
+Built so far: `print`, `as.matrix`, `as.data.frame`, `augment`. Still unbuilt: `[`, `cbind`.
 
 Not methods: `clocks_coverage()` / `samples_coverage()` format `$coverage` (never re-touch beta) and
-replace the `summary` that earlier drafts listed; `codebook()` and `citation()` are plain functions,
-since `utils::citation` is not an S3 generic. See DECISIONS 2026-07-23, 2026-07-24.
+replace the `summary` that earlier drafts listed; `codebook()` and `bibliography()` are plain
+functions (they take a result / clock tokens / `"all"`), since `utils::citation` is not an S3 generic.
+`bibliography()` emits keys + PMIDs + PubMed URLs (+ BibTeX stubs) from the catalog's `bib_key`/`pmid`;
+full BibTeX and `codebook()`'s training-population fields await the upstream `clocks.bib` /
+`master_source_of_truth.csv` sync. See DECISIONS 2026-07-23, 2026-07-24, 2026-07-27.
 
 Rules:
 

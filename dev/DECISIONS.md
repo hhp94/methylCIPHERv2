@@ -128,6 +128,26 @@ expectation.
   moments. So "is my DunedinPACE ~1" stays a separate, still-unbuilt distribution reference; the
   `score_reference` (`ref_mean`/`ref_sd`/`expect_lo`/`expect_hi`) hook from point 4 is where it lands.
 
+**9. Result-object verbs + catalog verbs (`as.matrix`/`as.data.frame`/`augment`/`codebook`/`bibliography`).**
+
+- **`as.data.frame` vs `augment` split is the anti-leak invariant made concrete.** `as.data.frame(res)`
+  is the id column + one column per clock, nothing else. `augment(res)` is that plus the record's
+  aligned covariates (`$pheno`, which only holds what the run required) plus an optional user `data`
+  joined by id -- the covariate-appended table for `lm(clock ~ Age + Female, augment(res, data =
+  pheno))`. Arbitrary pheno never rides `as.data.frame()`, so subject data can't leak onto the normal
+  export path.
+- **`augment` is a plain function, not a `broom` generic.** broom owns the `augment` generic; defining
+  our own would mask/clash when broom is loaded. A plain exported `augment(x, data)` sidesteps it and
+  matches the "citation/codebook are plain functions" precedent.
+- **`codebook` / `bibliography` run on what the catalog actually carries.** `codebook()` presents the
+  scoring-contract metadata (group, `n_cpgs`, computation type, covariates, pmid, `bib_key`, external
+  / batch flags). `bibliography()` emits, per unique publication, the citation key, a readable
+  "Author et al. Year" (parsed from `bib_key`), the PMID, and a PubMed URL -- plus minimal valid
+  BibTeX stubs on `format = "bibtex"`. **Full BibTeX** (titles/authors from `clocks.bib`) and
+  **codebook training-population/phenotype fields** (from `master_source_of_truth.csv`) are the same
+  deferred metadata sync as the score-distribution and age-range references; the functions are shaped
+  to absorb that data when it lands.
+
 **8. Coverage verdict is graded by fraction, and plots are sized down.**
 
 - **Coverage: partial != fail.** The verdict marked coverage FAIL if *any* clock dropped below 0.5, so
