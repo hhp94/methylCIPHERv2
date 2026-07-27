@@ -12,7 +12,227 @@ second-guessed; do not restate rules already stated in the migration / detail pl
 
 ---
 
-## 2026-07-26 (latest) -- chunking is a wrapper that pre-imputes; the seam is a hoist, not an argument
+## 2026-07-27 (latest) -- `normalize=` is an argument, not `prep()`; BMIQ defaults off and drops where QN fills
+
+**Decision.** Per-clock normalization is controlled by `normalize=`, a named logical argument on
+`calc_clocks()` and `sim_DNAm()` -- `normalize = c(Horvath1 = TRUE)`, or a bare scalar policy.
+`resolve_normalize()` (`R/resolve_inputs.R`) turns it into one decision per clock in the compute
+sequence, before any DNAm is read. Constitutive schemes are on and cannot be declined; everything
+else defaults **off**.
+
+**This decouples normalization from `prep()`, and retracts the framing above.** The entry below has
+`prep()` as "where per-clock normalization is decided". That conflated two features: a *policy*
+(a small named vector) and a *data structure* (the per-clock prepared matrices, potentially 24.7 GB).
+The policy needs no record -- it is an argument that flows to where normalization already happens,
+inside the clock's branch. `prep()` remains worth building as an **audit** feature ("what number did
+Horvath1 actually multiply?"), but nothing about normalization control waits on it, and `prep()`
+takes the same `normalize=` argument when it lands. Building them together would have blocked a
+2-day change on a multi-week one.
+
+**Constitutive vs declinable is read off the scheme, not a new upstream field.** The entry below
+asks upstream for that declaration. Upstream shipped the narrowing (below) but **no such field** --
+Horvath1 and Knight declare `normalization: ["BMIQ"]` exactly as DunedinPACE declares
+`["quantile"]`. Resolving it from the scheme is acceptable where a clock-id exception would not be:
+`NORM_CONSTITUTIVE` is a value in a closed enum that upstream owns, so a new BMIQ clock inherits the
+answer with no downstream edit, and adding a third scheme is a one-line change next to the other
+three `NORM_*` constants. If upstream ever needs a per-clock override of the scheme-level answer,
+that is when the field becomes necessary.
+
+**Upstream state, replacing the census below.** meta `a7148b3` narrowed `normalization` from 7 BMIQ
+clocks to **2**: EpiTOC, EpiTOC2, HypoClock, Mayne and PedBE went to `["none"]` (generic type-2
+corrections and training-side sentences, not scoring contracts), leaving Horvath1 and Knight. It
+also **vendored the calibration target**, reversing 2026-07-26's "the BMIQ gold standard is
+deliberately NOT vendored": `goldstandard2.csv.gz`, 21,368 probes, new `bmiq_gold_standard`
+probe_set role, committed once per group. Verified downstream: both scoring panels are strict
+subsets of that panel (353/353, 148/148), and the two vendored copies are `identical()` as R
+objects -- same probes, same order, same values. So the panel union across both clocks is exactly
+21,368 and there is nothing to union; `dedup_panels()` already collapses them.
+
+**Default `FALSE` for Horvath1 and Knight, deliberately, with a known cost.** `TRUE` would match
+Horvath's calculator; upstream measured a **7.7 year** gap without calibration. `FALSE` wins anyway
+on three counts: it is a no-op on existing behavior, so no silent numeric change; BMIQ needs 21,368
+probes present to fit a meaningful mixture and most callers on targeted panels have ~353, where
+defaulting on would silently produce a bad calibration; and it is what the ecosystem does (biolearn
+defines these with no preprocess, methylclock's `normalize` argument is dead code). It also keeps
+**Knight's parity untouched** -- its fixture is a `frozen_reference` on raw betas, so a default of
+`TRUE` would have turned two green `core` rows red. Reversing the default later is one constant.
+
+**BMIQ drops absent probes; QN fills them. This asymmetry is the point.** `score_Dunedin()` fills
+fully-absent norm CpGs with the gold mean itself and then quantile-normalizes the full panel.
+Copying that for BMIQ would be wrong, not merely different: BMIQ estimates the **sample's** own
+3-state mixture from the panel, so injecting values drawn from the **target** distribution pulls the
+sample's fit toward the gold standard and shrinks the correction being computed -- silently, and
+more the more probes are missing. Dropping keeps the fit on real observations. Absent scoring CpGs
+are then handled by the clock's declared `policy: "omit"` exactly as today, and partial NAs are
+already filled from the cohort-mean cache upstream, so `bmiq_calibration()` never sees an NA.
+Consequence: the thin-background warning's "Missing background CpGs are filled from the reference
+mean" is false for a BMIQ clock and must become scheme-aware.
+
+**No tuning surface.** `normalize=` takes a logical, never a per-clock options list. Every BMIQ
+setting is fixed at Horvath's published choice (`nL = 3`, `doH = TRUE`, `th1.v = c(0.2, 0.75)`,
+`niter = 5`, `tol = 0.001`), with `nfit = ncol(panel)` the single departure -- fit on every present
+probe rather than a 20,000 subsample, since the panel is only 21,368 and a caller who wants
+different preprocessing can do it to their own matrix before scoring. Determinism is not at risk:
+`betanorm::draw_fit_indices()` saves and restores `.Random.seed` around a fixed seed, so scoring
+neither consumes nor perturbs the caller's RNG stream.
+
+**It adds a branch rather than collapsing one, and that is the drop-vs-fill decision showing up in
+the routing.** The plan predicted `score_Dunedin()` would generalize into one normalize-then-linear
+branch serving both schemes. It cannot: the two schemes disagree about what an absent probe *is*.
+Rerouting DunedinPACE through the shared linear engine would change its numbers whenever a scoring
+CpG is absent -- today it fills that CpG with the gold mean and normalizes it, where the linear
+engine would drop it or take a vendored offset -- so it would put a currently-passing parity clock
+at risk to serve a tidiness goal. `score_Dunedin()` therefore stays as-is and `score_normalized()`
+is a second pre-transform branch, tagged `normalized` and routed by declaration
+(`clock_norm_scheme(p) %in% NORM_SCHEMES`, catalog-only so the smoke tier still proves totality).
+What *is* shared is everything after the transform: `linear_predictor()` / `linear_score()` gained
+one optional `observed` argument, so the normalized branch reuses the policy handling, covariate
+terms, mean reduction and output transform instead of reimplementing them.
+
+**Row-level failure is now a third kind, and `samples_coverage()` does not yet report it.** BMIQ runs
+`on.sample.error = "continue"` with `failed.sample = "NA"`, so a sample whose mixture fit fails gets
+an NA score while the cohort completes -- deliberately, since aborting a run over one sample is
+harsh and an NA is visible. But a reader then cannot tell *why* a row is NA: missing pheno, excessive
+NA, and now a failed calibration all land the same way. `betanorm::bmiq_calibration()` returns a
+per-sample `$success` vector, which is the signal a future `samples_coverage()` row-reason column
+should carry.
+
+**The `horvath` parity block stays skipped, and BMIQ does not change that.** `Horvath1@cohort_450K`
+looked like the one fixture where calibration is the *sole* difference from the oracle -- it
+declares no `missing` block, so zero absent scoring CpGs -- and therefore the one candidate for
+un-skipping now that `normalize = c(Horvath1 = TRUE)` exists. The measurement already on record
+(detail-plan sec 12) closes it: `betanorm::bmiq_calibration()` improves that pair **140x, to
+1.9e-3**, which is seven orders of magnitude outside `PARITY_ABS_TOL["horvath"]` (`1e-10`). Moving
+that bound would be an argument about algorithmic agreement, and the only licence this table has is
+about units. So BMIQ's numeric gate is the always-on golden in `test-normalize.R`, not parity --
+which is a thinner gate than a fixture and should be understood as such.
+
+## 2026-07-27 (later) -- `prep()` is a lazy per-clock plan; normalization is decided per clock, from declarations
+
+**Decision.** Add `prep(DNAm, clocks, ...)` (plan Phase 7): an S3 record, list-like and keyed by
+clock id, whose element for a clock is the matrix that clock's coefficients multiply -- its panel,
+imputed clock-wise and panel-wise, with its normalization applied or not. `calc_clocks()` accepts a
+`DNAm` or a `prep`. This invents no boundary: `score_cohort()` already factors as `score(prep(...))`,
+so Phase 7 makes an existing seam public.
+
+**Lazy, and that is forced by measurement.** `Sigma |panel_i|` against the union is 53,127 / 39,025
+(**1.36x**) over the 101 bundled clocks but 3,083,623 / 378,363 (**8.15x**) over the 28 pack clocks --
+PCBrainAge alone declares 357,852 CpGs, the 13 SystemsAge organ clocks 125,175 each, the 14 PCClocks
+78,464 each. Eager materialization at n=1000 is 425 MB bundled and **24.7 GB** external, against a
+~6.9 GB full-EPIC input: 3.6x the matrix being prepared. So the record holds a plan (DNAm reference,
+the shared cohort-mean cache, per-clock panel spec, per-clock normalization decision) and
+materializes one clock at a time; peak RSS is unchanged from today. `materialize()` is the opt-in
+eager form, which the bundled set can always afford.
+
+**Why `prep()` does not return one prepared matrix.** Neither form is well defined. Imputation is
+per clock -- a fully absent CpG takes the clock's own vendored ref as a scoring CpG and the
+gold-standard mean as a normalization CpG (`score_Dunedin.R`'s `fill_ref` split), so the same probe
+gets different numbers depending on which clock asks. Normalization is per clock -- different panels,
+different targets, and normalizing the shared input would silently change what every non-normalizing
+clock is scored on. The only line that exists is cohort-global vs clock-specific: cohort means are
+hoisted, everything else stays in the branch. `prep()` is a list because of that, not in spite of it.
+This also disposes of a `prep()`-as-pipeline-stage reading, in which imputation would have to be
+hoisted out too -- there is nothing hoistable left to hoist.
+
+**Normalization state, which is worse than it looked.** `normalization` is non-`none` on 9 clocks
+(`BMIQ` x7: EpiTOC, EpiTOC2, Horvath1, HypoClock, Knight, Mayne, PedBE; `noob` x1: Horvath2;
+`quantile` x1: DunedinPACE), but **DunedinPACE is the only clock in the catalog with a normalization
+probe_set and a target file pointer**. BMIQ is declared on seven clocks and implemented nowhere;
+`normalization: "BMIQ"` is a bare string with no artifacts behind it. `noob` is moot -- an
+IDAT-intensity background correction, always done upstream, unreachable from a beta matrix.
+
+**Horvath1's BMIQ is the DunedinPACE shape, not a whole-array transform.** Per the maintainer it
+picks ~21k probes (a superset of its 353) and normalizes each sample against a vendored golden-mean
+vector -- structurally identical to PACE's declared 20,000-CpG background plus gold target, and
+matching `betanorm::bmiq_calibration(datM, goldstandard.beta, ...)`, which already takes exactly that
+`(matrix, target)` shape. So it generalizes the existing branch rather than needing a new category:
+`dunedin_gold_means()` becomes a scheme-agnostic target accessor and the branch becomes
+normalize-then-linear dispatching on `clock_norm_scheme()` -- the existing **pre-transform** kind, no
+new entry in the closed branch set. An earlier framing of BMIQ as an unavoidably whole-array
+operation was wrong for Horvath1 and is retracted.
+
+**Two facts upstream must declare, per clock.** (1) Is the normalization expressible as a declared
+panel plus a vendored target? If not (genuine whole-array BMIQ needing type I/II annotation) it is
+not expressible in the catalog at all and stays the caller's preprocessing. (2) Is it **constitutive
+or published preprocessing**? PACE's QN is part of the clock's definition and cannot be disabled;
+Horvath1's BMIQ is what the published pipeline did and a caller may decline it. Without that field,
+"PACE cannot be turned off" becomes a hardcoded clock-id exception, which the declared-routing
+invariants exist to prevent.
+
+**No chunking cost.** `quantile_norm()` is per-sample against a fixed target and measured
+bit-identical on a row subset (max abs diff 0); BMIQ fits its mixture within a sample. Neither adds
+to `cross_sample_at`, so Phases 2/3 are untouched. When a BMIQ clock lands, Horvath1 goes from
+needing 353 CpGs to 353 to score plus ~21,000 to normalize -- the shape the norm-panel coverage axis
+and the 2026-07-23 gate split already handle, at which point CLAUDE.md's "(only DunedinPACE)"
+parenthetical about norm panels goes stale.
+
+---
+
+## 2026-07-27 -- chunking passes a fill vector inward; pre-imputation is rejected, and `expect_identical` is banned
+
+**Reverses 2026-07-26**, below, on its central mechanism. That entry had the chunked wrapper
+pre-impute each block from cohort means and hand a clean matrix to the scorer, and concluded that
+coverage therefore had to be hoisted out of `calc_clocks()` into the wrapper's first pass. Both
+halves are wrong, and the second follows from the first.
+
+**Decision.** The shared scoring internal takes `partial_fill`: a named numeric vector whose names
+are the cohort-partial columns and whose values are the cohort means. Blocks are handed over
+**raw, NAs intact**, and the fill happens inside, in the cache that `mean_imp_col()` builds today.
+Public `calc_clocks()` calls the internal with `partial_fill = NULL` -- derive it locally -- so the
+complete-cohort precondition remains literally true of the public surface and no chunk-aware
+parameter appears on it.
+
+**Why pre-imputation was wrong.** It is score-equivalent and that is exactly the trap: it erases the
+NA pattern, and `count_sample_miss()` reads the NA pattern, not the fill. A pre-filled block reports
+`score_imputed_partial = 0` for every clock, an all-zero `sample_miss`, and a `check_row_coverage()`
+that reduces to a per-clock constant -- a silent breach of "coverage is never reported for a sample
+it is not true of". Passing the vector inward instead keeps the NAs visible exactly where coverage
+counts them, so **the coverage machinery does not move at all** and the hoist that the prior entry
+built its case on is not needed. Assembly is a concatenate of the per-sample vectors plus a sum of
+the two `imputed_partial` scalars; every other `per_clock` field derives from the shared `cpg_list`
+and is already identical in every block.
+
+**The vector's names are the classification, and that is the load-bearing half.** A column that is
+partial cohort-wide can be entirely NA inside one block; `col_miss == nr` would call it structurally
+absent and route it to vendor-ref-or-drop. So when `partial_fill` is supplied the column half of
+`scan_missing_cpgs()` is **bypassed, not overridden** -- one source of truth, never a local
+computation a caller corrects afterwards. The row half (the all-NA-sample abort) is per-row, correct
+against a block, and stays.
+
+**What the seam is now.** Still a split of `calc_clocks()` into `mc_spec()` / `mc_cohort()` /
+`score_cohort()`, but justified by sharing and by cohort-set predicates (id uniqueness, the pheno
+union, column classification, means, the clocks gate) -- not by coverage, which no longer has a
+problem to solve.
+
+**Phase 0 (`partial_cache` becomes a mean vector) is deleted, not deferred.** It was justified as a
+memory win and measurement does not support it: against the current `mean_imp_col()` cache, a mean
+vector with per-clock refill ran 2-5x slower with peak RSS within 1-2% (n=2000-8000, union
+8k-30k probes, 40 panels). The persistent `n x k` cache is real but is not the binding constraint
+next to `DNAm` itself, and the per-clock slice is a fresh allocation in either design, so nothing is
+saved by not materializing the cache. Measured overlap across the 101 bundled panels is only 1.36x
+(union 39,025 CpGs, `Sigma |panel_i|` 53,127), so the amortization the cache buys is modest -- but
+modest and free beats a regression.
+
+**Two kernels are ours, in this package's C++.** The package is going Rcpp so the `betanorm`
+normalization functions can be vendored in and the dependency dropped; `fill_imp_col(obj, values,
+subset)` and `col_stats(obj)` (per-column sum / n_non_na / n_na / min / max in one traversal) land
+there rather than in `slideimp`. `fill_imp_col()` must **slice and fill in one traversal returning a
+new matrix**, never mutate in place: the slice is already a fresh allocation, so in-place buys
+nothing, and a kernel that can reach the caller's `DNAm` corrupts it invisibly. A pure-R fill is the
+2-5x regression measured above, which is what makes the kernel load-bearing rather than a
+convenience.
+
+**`expect_identical()` is banned package-wide; use `expect_equal()`.** `identical()` is bit-exact on
+doubles and also trips on differences that carry no meaning here (integer vs double storage, a
+dropped attribute, a name reordering), so a result correct to every digit anyone can act on fails
+with a diagnostic that reads like a numeric regression. Chunking makes this concrete: a single pass
+sums a column in one traversal, a chunked run sums block by block, and the association order alone
+moves the mean in the last bit. Where a bound is the actual claim, state it
+(`expect_equal(x, y, tolerance = ...)`). Recorded in CLAUDE.md under "Test altitude".
+
+---
+
+## 2026-07-26 -- chunking is a wrapper that pre-imputes; the seam is a hoist, not an argument
 
 **Decision.** `calc_clocks()` always assumes its `DNAm` is a **complete cohort** -- a precondition,
 never a parameter. Chunked scoring becomes a separate front end that pre-imputes each chunk from

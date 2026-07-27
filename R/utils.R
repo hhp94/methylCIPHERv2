@@ -5,6 +5,20 @@ bullets <- function(x) {
   stats::setNames(x, rep("*", length(x)))
 }
 
+# betanorm is a soft dep; every normalizing branch needs it
+require_betanorm <- function(id) {
+  if (!requireNamespace("betanorm", quietly = TRUE)) {
+    cli::cli_abort(
+      c(
+        "{.val {id}} needs the {.pkg betanorm} package for normalization.",
+        "i" = "Install it from GitHub: {.code pak::pak(\"hhp94/betanorm\")}."
+      ),
+      call = NULL
+    )
+  }
+  invisible(TRUE)
+}
+
 # present CpGs covered by the cohort-mean cache
 cached_cols <- function(present, partial_cache) {
   if (is.null(partial_cache)) {

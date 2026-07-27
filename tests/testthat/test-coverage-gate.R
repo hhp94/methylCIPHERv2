@@ -42,7 +42,7 @@ test_that("a failing clock stops the call before other clocks score", {
 
 test_that("a sparse normalization panel warns but still scores (does not stop)", {
   skip_if_not_installed("betanorm")
-  gold <- names(dunedin_gold_means("DunedinPACE"))
+  gold <- names(clock_norm_target("DunedinPACE"))
   model <- clock_scoring_cpgs("DunedinPACE")
 
   keep <- union(model, gold[seq_len(round(0.5 * length(gold)))])

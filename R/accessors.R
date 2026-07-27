@@ -130,24 +130,40 @@ clock_scoring_cpgs <- function(id, packs = NULL) {
   probe_sets_cpgs(entry, "scoring")
 }
 
-# normalization/background panel, character(0) when none
-clock_norm_cpgs <- function(id) {
-  probe_sets_cpgs(clock_entry(id), "quantile_normalization_background")
+# probe_set roles carrying a background panel plus the target it calibrates onto
+NORM_ROLES <- c("quantile_normalization_background", "bmiq_gold_standard")
+
+# schemes expressible as a declared panel + a vendored target
+NORM_SCHEMES <- c("quantile", "bmiq")
+
+# schemes that are part of the clock's definition and cannot be declined
+NORM_CONSTITUTIVE <- "quantile"
+
+# normalization panel for one clock, character(0) unless it normalizes
+clock_norm_cpgs <- function(id, normalize = FALSE) {
+  if (!isTRUE(normalize)) {
+    return(character(0))
+  }
+  entry <- clock_entry(id)
+  cpgs <- unlist(
+    lapply(NORM_ROLES, function(role) probe_sets_cpgs(entry, role)),
+    use.names = FALSE
+  )
+  if (is.null(cpgs)) character(0) else unique(cpgs)
 }
 
-# declared quantile-normalization background probe_set, or error
-qn_background_probe_set <- function(id) {
+# declared background probe_set (any NORM_ROLES role), or error
+norm_background_probe_set <- function(id) {
   ps <- pick_one(
     clock_entry(id)[["probe_sets"]],
-    function(p) identical(p[["role"]], "quantile_normalization_background"),
-    "quantile_normalization_background probe_sets",
+    function(p) p[["role"]] %in% NORM_ROLES,
+    "normalization background probe_sets",
     id
   )
   if (!length(ps[["file"]])) {
     cli::cli_abort(
       c(
-        "{.val {id}}: quantile_normalization_background probe_set has no
-         file pointer.",
+        "{.val {id}}: normalization background probe_set has no file pointer.",
         CATALOG_BUG
       ),
       call = NULL
@@ -156,12 +172,12 @@ qn_background_probe_set <- function(id) {
   ps
 }
 
-# gold-standard QN target means, or NULL when the clock needs no QN
-dunedin_gold_means <- function(id) {
-  if (!identical(clock_norm_scheme(id), "quantile")) {
+# vendored normalization target, or NULL when the scheme is not expressible
+clock_norm_target <- function(id) {
+  if (!(clock_norm_scheme(id) %in% NORM_SCHEMES)) {
     return(NULL)
   }
-  ps <- qn_background_probe_set(id)
+  ps <- norm_background_probe_set(id)
   bundle_tensor(clock_group_id(id), ps[["file"]])
 }
 
@@ -193,9 +209,23 @@ sex_routed_members <- function() {
   list(sex = sex, alias = alias)
 }
 
-# paper-assumed array-normalization scheme (annotation only)
+# declared array-normalization scheme, lowercased; "none" when absent
 clock_norm_scheme <- function(id) {
-  as.character(optional_field(id, "normalization", character(0)))
+  scheme <- tolower(as.character(optional_field(id, "normalization", "none")))
+  if (!length(scheme)) {
+    return("none")
+  }
+  if (length(scheme) > 1L) {
+    cli::cli_abort(
+      c(
+        "{.val {id}} declares {length(scheme)} normalization schemes
+         ({.val {scheme}}); exactly one is supported.",
+        CATALOG_BUG
+      ),
+      call = NULL
+    )
+  }
+  scheme
 }
 
 # per-cohort parity fixture blocks (one per registry cohort), or NULL

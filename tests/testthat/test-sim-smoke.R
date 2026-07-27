@@ -13,7 +13,8 @@ for (id in bundled_smoke_clocks()) {
   local({
     clock_id <- id
 
-    needs_betanorm <- identical(clock_norm_scheme(clock_id), "quantile")
+    # does this clock normalize in the default configuration?
+    needs_betanorm <- isTRUE(resolve_normalize(NULL, clock_id)[[clock_id]])
     test_that(paste0("sim_DNAm smoke: ", clock_id), {
       if (needs_betanorm) {
         skip_if_not(betanorm_installed, "betanorm not installed")

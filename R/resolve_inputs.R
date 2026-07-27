@@ -354,8 +354,88 @@ dedup_panels <- function(panels) {
   list(uniq = uniq, idx = idx)
 }
 
+# per-clock normalization decision, keyed by clock id. Data-independent, so it
+# is resolved once before any DNAm is touched.
+resolve_normalize <- function(normalize, clock_sequence) {
+  schemes <- vapply(clock_sequence, clock_norm_scheme, character(1))
+  names(schemes) <- clock_sequence
+  # constitutive normalization is on by default; everything else is opt-in
+  out <- stats::setNames(schemes %in% NORM_CONSTITUTIVE, clock_sequence)
+
+  if (!is.null(normalize) && length(normalize)) {
+    checkmate::assert_logical(normalize, any.missing = FALSE)
+    nm <- names(normalize)
+
+    if (is.null(nm)) {
+      if (length(normalize) != 1L) {
+        cli::cli_abort(
+          c(
+            "{.arg normalize} must be one {.code TRUE}/{.code FALSE} or a
+             named logical vector, got {length(normalize)} unnamed values.",
+            "i" = "Name them by clock id, e.g.
+                   {.code normalize = c(Horvath1 = TRUE)}."
+          ),
+          call = NULL
+        )
+      }
+      # a bare policy is a wish, not a claim about any one clock: it reaches
+      # the clocks that can honor it and passes over the ones that cannot
+      out[clock_sequence[
+        schemes %in% setdiff(NORM_SCHEMES, NORM_CONSTITUTIVE)
+      ]] <- normalize
+    } else {
+      unknown <- setdiff(nm, clock_sequence)
+      if (length(unknown)) {
+        cli::cli_abort(
+          c(
+            "{.arg normalize} names {cli::qty(unknown)} clock{?s}
+             {.val {unknown}} that {cli::qty(unknown)}{?is/are} not being
+             scored.",
+            "i" = "Name only clocks reached by {.arg clocks}."
+          ),
+          call = NULL
+        )
+      }
+      # a request the catalog cannot express is an error; declining a scheme
+      # the clock never declared is merely redundant
+      unusable <- nm[normalize & !(schemes[nm] %in% NORM_SCHEMES)]
+      if (length(unusable)) {
+        declared <- unique(unname(schemes[unusable]))
+        cli::cli_abort(
+          c(
+            "Cannot normalize {.val {unusable}}: {cli::qty(unusable)}
+             {?it declares/they declare} {.val {declared}}.",
+            "i" = "Only {.val {NORM_SCHEMES}} are expressible as a declared
+                   panel plus a vendored target."
+          ),
+          call = NULL
+        )
+      }
+      fixed <- nm[!normalize & schemes[nm] %in% NORM_CONSTITUTIVE]
+      if (length(fixed)) {
+        declared <- unique(unname(schemes[fixed]))
+        cli::cli_abort(
+          c(
+            "Cannot decline normalization for {.val {fixed}}.",
+            "i" = "{cli::qty(fixed)}{?Its/Their} {.val {declared}}
+                   normalization is part of the clock definition, not
+                   preprocessing."
+          ),
+          call = NULL
+        )
+      }
+      out[nm] <- normalize
+    }
+  }
+
+  out
+}
+
 # scoring + norm panels for the compute sequence (load packs first)
-clock_panels <- function(clock_sequence, packs = NULL) {
+clock_panels <- function(clock_sequence, packs = NULL, normalize = NULL) {
+  if (is.null(normalize)) {
+    normalize <- resolve_normalize(NULL, clock_sequence)
+  }
   list(
     clock_id = clock_sequence,
     score = dedup_panels(lapply(
@@ -363,7 +443,10 @@ clock_panels <- function(clock_sequence, packs = NULL) {
       clock_scoring_cpgs,
       packs = packs
     )),
-    norm = dedup_panels(lapply(clock_sequence, clock_norm_cpgs))
+    norm = dedup_panels(lapply(
+      clock_sequence,
+      function(cid) clock_norm_cpgs(cid, normalize[[cid]])
+    ))
   )
 }
 
@@ -517,12 +600,23 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
   )
   thin <- thin[!is.na(thin)]
   if (length(thin)) {
+    # the two schemes treat an absent background CpG differently
+    thin_schemes <- unique(vapply(names(thin), clock_norm_scheme, character(1)))
+    fate <- if (all(thin_schemes == "bmiq")) {
+      "Absent background CpGs are dropped from the calibration fit."
+    } else if (any(thin_schemes == "bmiq")) {
+      "Absent background CpGs are dropped from a BMIQ fit, and filled from
+       the reference mean for quantile normalization."
+    } else {
+      "Missing background CpGs are filled from the reference mean."
+    }
     cli::cli_warn(
       c(
         "{length(thin)} clock{?s} {?has/have} a thin normalization background
          (under {.arg min_clocks_coverage} = {format(threshold)}):",
         coverage_bullets(thin),
-        "i" = "Missing background CpGs are filled from the reference mean."
+        "i" = fate,
+        "i" = "{.fn clocks_coverage} reports the panel counts per clock."
       ),
       call = NULL
     )

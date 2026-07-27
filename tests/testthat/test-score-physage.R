@@ -26,8 +26,8 @@ test_that("absent surrogate CpGs vendor-fill by offset under mean reduction", {
   )
 
   cov <- res2$coverage$per_clock[["DNAmCRP"]]
-  expect_identical(cov$score_imputed_full, 5L)
-  expect_identical(cov$score_dropped, 0L)
+  expect_equal(cov$score_imputed_full, 5L)
+  expect_equal(cov$score_dropped, 0L)
 })
 
 test_that("PhysAge composites run and need >= 2 samples", {

@@ -26,9 +26,15 @@ linear_predictor <- function(
   DNAm,
   partial_cache = NULL,
   pheno = NULL,
-  id = "<component>"
+  id = "<component>",
+  observed = NULL
 ) {
-  obs <- observed_panel(score_present, DNAm, partial_cache)
+  # `observed` lets a pre-transform branch supply already-normalized betas
+  obs <- if (is.null(observed)) {
+    observed_panel(score_present, DNAm, partial_cache)
+  } else {
+    observed
+  }
   cpg_contrib <- obs$values %*% coef[obs$cols]
 
   cov_contrib <- 0
@@ -62,7 +68,8 @@ linear_score <- function(
   DNAm,
   partial_cache = NULL,
   pheno = NULL,
-  packs = NULL
+  packs = NULL,
+  observed = NULL
 ) {
   id <- cpgs$clock_id
   policy <- clock_impute(id)[["policy"]]
@@ -88,7 +95,8 @@ linear_score <- function(
     DNAm = DNAm,
     partial_cache = partial_cache,
     pheno = pheno,
-    id = id
+    id = id,
+    observed = observed
   )
 
   if (vendor_mean) {

@@ -117,7 +117,7 @@ test_that("calc_clocks() scores PCBrainAge end-to-end from an in-memory pack (cl
   expect_equal(nrow(res$scores), 3L)
   expect_false(anyNA(res$scores))
 
-  expect_identical(res$coverage$per_clock$PCBrainAge$score_imputed_full, 0L)
+  expect_equal(res$coverage$per_clock$PCBrainAge$score_imputed_full, 0L)
 })
 
 test_that("calc_clocks() vendor-fills absent external CpGs from the pack $impute vector", {
@@ -128,7 +128,7 @@ test_that("calc_clocks() vendor-fills absent external CpGs from the pack $impute
   res <- calc_clocks(DNAm, "PCBrainAge", from = pcba_pack)
   expect_false(anyNA(res$scores))
 
-  expect_identical(res$coverage$per_clock$PCBrainAge$score_imputed_full, 5L)
+  expect_equal(res$coverage$per_clock$PCBrainAge$score_imputed_full, 5L)
 })
 
 test_that("calc_clocks() on an external clock errors (closed set) when its pack is absent", {
@@ -200,18 +200,18 @@ test_that("calc_clocks() vendor-fills absent SystemsAge CpGs from the pack $impu
   res <- calc_clocks(DNAm, "Age_prediction", from = sa_pack)
   expect_false(anyNA(res$scores))
   cov <- res$coverage$per_clock$Age_prediction
-  expect_identical(cov$score_imputed_full, 4L)
+  expect_equal(cov$score_imputed_full, 4L)
 })
 
 # accessors over a pack (shares the pack builders above).
 
 test_that("external accessors read the named column and impute vector from the pack", {
   packs <- list(PCClocks = pcc_pack)
-  expect_identical(
+  expect_equal(
     clock_coefs("PCADM", packs),
     stats::setNames(pcc_pack$coefficient_matrix[, "PCADM"], pcc_cpgs)
   )
-  expect_identical(
+  expect_equal(
     clock_impute_ref("PCADM", packs),
     stats::setNames(pcc_pack$impute, pcc_cpgs)
   )
@@ -231,7 +231,7 @@ test_that("external accessors error without the group's pack, or without its col
 })
 
 test_that("bundled clocks ignore `packs` and still resolve from mc_bundles", {
-  expect_identical(
+  expect_equal(
     clock_coefs("Hannum"),
     clock_coefs("Hannum", list(PCClocks = pcc_pack))
   )

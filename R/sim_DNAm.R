@@ -13,6 +13,7 @@ sim_DNAm <- function(
   Age = FALSE,
   Female = FALSE,
   remove = 0,
+  normalize = NULL,
   from = NULL,
   ask = TRUE
 ) {
@@ -21,8 +22,9 @@ sim_DNAm <- function(
   checkmate::assert_int(remove, lower = 0)
 
   clock_sequence <- resolve_clocks_sequence(resolve_clocks(clocks))
+  normalize <- resolve_normalize(normalize, clock_sequence)
   packs <- load_mc_assets(pack_groups_needed(clock_sequence), from, ask)
-  cpgs <- clock_cpgs(clock_sequence, packs)
+  cpgs <- clock_cpgs(clock_sequence, packs, normalize)
   if (remove > 0) {
     n_drop <- min(remove, length(cpgs))
     cpgs <- cpgs[-sample.int(length(cpgs), n_drop)]
@@ -72,14 +74,17 @@ print.mc_sim <- function(x, n = 6, p = 6, ...) {
   invisible(x)
 }
 
-clock_cpgs <- function(clock_ids, packs = NULL) {
+clock_cpgs <- function(clock_ids, packs = NULL, normalize = NULL) {
+  if (is.null(normalize)) {
+    normalize <- resolve_normalize(NULL, clock_ids)
+  }
   results <- lapply(clock_ids, function(cid) {
     scoring <- clock_scoring_cpgs(cid, packs)
     if (!length(scoring)) {
       # sex-routed aliases own no panel
       return(if (length(clock_depends_on(cid))) character(0) else NULL)
     }
-    c(scoring, clock_norm_cpgs(cid))
+    c(scoring, clock_norm_cpgs(cid, normalize[[cid]]))
   })
   unresolved <- clock_ids[vapply(results, is.null, logical(1))]
 

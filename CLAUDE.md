@@ -286,6 +286,15 @@ refactor is too tight -- loosen or delete it.
   otherwise bind anything from `data-raw/` in a test.
 - **Errors: assert *that*, not the wording.** `expect_error(expr)` with no regex. Pin a message or
   condition class only when a test must otherwise confuse two distinct failure modes.
+- **Never `expect_identical()`. Always `expect_equal()`.** `expect_identical()` compares with
+  `identical()`, which is bit-exact on doubles and also fails on differences that carry no meaning
+  here -- integer vs double storage, an attribute that got dropped or added, a name reordering.
+  Floating-point results that are correct to every digit anyone can act on still fail it, and the
+  failure looks like a real numeric regression, so time gets spent chasing a last-bit difference in
+  a summation order. `expect_equal()` applies a tolerance by default and is the right altitude for
+  everything in this package, including counts. Where a bound is the actual point -- chunk
+  invariance, parity -- state it explicitly (`expect_equal(x, y, tolerance = 1e-12)`), which is a
+  claim about how close is close enough rather than an accident of how the number was reached.
 - **No internal dispatch-tag tables.** Do not hard-code `clock_reduction()` / `score_type()` per
   clock; prove routing through output. The one allowed invariant: every catalog clock maps to a
   *known* tag -- and since `score_type()` stops otherwise, that test also proves the catalog

@@ -61,16 +61,16 @@ local_fake_registry <- function(rows, .env = parent.frame()) {
 test_that("the assets dir resolves arg > option > env > default", {
   withr::local_options(mc.assets_dir = NULL)
   withr::local_envvar(MC_ASSETS_DIR = NA)
-  expect_identical(get_mc_assets_dir(), mc_default_assets_dir())
+  expect_equal(get_mc_assets_dir(), mc_default_assets_dir())
 
   withr::local_envvar(MC_ASSETS_DIR = "from-env")
-  expect_identical(get_mc_assets_dir(), path.expand("from-env"))
+  expect_equal(get_mc_assets_dir(), path.expand("from-env"))
 
   withr::local_options(mc.assets_dir = "from-option")
-  expect_identical(get_mc_assets_dir(), path.expand("from-option"))
+  expect_equal(get_mc_assets_dir(), path.expand("from-option"))
 
   # an explicit source beats both layers
-  expect_identical(mc_resolve_assets_dir("from-arg"), path.expand("from-arg"))
+  expect_equal(mc_resolve_assets_dir("from-arg"), path.expand("from-arg"))
 })
 
 test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", {
@@ -80,11 +80,11 @@ test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", 
   dir <- withr::local_tempdir()
   old <- set_mc_assets_dir(dir)
   expect_null(old)
-  expect_identical(get_mc_assets_dir(), as.character(fs::path_expand(dir)))
+  expect_equal(get_mc_assets_dir(), as.character(fs::path_expand(dir)))
 
   # the returned value is what restores the previous state
   set_mc_assets_dir(old)
-  expect_identical(get_mc_assets_dir(), mc_default_assets_dir())
+  expect_equal(get_mc_assets_dir(), mc_default_assets_dir())
 
   # a dir that does not exist yet is created, so a bad path fails here and
   # not halfway through a download
@@ -93,7 +93,7 @@ test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", 
   expect_true(dir.exists(nested))
 
   set_mc_assets_dir(NULL)
-  expect_identical(get_mc_assets_dir(), mc_default_assets_dir())
+  expect_equal(get_mc_assets_dir(), mc_default_assets_dir())
   for (bad in list(5, c("a", "b"), "", NA_character_)) {
     expect_error(set_mc_assets_dir(bad))
   }
@@ -107,9 +107,9 @@ test_that("list_mc_assets() answers what exists, what is staged, what is reclaim
 
   # readable before anything is on disk, and without prompting or fetching
   before <- list_mc_assets()
-  expect_identical(before$group_id, "FakeGroup")
+  expect_equal(before$group_id, "FakeGroup")
   expect_false(before$downloaded)
-  expect_identical(before$superseded, 0L)
+  expect_equal(before$superseded, 0L)
   expect_gt(as.numeric(before$size), 0)
   expect_length(list.files(assets), 0)
 
@@ -121,7 +121,7 @@ test_that("list_mc_assets() answers what exists, what is staged, what is reclaim
 
   after <- list_mc_assets()
   expect_true(after$downloaded)
-  expect_identical(after$superseded, 1L)
+  expect_equal(after$superseded, 1L)
   expect_gt(as.numeric(after$superseded_size), 0)
 
   # sizes stay numeric, so a caller can total them
@@ -136,7 +136,7 @@ test_that("the shipped registry covers the three external groups", {
   )
   for (gid in mc_external_groups()) {
     row <- mc_asset(gid)
-    expect_identical(row$group_id, gid)
+    expect_equal(row$group_id, gid)
     expect_gt(row$size_bytes, 0)
   }
 })
@@ -166,7 +166,7 @@ test_that("download_mc_assets() fetches, verifies, and leaves no scratch files",
   local_fake_registry(row)
 
   paths <- suppressMessages(download_mc_assets(ask = FALSE))
-  expect_identical(unname(basename(paths)), row$file)
+  expect_equal(unname(basename(paths)), row$file)
   expect_true(file.exists(file.path(assets, row$file)))
   expect_false(any(grepl(".part", list.files(assets), fixed = TRUE)))
 
@@ -193,7 +193,7 @@ test_that("load_mc_assets() downloads missing packs on consent and returns a nam
 
   packs <- suppressMessages(load_mc_assets("FakeGroup", ask = FALSE))
   expect_named(packs, "FakeGroup")
-  expect_identical(packs[["FakeGroup"]], row$.payload)
+  expect_equal(packs[["FakeGroup"]], row$.payload)
   expect_true(file.exists(file.path(assets, row$file)))
 })
 
@@ -220,7 +220,7 @@ test_that("load_mc_assets() resolves in-memory pack(s) without touching disk", {
   b <- fake_asset(dir, group = "GroupB")
   local_fake_registry(stats::setNames(list(a, b), c("GroupA", "GroupB")))
 
-  expect_identical(
+  expect_equal(
     load_mc_assets("GroupA", from = a$.payload)[["GroupA"]],
     a$.payload
   )
@@ -229,7 +229,7 @@ test_that("load_mc_assets() resolves in-memory pack(s) without touching disk", {
     res <- load_mc_assets("GroupA", from = list(a$.payload, b$.payload))
   )
   expect_named(res, "GroupA")
-  expect_identical(res[["GroupA"]], a$.payload)
+  expect_equal(res[["GroupA"]], a$.payload)
 })
 
 test_that("clear_mc_assets() removes staged packs only on explicit consent", {
@@ -248,7 +248,7 @@ test_that("clear_mc_assets() removes staged packs only on explicit consent", {
   expect_true(file.exists(file.path(assets, row$file)))
 
   removed <- suppressMessages(clear_mc_assets(ask = FALSE))
-  expect_identical(basename(removed), row$file)
+  expect_equal(basename(removed), row$file)
   expect_false(file.exists(file.path(assets, row$file)))
 })
 
@@ -277,7 +277,7 @@ test_that("clear_mc_assets() reclaims superseded packs and spares everything els
   }
 
   expect_named(mc_stale_files(), "FakeGroup")
-  expect_identical(unname(basename(mc_stale_files())), basename(superseded))
+  expect_equal(unname(basename(mc_stale_files())), basename(superseded))
 
   # clear means clear: the current pack and the superseded one both go
   removed <- suppressMessages(clear_mc_assets(ask = FALSE))
@@ -322,8 +322,8 @@ test_that("download -> load -> clear round trips and leaves the assets dir empty
   # staged: loads from disk, needs no consent even with ask = TRUE
   packs <- load_mc_assets("all")
   expect_named(packs, c("GroupA", "GroupB"))
-  expect_identical(packs[["GroupA"]], a$.payload)
-  expect_identical(packs[["GroupB"]], b$.payload)
+  expect_equal(packs[["GroupA"]], a$.payload)
+  expect_equal(packs[["GroupB"]], b$.payload)
 
   removed <- suppressMessages(clear_mc_assets(ask = FALSE))
   expect_setequal(basename(removed), c(a$file, b$file))
@@ -392,5 +392,5 @@ test_that("the real PCBrainAge release asset downloads and verifies", {
   pack <- packs[["PCBrainAge"]]
   row <- mc_asset("PCBrainAge")
   expect_length(pack$cpgs, row$n_cpgs)
-  expect_identical(nrow(pack$coefficient_matrix), row$n_cpgs)
+  expect_equal(nrow(pack$coefficient_matrix), row$n_cpgs)
 })

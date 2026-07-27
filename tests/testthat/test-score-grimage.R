@@ -36,7 +36,7 @@ for (id in c("GrimAgeV1", "GrimAgeV2")) {
       )
       got <- res$scores[, id]
 
-      expect_identical(rownames(res$scores), ids)
+      expect_equal(rownames(res$scores), ids)
       expect_true(is.na(got[bad]))
       expect_true(all(is.finite(got[-bad])))
     }

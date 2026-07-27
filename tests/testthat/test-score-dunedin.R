@@ -25,7 +25,7 @@ test_that("DunedinPoAm38 vendor-fills fully-absent CpGs (score_imputed_full)", {
 # PACE QN golden (always-on proof that normalization runs)
 test_that("DunedinPACE quantile-normalizes the gold panel before the linear score", {
   skip_if_not_installed("betanorm")
-  gold <- dunedin_gold_means("DunedinPACE")
+  gold <- clock_norm_target("DunedinPACE")
   panel <- names(gold)
   DNAm <- random_betas(panel, n = 5L) # full gold-panel coverage, no gates/fill
   res <- calc_clocks(DNAm, "DunedinPACE")
@@ -50,7 +50,7 @@ test_that("DunedinPACE quantile-normalizes the gold panel before the linear scor
 # normalizing clock keeps score- and norm-panel partial fills apart
 test_that("DunedinPACE reports score and norm panel miss separately", {
   skip_if_not_installed("betanorm")
-  norm_panel <- names(dunedin_gold_means("DunedinPACE"))
+  norm_panel <- names(clock_norm_target("DunedinPACE"))
   score_panel <- clock_scoring_cpgs("DunedinPACE")
   norm_only <- setdiff(norm_panel, score_panel)
 
@@ -60,16 +60,16 @@ test_that("DunedinPACE reports score and norm panel miss separately", {
 
   res <- calc_clocks(DNAm, "DunedinPACE", min_samples_coverage = 0)
   sm <- res$coverage$sample_miss
-  expect_identical(colnames(sm$score), "DunedinPACE")
-  expect_identical(colnames(sm$norm), "DunedinPACE")
+  expect_equal(colnames(sm$score), "DunedinPACE")
+  expect_equal(colnames(sm$norm), "DunedinPACE")
 
-  expect_identical(unname(sm$norm[, "DunedinPACE"]), c(1L, 1L, 0L, 0L))
-  expect_identical(unname(sm$score[, "DunedinPACE"]), c(0L, 1L, 0L, 0L))
+  expect_equal(unname(sm$norm[, "DunedinPACE"]), c(1L, 1L, 0L, 0L))
+  expect_equal(unname(sm$score[, "DunedinPACE"]), c(0L, 1L, 0L, 0L))
 
   cov <- res$coverage$per_clock$DunedinPACE
   expect_true(cov$normalizes)
-  expect_identical(cov$score_imputed_partial, 1L) # sample 2 only
-  expect_identical(cov$norm_imputed_partial, 2L) # samples 1 and 2
+  expect_equal(cov$score_imputed_partial, 1L) # sample 2 only
+  expect_equal(cov$norm_imputed_partial, 2L) # samples 1 and 2
 })
 
 # coverage floors live in test-coverage-gate.R for all clocks

@@ -59,6 +59,13 @@ score_type <- function(p) {
     return(gtag)
   }
 
+  # a declared normalization scheme routes to normalize-then-linear; the
+  # Dunedin group keeps its own tag above. Catalog-only, never the request --
+  # the branch itself reads `cpgs$normalizes` to decide whether to apply it.
+  if (clock_norm_scheme(p) %in% NORM_SCHEMES) {
+    return("normalized")
+  }
+
   if (wf == "cpg_coefficient" && ct %in% c("linear", "linear_transformed")) {
     return("linear")
   }
@@ -79,7 +86,23 @@ pack_groups_needed <- function(clock_sequence) {
   })))
 }
 
-# public scorer
+
+#' Stub
+#'
+#' Rcpp needs some roxygen2 stub
+#'
+#' @param DNAm x
+#' @param clocks x
+#' @param pheno x
+#' @param pheno_id x
+#' @param min_clocks_coverage x
+#' @param min_samples_coverage x
+#' @param normalize x
+#' @param assets x
+#' @param ask x
+#'
+#' @returns x
+#' @export
 calc_clocks <- function(
   DNAm,
   clocks,
@@ -87,11 +110,13 @@ calc_clocks <- function(
   pheno_id = "ID",
   min_clocks_coverage = 0.75,
   min_samples_coverage = 0.75,
-  from = NULL,
+  normalize = NULL,
+  assets = NULL,
   ask = TRUE
 ) {
   clock_ids <- resolve_clocks(clocks)
   clock_sequence <- resolve_clocks_sequence(clock_ids)
+  normalize <- resolve_normalize(normalize, clock_sequence)
   # routed members are internal machinery: scored, but never a score column
   output_ids <- drop_routed_members(c(
     clock_ids,
@@ -132,9 +157,9 @@ calc_clocks <- function(
   )
   pheno <- resolve_pheno(DNAm, pheno, pheno_id, extra_columns)
 
-  packs <- load_mc_assets(pack_groups_needed(clock_sequence), from, ask)
+  packs <- load_mc_assets(pack_groups_needed(clock_sequence), assets, ask)
 
-  panels <- clock_panels(clock_sequence, packs)
+  panels <- clock_panels(clock_sequence, packs, normalize)
   mna <- scan_missing_cpgs(DNAm, panels_union(panels))
   cpg_list <- resolve_cpgs(mna$usable_cols, panels)
   check_coverage(cpg_list, min_clocks_coverage)
@@ -192,6 +217,14 @@ calc_clocks <- function(
       DNAmFitAge = score_DNAmFitAge(p, results, DNAm),
       PhysAge = score_PhysAge(p, cpgs, DNAm, partial_cache),
       Dunedin = score_Dunedin(p, cpgs, DNAm, partial_cache),
+      normalized = score_normalized(
+        p,
+        cpgs,
+        DNAm,
+        partial_cache,
+        pheno,
+        packs
+      ),
       EpiTOC2 = score_EpiTOC2(p, cpgs, DNAm, partial_cache),
       MiAge = score_MiAge(p, cpgs, DNAm, partial_cache),
       Zhang2019 = score_Zhang2019(p, cpgs, DNAm, partial_cache),
@@ -212,7 +245,8 @@ calc_clocks <- function(
     sample_id,
     pheno = pheno,
     pheno_id = pheno_id,
-    covariates_used = extra_columns
+    covariates_used = extra_columns,
+    normalized = names(normalize)[normalize]
   )
 }
 
@@ -242,7 +276,8 @@ construct_mc_result <- function(
   sample_id,
   pheno = NULL,
   pheno_id = "ID",
-  covariates_used = character(0)
+  covariates_used = character(0),
+  normalized = character(0)
 ) {
   scores <- do.call(cbind, results[output_ids])
   dimnames(scores) <- list(sample_id, output_ids)
@@ -271,7 +306,9 @@ construct_mc_result <- function(
         clocks = output_ids,
         requested = requested_ids,
         dependencies = setdiff(output_ids, requested_ids),
-        covariates_used = covariates_used
+        covariates_used = covariates_used,
+        # which clocks were actually normalized -- absent means scored raw
+        normalized = normalized
       )
     ),
     class = "mc_result"

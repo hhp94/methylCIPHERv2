@@ -1,10 +1,10 @@
 # rank is pinned on one typo only
 test_that("did_you_mean puts the intended clock first, per namespace", {
-  expect_identical(
+  expect_equal(
     did_you_mean("systemage", suggestion_pools()$clock)[[1L]],
     "SystemsAge"
   )
-  expect_identical(
+  expect_equal(
     did_you_mean("grimage", suggestion_pools()$group)[[1L]],
     "GrimAge"
   )
@@ -15,25 +15,25 @@ test_that("clock and group suggestions stay in their own namespace", {
   expect_false("all" %in% c(pools$clock, pools$group, names(pools$clock)))
   expect_setequal(unname(pools$group), unique(mc_index[["group_id"]]))
   expect_true(all(did_you_mean("systemage", pools$group) %in% pools$group))
-  expect_identical(did_you_mean("fitage", pools$group)[[1L]], "DNAmFitAge")
+  expect_equal(did_you_mean("fitage", pools$group)[[1L]], "DNAmFitAge")
   expect_length(suggestion_bullets(c("zzz", "systemage")), 6L)
 })
 
 test_that("case is a suggestion, never a resolution", {
-  expect_identical(
+  expect_equal(
     did_you_mean("SYSTEMSAGE", suggestion_pools()$clock)[[1L]],
     "SystemsAge"
   )
   expect_error(resolve_clocks("SYSTEMSAGE"))
   # exact id resolves exactly, and a group token beats a same-named clock
-  expect_identical(resolve_clocks("non_prcPhenoAge"), "non_prcPhenoAge")
+  expect_equal(resolve_clocks("non_prcPhenoAge"), "non_prcPhenoAge")
   expect_length(resolve_clocks("prcPhenoAge"), 2L)
 })
 
 test_that("a mistyped routed member is pointed at its alias", {
   routed <- sex_routed_members()
   member <- names(routed$alias)[[1L]]
-  expect_identical(
+  expect_equal(
     did_you_mean(
       substr(member, 1L, nchar(member) - 1L),
       suggestion_pools()$clock
@@ -55,7 +55,7 @@ test_that("suggestions never name a clock the user cannot request", {
 
 test_that("every listed callable clock actually resolves", {
   lc <- list_clocks()
-  expect_identical(nrow(lc), length(mc_index[["clock_id"]]))
+  expect_equal(nrow(lc), length(mc_index[["clock_id"]]))
   expect_setequal(lc[["clock_id"]][lc[["callable"]]], resolve_clocks("all"))
   routed <- lc[!lc[["callable"]], ]
   for (i in seq_len(nrow(routed))) {
@@ -69,7 +69,7 @@ test_that("every listed callable clock actually resolves", {
 test_that("group_size is what the group token expands to", {
   lc <- list_clocks()
   for (g in unique(lc[["group_id"]])) {
-    expect_identical(
+    expect_equal(
       length(resolve_clocks(g)),
       lc[["group_size"]][match(g, lc[["group_id"]])]
     )
@@ -89,7 +89,7 @@ test_that("keyword names cannot collide with a clock or group id", {
   expect_false(any(names(MC_TAGS) %in% mc_index[["clock_id"]]))
   expect_false(any(names(MC_TAGS) %in% mc_index[["group_id"]]))
   expect_false("all" %in% names(MC_TAGS))
-  expect_identical(names(MC_TAGS), tolower(names(MC_TAGS)))
+  expect_equal(names(MC_TAGS), tolower(names(MC_TAGS)))
 })
 
 test_that("a keyword naming a dropped token is a hard stop, not a short set", {
@@ -112,12 +112,12 @@ test_that("keyword membership matches the tags column", {
 test_that("list_tags returns the registry invisibly", {
   out <- withVisible(list_tags())
   expect_false(out$visible)
-  expect_identical(out$value, MC_TAGS)
+  expect_equal(out$value, MC_TAGS)
 })
 
 test_that("list_clocks filters, and rejects an unknown group", {
   expect_true(all(list_clocks(group = "GrimAge")[["group_id"]] == "GrimAge"))
   expect_gt(nrow(list_clocks(pattern = "horvath")), 0L)
-  expect_identical(nrow(list_clocks(pattern = "nothing-matches-this")), 0L)
+  expect_equal(nrow(list_clocks(pattern = "nothing-matches-this")), 0L)
   expect_error(list_clocks(group = "Horvat"))
 })

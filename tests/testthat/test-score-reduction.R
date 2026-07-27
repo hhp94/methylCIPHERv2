@@ -32,6 +32,7 @@ test_that("every catalog clock maps to a known score_type tag", {
     "pack_linear",
     "pack_systemsage",
     "Dunedin",
+    "normalized",
     "EpiTOC2",
     "MiAge",
     "Zhang2019",

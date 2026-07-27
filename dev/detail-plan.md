@@ -214,11 +214,12 @@ scoring, both run exactly once — never inside the per-clock loop:
     tracks a caller who moves the floor, rather than pinning an absolute second number. Clocks with
     no panel at all are not gated here; they fail later on the unimplemented-scorer branch, which
     is the clearer error.
-    A clock's **normalization background** (only DunedinPACE carries one) is a *separate,
-    warn-only* check in the same function: under `min_clocks_coverage` it warns and never stops,
-    because absent gold CpGs fill to their reference mean before quantile-normalizing, so the
-    clock still scores. "Cannot score" and "normalized against a thin background" are different
-    failures and do not share a band.
+    A clock's **normalization background** (DunedinPACE always; Horvath1 / Knight when BMIQ is
+    requested) is a *separate, warn-only* check in the same function: under `min_clocks_coverage`
+    it warns and never stops, because the clock still scores either way -- absent gold CpGs fill to
+    their reference mean before quantile-normalizing, or are dropped from a BMIQ fit (§2.4a), and
+    the warning names which. "Cannot score" and "normalized against a thin background" are
+    different failures and do not share a band.
     **Sample-invariant** — it reads set sizes, so it fires on panel/array mismatch (wrong array, a
     group's weights off-manifest, a simulated panel built from too narrow a clock set), never on
     per-sample NA, which is tier 2's job (§4.2). Running it over the **plan** is what makes a
@@ -230,8 +231,9 @@ scoring, both run exactly once — never inside the per-clock loop:
 
 Deliberately **not** in this front end: the full-panel warning (it is the `sample_scale`
 transform's own precondition — §2.4), imputation checks (they live with the impute step — §2.3),
-and array-normalization (never executed — §2.4a). Same principle throughout: a clock-specific
-precondition lives with the step that consumes it, not hoisted into the universal prepare path.
+and array-normalization (it happens inside the clock's own branch, on the clock's own panel —
+§2.4a). Same principle throughout: a clock-specific precondition lives with the step that consumes
+it, not hoisted into the universal prepare path.
 
 ### 2.2 Dispatch: linear engine + a finite branch set
 
@@ -367,28 +369,44 @@ chunk-safe (`cross_sample_at` is `NA`; the retired `extract_batch_ops()` wrongly
 `resolve_DNAm_extra()` with one `"Zhang2019" %in% clock_ids` special case, as no other clock
 exercises it.
 
-### 2.4a Normalization policy — annotate, never execute
+### 2.4a Normalization policy — executed per clock, constitutive or opt-in
 
 `sample_scale` above is a *scoring-recipe* transform, not array normalization. Array
-normalization proper is the per-clock `normalization` field: `none` ×104, `BMIQ` ×7,
-`quantile` ×1 (DunedinPACE), `noob` ×1 (Horvath2). **The package executes none of it, except
-DunedinPACE's `quantile`** (see below).
+normalization proper is the per-clock `normalization` field: `none` ×125, `BMIQ` ×2
+(Horvath1, Knight), `quantile` ×1 (DunedinPACE), `noob` ×1 (Horvath2). The package executes
+`quantile` and `BMIQ`.
 
-- BMIQ / noob are squarely **upstream** (sesame / minfi) — the user's responsibility.
-- Horvath's BMIQ-to-golden-mean is **deliberately skipped**: a correctness bug in RPMM. Parity
-  fixtures show ~0.9999 correlation of no-BMIQ vs the Horvath server, so re-implementing it buys
-  nothing and inherits the bug. Users who want BMIQ run the RPMM pipeline themselves first
-  (most won't).
-- DunedinPACE's `quantile` is the **one executed** normalization: the `score_Dunedin` branch
-  quantile-normalizes the gold panel to `gold_standard_means` via `betanorm::quantile_norm`
-  (bit-exact with the author's `preprocessCore`) before the linear score. It is intrinsic to the
-  clock (the score is defined on normalized betas), not array prep, so it cannot be pushed upstream.
+Upstream narrowed BMIQ from 7 clocks to 2 and vendored the calibration target (meta `a7148b3`;
+DECISIONS 2026-07-27 latest), which is what made execution possible: both clocks declare a
+`bmiq_gold_standard` probe_set of 21,368 probes, `identical()` across the two groups, with each
+scoring panel a strict subset (353/353, 148/148). The earlier position — BMIQ deliberately skipped,
+users run RPMM themselves — is **retracted**, along with the ~0.9999 correlation that supported it
+(correlation is never a gate here; see CLAUDE.md).
 
-So `normalization` is a **coverage / provenance annotation** — surfaced via a (future)
-`clock_norm_scheme()` accessor feeding `norm_needed` (§4) — **not a compute step and not a
-check**. There is no shared "norm intermediate" layer: nothing is jointly normalized by us
-(`sample_scale` is per-sample and Zhang-only today; QN is external), so building one would be
-speculative. The only norm-adjacent thing the package runs is the `sample_scale` transform.
+- `noob` stays **upstream** (sesame / minfi): an IDAT-intensity background correction, unreachable
+  from a beta matrix under any design.
+- `quantile` (DunedinPACE) is **constitutive** — the score is defined on normalized betas, so it
+  cannot be declined. `score_Dunedin` quantile-normalizes the gold panel to its declared target via
+  `betanorm::quantile_norm` (bit-exact with the author's `preprocessCore`) before the linear score.
+- `BMIQ` (Horvath1, Knight) is **published preprocessing**: it defaults **off** and is opted into
+  per clock via `normalize = c(Horvath1 = TRUE)`. `score_normalized()` calibrates with
+  `betanorm::bmiq_calibration()` at Horvath's fixed settings (`nL = 3`, `doH = TRUE`,
+  `th1.v = c(0.2, 0.75)`, `niter = 5`, `tol = 0.001`, `nfit = ncol(panel)`), then hands the
+  calibrated betas to the shared linear engine through `linear_score(observed = )`. There is no
+  per-clock options list — a caller wanting different preprocessing applies it to their own matrix.
+
+**Absent background CpGs are handled differently by the two schemes, deliberately.** `quantile`
+fills a fully-absent CpG from the target mean and normalizes the full panel; `BMIQ` **drops** it.
+BMIQ estimates each sample's own 3-state mixture from the panel, so target-drawn values pull that
+fit toward the gold standard and shrink the correction. That difference is also why the two are
+separate branches rather than one generalized scorer.
+
+So `normalization` is **both** a compute step and a coverage/provenance fact: `clock_norm_scheme()`
+feeds `score_type()` routing and `resolve_normalize()`, `norm_needed` (§4) is empty unless the clock
+actually normalizes on this run, and `$provenance$normalized` records which clocks did. There is
+still no shared "norm intermediate" layer — each clock normalizes its own declared panel against its
+own declared target, so nothing is jointly normalized by us (see `dev/id-streaming-plan.md` §9.2 for
+why one prepared matrix is not a well-defined object).
 
 ### 2.5 GrimAge pack (orchestrator)
 
@@ -462,7 +480,7 @@ usable column universe, the same for every sample:
 | Field | Meaning |
 |---|---|
 | `clock_id` | Score column / catalog id |
-| `norm_needed` / `norm_present` | Normalization / background panel (Zhang, QN clocks); `NA` when none |
+| `norm_needed` / `norm_present` | Normalization / background panel, empty unless the clock normalizes **on this run** (§2.4a); `NA` when none |
 | `score_needed` | Scoring CpGs (materialized `probe_sets[role=scoring]`; external groups: the pack's `$cpgs`) |
 | `score_present` | Scoring CpGs found in `usable_cols` (colnames minus all-NA, §2.3a) |
 | `score_used` | Terms that entered the sum |
@@ -531,7 +549,8 @@ concentrate in that clock's scoring set — invisible to the global empty-row ch
 an error** (one clock being locally empty for one sample must not fail the batch — record it, don't
 throw). `compute_coverage()` builds a length-`n` vector = row-wise NA count over a panel's present
 CpGs, **once per distinct panel** and **per panel role** (score always; norm when the clock
-normalizes -- only DunedinPACE), fanned out to clocks via `resolve_cpgs()`'s panel index. Assembly
+normalizes *on this run* -- DunedinPACE always, Horvath1 / Knight only when BMIQ is requested),
+fanned out to clocks via `resolve_cpgs()`'s panel index. Assembly
 stacks these into `$coverage$sample_miss = list(score = <n x k>, norm = <n x k' over just the
 normalizing columns>)` on the result record, for a sample x clock coverage heatmap per panel.
 
@@ -1056,6 +1075,13 @@ unexpected value), but the field itself stays on the maintainer side (manifest),
   1.9e-3) and is the only clock BMIQ helps -- but it cannot rescue EPICv1, whose 1062 filled probes
   contaminate the fit. **Do not convert this into a tolerance:** the residual spans 4.2e-08 to
   2.7e-01, so any bound wide enough to pass is vacuous.
+  That measurement now settles a question the BMIQ branch reopened. `Horvath1 @ cohort_450K` looked
+  like the one fixture where calibration is the *sole* difference from the oracle -- it declares no
+  `missing` block, so zero absent scoring CpGs -- and therefore the one candidate for un-skipping
+  once `normalize = c(Horvath1 = TRUE)` existed. It is not: 1.9e-3 sits seven orders of magnitude
+  outside `PARITY_ABS_TOL["horvath"]` (`1e-10`), and closing that is not a units argument, which is
+  the only licence this table has for moving. **The `horvath` block stays skipped in full**, and
+  BMIQ's numeric gate is the always-on golden in `test-normalize.R`, not parity.
 
   **The pack relaxation is measured, not assumed.** Pack outputs reach ~3.3e6 (`PCB2M`), where
   `1e-10` absolute is below the float representation floor before any arithmetic runs. Across all

@@ -32,7 +32,7 @@ test_that("the alias routes each sample to its own sex's model", {
   age <- seq(45, 70, length.out = 6)
   pheno <- fitage_pheno(rownames(DNAm), female, age)
 
-  expect_identical(names(clock_covariates_coefs("DNAmGrip_wAge_Female")), "Age")
+  expect_equal(names(clock_covariates_coefs("DNAmGrip_wAge_Female")), "Age")
 
   got <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno)$scores
   f <- which(female == 1)
@@ -63,8 +63,8 @@ test_that("panel coverage lands on the members, never on the alias", {
 
   # the two panels differ in size, so no one count is true of every sample.
   expect_null(cov[["DNAmGrip_wAge"]])
-  expect_identical(cov[["DNAmGrip_wAge_Female"]]$score_needed, length(fem))
-  expect_identical(cov[["DNAmGrip_wAge_Male"]]$score_needed, length(mal))
+  expect_equal(cov[["DNAmGrip_wAge_Female"]]$score_needed, length(fem))
+  expect_equal(cov[["DNAmGrip_wAge_Male"]]$score_needed, length(mal))
   expect_false(length(fem) == length(mal))
 
   # members are scored but never returned as columns.
@@ -73,12 +73,12 @@ test_that("panel coverage lands on the members, never on the alias", {
       colnames(res$scores)
   ))
   # sample_miss is per panel -- the score matrix spans every returned column
-  expect_identical(
+  expect_equal(
     colnames(res$coverage$sample_miss$score),
     colnames(res$scores)
   )
   # no returned clock normalizes here, so the norm matrix has no columns
-  expect_identical(ncol(res$coverage$sample_miss$norm), 0L)
+  expect_equal(ncol(res$coverage$sample_miss$norm), 0L)
 })
 
 test_that("per-sample QC routes with the score; panel counts do not", {
@@ -95,7 +95,7 @@ test_that("per-sample QC routes with the score; panel counts do not", {
   res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno)
 
   # only the female with a blanked value leans on a cohort mean
-  expect_identical(
+  expect_equal(
     unname(res$coverage$sample_miss$score[, "DNAmGrip_wAge"]),
     c(1L, 0L, 0L, 0L, 0L, 0L)
   )
@@ -137,8 +137,8 @@ test_that("absent member CpGs vendor-fill from that sex's medians", {
   )
 
   cov <- res$coverage$per_clock[[id]]
-  expect_identical(cov$score_imputed_full, 5L)
-  expect_identical(cov$score_dropped, 0L)
+  expect_equal(cov$score_imputed_full, 5L)
+  expect_equal(cov$score_dropped, 0L)
 })
 
 
@@ -178,8 +178,8 @@ test_that("DNAmFitAge mixes same-sex members by KDM and carries no batch stamp",
 })
 
 test_that("the alias declares the routing covariate and its members do not", {
-  expect_identical(clock_covariates_required("DNAmFitAge"), "Female")
-  expect_identical(clock_covariates_required("DNAmFitAge_Female"), character(0))
+  expect_equal(clock_covariates_required("DNAmFitAge"), "Female")
+  expect_equal(clock_covariates_required("DNAmFitAge_Female"), character(0))
 })
 
 # composite vendor-fills over its own panel, not the family prep panel
@@ -201,7 +201,7 @@ test_that("the composite vendor-fills over its own panel", {
   for (id in c("DNAmFitAge_Female", "DNAmFitAge_Male")) {
     cov <- res$coverage$per_clock[[id]]
     expect_gt(cov$score_imputed_full, 0L)
-    expect_identical(cov$score_dropped, 0L)
-    expect_identical(cov$score_used, cov$score_needed)
+    expect_equal(cov$score_dropped, 0L)
+    expect_equal(cov$score_used, cov$score_needed)
   }
 })

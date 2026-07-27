@@ -12,7 +12,7 @@ test_that("every catalog clock reaches at least one citation", {
   expect_true(all(donors %in% mc_citations[["clock_id"]]))
 
   expect_true(all(mc_index[["n_citations"]] >= 1L))
-  expect_identical(
+  expect_equal(
     mc_index[["n_citations"]][match("Hannum", ids)],
     sum(mc_citations[["clock_id"]] == "Hannum")
   )
@@ -30,7 +30,7 @@ test_that("every catalog clock reaches at least one citation", {
 test_that("cite_clocks speaks the same clock tokens as calc_clocks", {
   one <- cite_clocks("Hannum")
   expect_s3_class(one, "mc_citation")
-  expect_identical(unique(as.data.frame(one)$clock_id), "Hannum")
+  expect_equal(unique(as.data.frame(one)$clock_id), "Hannum")
   expect_true(any(grepl("^@", one$bibtex)))
 
   grp <- cite_clocks("GrimAge")
@@ -45,7 +45,7 @@ test_that("cite_clocks speaks the same clock tokens as calc_clocks", {
 
   # one entry per distinct paper, however many clocks share it
   many <- cite_clocks(c("Hannum", "Horvath1", "PhenoAge"))
-  expect_identical(
+  expect_equal(
     sum(grepl("^@", many$bibtex)),
     length(unique(as.data.frame(many)$bib_key))
   )
@@ -59,8 +59,8 @@ test_that("a sex-routed alias cites through its donor", {
   donor <- mc_catalog[[alias]][["donor_clock_id"]]
   links <- as.data.frame(cite_clocks(alias))
 
-  expect_identical(unique(links$clock_id), alias)
-  expect_identical(
+  expect_equal(unique(links$clock_id), alias)
+  expect_equal(
     links$bib_key,
     mc_citations$bib_key[mc_citations$clock_id == donor]
   )

@@ -25,14 +25,14 @@ test_that("clocks_coverage marks members routing_target and the alias returned",
 
   # the alias is a returned column with an all-NA panel row
   alias <- cc[cc$clock_id == "DNAmGrip_wAge", ]
-  expect_identical(alias$role, "returned")
+  expect_equal(alias$role, "returned")
   expect_true(is.na(alias$score_needed))
 
   # the two members are routing targets carrying the per-sex denominators
   members <- cc[
     cc$clock_id %in% c("DNAmGrip_wAge_Female", "DNAmGrip_wAge_Male"),
   ]
-  expect_identical(sort(unique(members$role)), "routing_target")
+  expect_equal(sort(unique(members$role)), "routing_target")
   expect_setequal(members$score_needed, c(length(fem), length(mal)))
 })
 
@@ -48,9 +48,9 @@ test_that("clocks_coverage reports score_used = present + imputed_full per row",
 
   cc <- clocks_coverage(calc_clocks(DNAm, "DNAmGait_noAge", pheno = pheno))
   row <- cc[cc$clock_id == id, ]
-  expect_identical(row$score_imputed_full, 5L)
-  expect_identical(row$score_used, row$score_present + row$score_imputed_full)
-  expect_identical(row$missing_cpgs[[1]], drop)
+  expect_equal(row$score_imputed_full, 5L)
+  expect_equal(row$score_used, row$score_present + row$score_imputed_full)
+  expect_equal(row$missing_cpgs[[1]], drop)
 })
 
 test_that("samples_coverage is long with a per-sex denominator for an alias", {
@@ -63,20 +63,20 @@ test_that("samples_coverage is long with a per-sex denominator for an alias", {
   res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno)
   sc <- samples_coverage(res)
 
-  expect_identical(
+  expect_equal(
     names(sc),
     c("id", "clock_id", "panel", "n_observed", "n_needed", "coverage")
   )
   alias <- sc[sc$clock_id == "DNAmGrip_wAge", ]
-  expect_identical(nrow(alias), 6L)
+  expect_equal(nrow(alias), 6L)
   # n_needed is the scoring model of the sex that scored each sample
-  expect_identical(
+  expect_equal(
     alias$n_needed,
     ifelse(female == 1, length(fem), length(mal))
   )
   # full coverage: every declared CpG present
   expect_true(all(alias$coverage == 1))
-  expect_identical(alias$n_observed, alias$n_needed)
+  expect_equal(alias$n_observed, alias$n_needed)
 })
 
 test_that("samples_coverage coverage is literally row_coverage() for a partial fill", {
@@ -93,14 +93,14 @@ test_that("samples_coverage coverage is literally row_coverage() for a partial f
   alias <- sc[sc$clock_id == "DNAmGrip_wAge", ]
 
   # sample 1 is one CpG short of its female panel, the rest are full
-  expect_identical(alias$n_observed[1], length(fem) - 1L)
+  expect_equal(alias$n_observed[1], length(fem) - 1L)
   expect_equal(alias$coverage[1], (length(fem) - 1L) / length(fem))
   expect_true(all(alias$coverage[-1] == 1))
 })
 
 test_that("samples_coverage gives a normalizing clock a score and a norm row", {
   skip_if_not_installed("betanorm")
-  norm_panel <- names(dunedin_gold_means("DunedinPACE"))
+  norm_panel <- names(clock_norm_target("DunedinPACE"))
   score_panel <- clock_scoring_cpgs("DunedinPACE")
   DNAm <- random_betas(norm_panel, n = 4L)
 
@@ -110,7 +110,7 @@ test_that("samples_coverage gives a normalizing clock a score and a norm row", {
 
   expect_setequal(unique(dp$panel), c("score", "norm"))
   needed <- tapply(dp$n_needed, dp$panel, unique)
-  expect_identical(as.integer(needed[["score"]]), length(score_panel))
+  expect_equal(as.integer(needed[["score"]]), length(score_panel))
   # the norm background is the larger, separate panel
   expect_gt(needed[["norm"]], needed[["score"]])
 })
