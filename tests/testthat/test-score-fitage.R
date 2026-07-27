@@ -15,7 +15,7 @@ fitage_pheno <- function(ids, female, age = NULL) {
 # hand-compute one member (intercept + betas %*% coef + Age).
 member_expected <- function(id, DNAm, rows, age) {
   coef <- clock_coefs(id)
-  cov <- clock_covariate_coefs(id)
+  cov <- clock_covariates_coefs(id)
   out <- clock_intercept(id) +
     as.numeric(DNAm[rows, names(coef), drop = FALSE] %*% coef)
   if (length(cov)) {
@@ -32,7 +32,7 @@ test_that("the alias routes each sample to its own sex's model", {
   age <- seq(45, 70, length.out = 6)
   pheno <- fitage_pheno(rownames(DNAm), female, age)
 
-  expect_identical(names(clock_covariate_coefs("DNAmGrip_wAge_Female")), "Age")
+  expect_identical(names(clock_covariates_coefs("DNAmGrip_wAge_Female")), "Age")
 
   got <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno)$scores
   f <- which(female == 1)

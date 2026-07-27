@@ -87,7 +87,7 @@ calc_clocks <- function(
   pheno_id = "ID",
   min_clocks_coverage = 0.75,
   min_samples_coverage = 0.75,
-  assets = NULL,
+  from = NULL,
   ask = TRUE
 ) {
   clock_ids <- resolve_clocks(clocks)
@@ -132,7 +132,7 @@ calc_clocks <- function(
   )
   pheno <- resolve_pheno(DNAm, pheno, pheno_id, extra_columns)
 
-  packs <- load_mc_assets(pack_groups_needed(clock_sequence), assets, ask)
+  packs <- load_mc_assets(pack_groups_needed(clock_sequence), from, ask)
 
   panels <- clock_panels(clock_sequence, packs)
   mna <- scan_missing_cpgs(DNAm, panels_union(panels))

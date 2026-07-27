@@ -31,7 +31,7 @@ Bocklandt / Garagnani stay out (no published coefficients).
 | Item | Rule |
 |---|---|
 | Remote | `https://github.com/hhp94/methylCIPHER-meta.git` |
-| Inputs R may read | `manifest.json`, `weights/**`, `bibliography/{papers.csv,clocks.bib}` (never `control/`, `papers/`, `scripts/`) |
+| Inputs R may read | `manifest.json`, `weights/**`, `bibliography/{clock_citations.csv,clocks.bib}` (never `control/`, `papers/`, `scripts/`, `bibliography/papers.csv`) |
 | Clock meta | `weights/{group_id}/{clock_id}.meta.json` |
 | Group sidecar | `weights/{group_id}/_group.meta.json` (multi-member only) |
 | Discovery | Recursive `*.meta.json`; clock vs group by basename |
@@ -99,14 +99,16 @@ batch rules ->
 | `clocks_coverage(x)` | Per-clock coverage table (per-role needed / used / imputed / missing) |
 | `samples_coverage(x)` | Per-(sample, clock, panel) coverage table (long; carries per-row denominators) |
 | `augment()` | Join scores to phenotype / analysis data |
-| `clear_mc_cache()` + download helpers | Heavy assets |
+| `cite_clocks(x)` | Citations for ids/groups or an `mc_result` -> `mc_citation` (print / `as.data.frame` / `toBibtex`) |
+| `get_mc_assets_dir()` / `set_mc_assets_dir()` / `list_mc_assets()` / `download_mc_assets()` / `load_mc_assets()` / `clear_mc_assets()` | Heavy external assets |
 | Optional legacy `calc*()` | Thin -> `calc_clocks`; not the engine |
 
 `calc_clocks()` returns an S3 record over `list` (class `"mc_result"`): `$scores` (n x k
 double), `$pheno`, `$coverage`, `$provenance`. Verbs are methods (`print`, `as.matrix`,
 `as.data.frame`, `[`, `cbind`, `augment`) -- so subsetting never silently drops
 coverage/provenance; `rbind` refuses, and `clocks_coverage()` / `samples_coverage()` / `codebook()`
-/ `citation()` are plain functions (detail-plan sec 1.3). `$scores` and `as.data.frame()` are **scores only** (no
+are plain functions, while citations dispatch on the package's own `cite_clocks()` generic
+(detail-plan sec 1.3, sec 8.1). `$scores` and `as.data.frame()` are **scores only** (no
 auto-appended pheno); `$pheno` separately retains the aligned id column plus required
 covariates, which is what `augment()` reads. Align
 pheno by sample id, never row order. `rownames(DNAm)` is the canonical sample id and is
@@ -162,7 +164,7 @@ tensors, which is the better fix. See [`sync-boundary-migration.md`](sync-bounda
 | Tier | Runs where | Job |
 |---|---|---|
 | Engine units + `sim_DNAm` smoke | Always (no meta dependency) | `linear_score` arithmetic, impute accounting, accessors, coverage math, result methods (golden values hand-authored in-test); plus `sim_DNAm` `expect_no_error` over every shipped clock |
-| Parity fixtures | `MC_PARITY=1` + cohort staged (`file.exists` gate); dev `test_parity()` | Upstream golden fixtures vs **every registry cohort** (`cohort_EPICv1`, `cohort_450K`) -- the single clock-golden source. Tolerance is ours: exact, or correlation where the fixture's `server_normalization` says the oracle saw server-normalized betas |
+| Parity fixtures | `MC_PARITY=1` + cohort staged (`file.exists` gate); dev `test_parity()` | Upstream golden fixtures vs **every registry cohort** (`cohort_EPICv1`, `cohort_450K`) -- the single clock-golden source. Tolerance is ours and is **harsh on both axes**: `max_abs_diff` AND `max_rel_diff`, both reduced with `max`. `PARITY_REL_TOL` is `1e-10` everywhere with no exception; only the scale-sensitive `PARITY_ABS_TOL` varies by block (`core`/`fitage` `1e-10`, `packs` `1e-6`, measured). Correlation is banned as a gate package-wide, as are `median`/`mean` reducers. Four blocks from `parity_block()`, each selected by a declared field: `core`, `fitage`, `packs`, `horvath`. **214 pass / 32 skip / 0 fail.** The `horvath` block (30) is skipped on evidence -- the online calculator filled absent probes with an unpublished constant, and pairs with zero absent probes already match to ~1e-8, so the gap is the oracle's input, not our arithmetic |
 
 No shipped slice of the golden cohort (it would drift). CI may stage the cohort and run parity;
 CRAN skips it. Details -> [`detail-plan.md`](detail-plan.md) sec 10.

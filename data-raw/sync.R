@@ -181,17 +181,76 @@ prune_group_meta <- function(gmeta) {
 
 # bibliography
 
-read_papers_csv <- function(repo_path) {
-  path <- file.path(repo_path, "bibliography", "papers.csv")
+CITATION_FIELDS <- c("clock_id", "pmid", "role", "bib_key")
+CITATION_ROLES <- c("primary", "cite_also")
+
+# the clock -> paper join, 1:N. a meta's scalar `pmid` is the primary paper only,
+# never the citation set.
+read_clock_citations <- function(repo_path) {
+  path <- file.path(repo_path, "bibliography", "clock_citations.csv")
   df <- utils::read.csv(
     path,
     stringsAsFactors = FALSE,
     colClasses = "character"
   )
-  list(
-    bib_key = stats::setNames(trimws(df[["bib_key"]]), trimws(df[["pmid"]])),
-    n = nrow(df)
+  for (col in CITATION_FIELDS) {
+    if (!col %in% names(df)) {
+      stop("clock_citations.csv is missing column '", col, "'", call. = FALSE)
+    }
+    df[[col]] <- trimws(df[[col]])
+  }
+  bad <- df[!nzchar(df[["bib_key"]]), , drop = FALSE]
+  if (nrow(bad)) {
+    stop(
+      "clock_citations.csv has ",
+      nrow(bad),
+      " row(s) with an empty bib_key (upstream gap): ",
+      paste(unique(bad[["clock_id"]]), collapse = ", "),
+      call. = FALSE
+    )
+  }
+  bad_role <- setdiff(unique(df[["role"]]), CITATION_ROLES)
+  if (length(bad_role)) {
+    stop(
+      "clock_citations.csv has unknown role(s): ",
+      paste(bad_role, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  df[, CITATION_FIELDS, drop = FALSE]
+}
+
+# citation rows for the released clocks, primary first. both roles are
+# citation obligations -- `role` distinguishes them, it does not drop either.
+build_citations_table <- function(citations, clock_ids) {
+  df <- citations[citations[["clock_id"]] %in% clock_ids, , drop = FALSE]
+  missing_cites <- setdiff(clock_ids, unique(df[["clock_id"]]))
+  if (length(missing_cites)) {
+    stop(
+      "clock(s) in manifest.json with no clock_citations.csv row: ",
+      paste(missing_cites, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  n_primary <- tapply(
+    df[["role"]] == "primary",
+    df[["clock_id"]],
+    sum
   )
+  if (any(n_primary != 1L)) {
+    stop(
+      "clock(s) without exactly one primary citation: ",
+      paste(names(n_primary)[n_primary != 1L], collapse = ", "),
+      call. = FALSE
+    )
+  }
+  df <- df[
+    order(df[["clock_id"]], df[["role"]] != "primary", df[["bib_key"]]),
+    ,
+    drop = FALSE
+  ]
+  row.names(df) <- NULL
+  df
 }
 
 vendor_bibliography <- function(repo_path) {
@@ -488,8 +547,6 @@ build_catalog <- function(repo_path, manifest) {
     groups[[gid]] <- entry
   }
 
-  papers <- read_papers_csv(repo_path)
-
   # clock_id -> meta path, selected by the manifest
   by_id <- list()
   for (mp in files$clock) {
@@ -522,6 +579,11 @@ build_catalog <- function(repo_path, manifest) {
       call. = FALSE
     )
   }
+
+  citations <- build_citations_table(
+    read_clock_citations(repo_path),
+    names(released)
+  )
 
   clocks <- list()
   for (cid in names(released)) {
@@ -557,8 +619,8 @@ build_catalog <- function(repo_path, manifest) {
     if (!is.null(entry[["computation_type"]])) {
       entry[["computation_type"]] <- as.character(entry[["computation_type"]])
     }
+    # provenance pointer to the primary paper, not the citation set (mc_citations)
     entry[["pmid"]] <- as.character(entry[["pmid"]] %||% NA_character_)
-    entry[["bib_key"]] <- unname(papers$bib_key[entry[["pmid"]]])
 
     entry[["imputation_policy"]] <- as.character(
       entry[["imputation"]][["policy"]] %||% NA_character_
@@ -584,6 +646,7 @@ build_catalog <- function(repo_path, manifest) {
   list(
     clocks = clocks,
     groups = groups,
+    citations = citations,
     source_git_sha = NA_character_,
     schema_version = manifest[["schema_version"]],
     n_clocks = length(clocks)
@@ -904,7 +967,9 @@ attach_sex_routed_aliases <- function(catalog) {
         covariates_required = "Female",
         imputation_policy = donor[["imputation_policy"]],
         pmid = donor[["pmid"]],
-        bib_key = donor[["bib_key"]],
+        # an alias is package-minted, so it has no clock_citations.csv rows of
+        # its own; citations resolve through the donor.
+        donor_clock_id = donor[["clock_id"]],
         license = donor[["license"]],
         cross_sample_at = NA_integer_,
         external_group = FALSE
@@ -1532,6 +1597,7 @@ external_asset_registry_row <- function(a) {
 build_index <- function(catalog) {
   clocks <- catalog[["clocks"]]
   ids <- names(clocks)
+  citations <- catalog[["citations"]]
 
   scal <- function(field, default = NA_character_) {
     unname(vapply(
@@ -1557,6 +1623,17 @@ build_index <- function(catalog) {
     integer(1L)
   ))
 
+  # citation count, resolved through the donor for a sex-routed alias. the keys
+  # themselves live once, in mc_citations.
+  n_citations <- unname(vapply(
+    clocks,
+    function(e) {
+      id <- as.character(e[["donor_clock_id"]] %||% e[["clock_id"]])
+      sum(citations[["clock_id"]] == id)
+    },
+    integer(1L)
+  ))
+
   idx <- data.frame(
     clock_id = ids,
     group_id = scal("group_id"),
@@ -1569,8 +1646,9 @@ build_index <- function(catalog) {
     cross_sample_at = cross_at,
     batch_dependent = !is.na(cross_at),
     external_group = lgl("external_group"),
-    bib_key = scal("bib_key"),
+    # `pmid` is the primary paper only; a scalar cannot hold the citation set
     pmid = scal("pmid"),
+    n_citations = n_citations,
     stringsAsFactors = FALSE,
     row.names = NULL
   )
@@ -1617,6 +1695,7 @@ build_sysdata <- function(
   mc_groups <- catalog[["groups"]]
   mc_bundles <- bundles
   mc_index <- build_index(catalog)
+  mc_citations <- catalog[["citations"]]
   ext_reg <- NULL
   if (!is.null(external_assets) && length(external_assets)) {
     ext_reg <- lapply(external_assets, external_asset_registry_row)
@@ -1636,10 +1715,11 @@ build_sysdata <- function(
     mc_groups,
     mc_bundles,
     mc_index,
+    mc_citations,
     mc_provenance,
     internal = TRUE,
     overwrite = TRUE,
-    compress = "gzip"
+    compress = "xz"
   )
 
   path <- file.path("R", "sysdata.rda")
@@ -1658,6 +1738,7 @@ build_sysdata <- function(
       "mc_groups",
       "mc_bundles",
       "mc_index",
+      "mc_citations",
       "mc_provenance"
     )
   ))

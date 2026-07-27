@@ -343,7 +343,7 @@ recipe_step_out <- function(id, out) {
 }
 
 # covariate weights, numeric(0) when none
-clock_covariate_coefs <- function(id) {
+clock_covariates_coefs <- function(id) {
   cov <- clock_entry(id)[["covariates"]]
   if (is.null(cov)) {
     step <- recipe_step_out(id, "score")

@@ -83,7 +83,7 @@ linear_score <- function(
   lp <- linear_predictor(
     coef = coef,
     intercept = clock_intercept(id),
-    cov_coefs = clock_covariate_coefs(id),
+    cov_coefs = clock_covariates_coefs(id),
     score_present = cpgs$score_present,
     DNAm = DNAm,
     partial_cache = partial_cache,

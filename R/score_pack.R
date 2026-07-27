@@ -31,7 +31,7 @@ pack_linpred <- function(design, M, cols) {
 
 # per-clock covariate contributions (n x k)
 pack_cov_contrib <- function(ids, pheno, n) {
-  cc <- lapply(ids, clock_covariate_coefs)
+  cc <- lapply(ids, clock_covariates_coefs)
   need <- unique(unlist(lapply(cc, names), use.names = FALSE))
   if (!length(need)) {
     return(matrix(0, nrow = n, ncol = length(ids)))

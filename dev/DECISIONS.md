@@ -12,6 +12,602 @@ second-guessed; do not restate rules already stated in the migration / detail pl
 
 ---
 
+## 2026-07-26 (latest) -- chunking is a wrapper that pre-imputes; the seam is a hoist, not an argument
+
+**Decision.** `calc_clocks()` always assumes its `DNAm` is a **complete cohort** -- a precondition,
+never a parameter. Chunked scoring becomes a separate front end that pre-imputes each chunk from
+cohort-wide means *before* handing it to the shared scoring internal, so no cohort-statistics
+argument is added to the public function. Design in `dev/id-streaming-plan.md` (local-only); phases
+1-4 keep their existing numbers because four citations in the tracked docs refer to them.
+
+**Why a precondition and not a flag.** Partial-vs-complete missingness is only definable against a
+column's NA count over every sample, so `col_miss == nr` in `scan_missing_cpgs()` is wrong the moment
+`nr` is a chunk's row count rather than the cohort's. Making completeness a precondition means the
+existing machinery is correct by assumption instead of correct by inspection, and no scorer ever has
+to ask whether it is seeing everything.
+
+**Why pre-imputation beats an injected `cohort_stats`.** An earlier proposal in the same session was
+to pass cohort means plus the column classification into `calc_clocks()`. Pre-imputing outside is
+strictly better: it makes the scoring path a pure function of the matrix it was handed, and it is
+provably score-equivalent because `observed_panel()` only *orders* cached-before-raw columns and no
+scorer branches on fill provenance. A cohort-partial column arrives filled and reads as clean; a
+cohort-all-NA column cannot be filled and still routes to vendor-ref-or-drop; and the pathological
+case (partial cohort-wide, all-NA within one chunk) is exactly what the fill erases. Rejecting the
+argument keeps a chunk-aware parameter off the public one-cohort surface.
+
+**What pre-imputation does *not* fix, which is the real finding.** It erases the record of what was
+imputed. `panel_sample_miss()` counts NAs in the raw matrix over cached columns, so with
+`partial_cache = NULL` a chunked run would report `score_imputed_partial = 0` for every clock, an
+all-zero `sample_miss`, and `check_row_coverage()` would never fire -- breaking "coverage is never
+reported for a sample it is not true of" **silently**. The clocks gate survives (`usable_cols` is
+cohort-invariant); only the samples gate breaks. So coverage must be built by the wrapper's first
+pass from the pre-imputation NA pattern. That is a hoist rather than a duplication -- coverage is
+already computed once upstream of the scoring loop -- and it delivers the wanted behavior that
+`min_samples_coverage` throws before any scoring.
+
+**Why the fill policy was never negotiable.** Falling back to a vendored constant for partial NA
+would have made streaming trivial and was rejected outright: a fixed external constant is a
+*different estimand*, not a cheaper estimate of the same one, so it converts a technical missingness
+problem into biological error inside a value that then flows into a clock. Two passes is therefore
+not a performance preference but the only exact way to honor the existing invariant.
+
+**Chunking and binding are separate problems.** Chunking caps resident set size with **one** set of
+fill values; binding is wider and admits records with **deliberately different** fill values (three
+time points, imputed per time point). Both yield disjoint ids and identical columns, so no id gate can
+distinguish them -- only a recorded per-sample batch label plus a per-batch imputation summary can.
+`rbind` therefore records and never refuses on differing fill regimes. A batch label is not
+`batch_set_id` returning: it is provenance about origin, not a fingerprint used as a gate.
+
+**Input: an iterator contract with two adapters.** The source must only report dimnames without
+loading and yield sample-blocks -- both passes are sequential scans, so there is no random-access
+requirement. An **in-memory block iterator** (no dependency) is the always-on test vehicle and the
+supported manual path: chunk invariance is a property of the algorithm, not of I/O, so splitting a
+matrix in memory proves it as well as reading from disk, and the correctness tier never needs a
+Suggests installed. **`DelayedArray`** (Suggests) is the user-facing adapter -- users bring their own
+HDF5 and the friction is one line, not an ETL. Bioconductor stays in Suggests only; its twice-yearly
+breaking cycle must never be able to archive this package.
+
+**We own the accumulator; DelayedArray only slices.** Its whole used surface is `dim()`, `dimnames()`,
+`[` + `as.matrix()`, and `chunkdim()`, because breakage exposure scales with surface area.
+`DelayedMatrixStats` is deliberately absent for three reasons that have nothing to do with dependency
+hygiene: (1) `rowMeans2()` traverses in its own order and lands ~5.6e-16 from a plain-matrix
+`colMeans()`, so one shared accumulator is what keeps the chunked and single-cohort paths
+`identical` by construction -- the same failure mode as duckdb's threaded `avg`, from a different
+direction; (2) a fused single traversal measured 1.31s against 2.33s for two DelayedMatrixStats
+sweeps, and yields the value range and id vector free, where pass 1 needs ~6 quantities; (3)
+`setAutoBlockSize()` is a session global a package must not set. `matrixStats` is already in Imports,
+so the per-block kernels cost nothing.
+
+**Assume neither orientation nor geometry.** Bioconductor is probes x samples and this package is
+samples x probes -- *opposite* -- so orientation is inferred from dimnames, verified against the union
+panel, and errors rather than guesses when ambiguous (extending `check_DNAm()`'s existing transposed
+warning). Chunk geometry is read from `chunkdim()` and turned into an advisory: measured spread is 12x
+on a 100-sample block, `writeHDF5Array`'s auto default is one of the *worse* choices for this access
+pattern, and the two passes pull in opposite directions so a square-ish chunk is near-best on both.
+Slicing along samples is fixed by fiat -- a choice about our traversal, not an assumption about input.
+
+**npy rejected despite winning every benchmark.** 1.00x storage, 0.018s per 100-sample block (6x
+HDF5), 0.1s for pass 1 (19x HDF5), and readable with base R `seek()` + `readBin()` with no package at
+all (`RcppCNPy` cannot do partial reads, so it would not have been the route). It loses because npy
+carries no dimnames, so it needs sidecars, so *we* would own a format spec plus its validator,
+versioning, and edge cases (v1/v2 headers, `fortran_order`, endianness, rejecting float32 whose ~1e-7
+precision blows `PARITY_REL_TOL`) permanently. Hand-rolled correctness is a liability a speed win does
+not buy off.
+
+**duckdb deferred, not rejected.** It is CRAN, already in Suggests, and the parity fixtures already
+use the exact wide schema with a working reader. Cohort validation as SQL is its real strength. It
+loses on storage -- measured 1.65x in-memory against HDF5's 0.53x, i.e. 3.1x HDF5, with `DOUBLE`
+mandatory so it cannot be tuned down -- and on requiring an ETL, since "duckdb reads whatever you
+have" is false and the freeze is the expensive full read+write chunking exists to avoid. If it lands,
+the rule is **SQL owns identity and integers, R owns every float**: duckdb's threaded hash aggregate
+is not reproducible across thread counts *or* across repeat runs (~1e-15), while `SET threads=1`,
+counts, and distincts are. `bigmemory` is rejected outright -- weak dimnames support is disqualifying
+when dimnames *are* the identity.
+
+---
+
+## 2026-07-26 -- a fixture census guards the generated parity blocks, behind the parity gate
+
+**Decision.** `test-fixtures-parity.R` gains one census test asserting that every catalog clock
+declares a fixture for every `PARITY_COHORTS` cohort, with the sex-routed aliases as the only
+clocks declaring none. It is gated on `MC_PARITY` alone -- **not** on a staged cohort, because it
+reads only the committed catalog.
+
+**Why it exists.** The four blocks are generated by `parity_targets()` looping over
+`clock_fixtures()`. That makes the tier self-maintaining when fixtures are added, but it also means
+a fixture upstream *drops* produces no test at all: not a skip, not a failure, just 216 passes
+becoming 214 in a run that is still green. Skips are loud -- testthat prints every one with its
+reason -- so the skipped case was never the risk. The risk was the test that is never generated.
+Before this, the only tripwire was the hand-written standing-state count in `CLAUDE.md`, i.e. a
+human remembering a number. This is the same silent-shrinkage failure the routing invariant already
+forbids on the other axis ("a sync that adds a routing pair no branch claims must fail the
+always-on tier, never silently shrink it"); the fixture axis had no equivalent.
+
+**Why a rule and not a snapshot.** The declaration surface is exactly regular: 129 catalog clocks,
+122 declaring both cohorts (244 targets = core 130 + fitage 28 + packs 56 + horvath 30), and the 7
+with none are `setequal` to the sex-routed aliases. So the census states a rule -- "both cohorts, or
+you are an alias" -- rather than a committed list of ids or per-block counts. A count ledger would
+catch the same drops but churn on every legitimate upstream addition, which trains people to bump
+it without reading it. Both halves of the rule derive from existing declarations
+(`clock_fixtures()`, `sex_routed_members()`), so a new clock or a new sex-routed family needs no
+edit here. The residual hole is a clock vanishing from `mc_catalog` entirely -- the census iterates
+the catalog, so it cannot see that; closing it needs a real id ledger, and a missing score column
+is a louder signal anyway.
+
+**Why gated, given it costs nothing to run.** Ungated it would run on every `devtools::test()` and
+on CRAN, which is precisely when the tier it guards is skipped -- the argument for always-on. It
+lost on scope: a fixture census asserts an upstream contract's completeness, which is maintainer
+and CI concern in the same way parity itself is, and CRAN can neither see the meta repo nor act on
+a dropped fixture. CI stages the cohorts and sets the flag, so the gate is open where a bad sync
+actually lands. Accepted consequence: a plain local `devtools::test()` will not catch a dropped
+fixture.
+
+---
+
+## 2026-07-25 -- Zhang2019 parity lands by fixing the fixture's *input*, not its tolerance
+
+**Decision.** `Zhang2019` leaves `KNOWN_PARITY_GAPS`, which is now empty. The parity tier gained
+`needs_full_panel()` + `cohort_betas_full()`: a target whose worklist contains a clock declaring a
+`sample_scale` recipe op is scored on the cohort's **whole array**, not on the union of scoring
+panels. Both cohorts pass at the unchanged `core` bounds -- `max_abs_diff` 9.8e-13 @ EPICv1 and
+3.5e-12 @ 450K, `max_rel_diff` 6.2e-14 and 8.5e-14.
+
+**Why the old skip reason was wrong.** It read "sample_scale moments over needed-CpG subset, not
+full panel; exact parity unreachable" -- but "not full panel" described the *test harness*, not the
+clock. `score_Zhang2019()` already takes its moments over whatever `calc_clocks()` is handed, and
+real users hand it their array; only the fixture loader was narrowing the input to the 514-CpG
+scoring panel. So the unreachable-ness was self-inflicted. Measured on the subset the miss is 1.8e1
+absolute / 82% relative -- which is exactly the size you get from shifting a z-score's centre, and
+is why no tolerance was ever the answer here.
+
+**Why the rule is read off the recipe and not a `FULL_PANEL_CLOCKS` list.** The 2026-07-23 entry
+below proposed a `FULL_PANEL_CLOCKS` constant; it was forward-looking text and never landed (that
+entry's "Zhang leaves `KNOWN_PARITY_GAPS`" paragraph described work that stopped at the scorer).
+A hand-kept list is the thing every other block in this file was refactored away from: the fact
+"this clock's moments span the input matrix" is already declared upstream as `recipe[[i]]$op ==
+"sample_scale"`, so the predicate reads that and a future sample-scale clock gets the full array
+without anyone remembering to add it.
+
+**Cost.** The full array is 866k x 71 (EPICv1) / 473k x 80 (450K) -- ~550 MB and ~350 MB, about 1s
+to read and 1s to score, and only for the two Zhang targets. That is affordable in a tier that is
+already cohort-gated and CRAN-skipped, and it is the only honest input.
+
+---
+
+## 2026-07-25 -- the horvath_online gap is the oracle's input, not our arithmetic; skip it
+
+**Decision.** A fourth parity block, `horvath`, selected by the declared `fixtures[].oracle ==
+"horvath_online"`, skipped wholesale. Parity is now 214 pass / 32 skip / 0 fail. This entry also
+**corrects two claims made earlier the same day** (see "Corrections" below) -- both were wrong, and
+the earlier entry is left standing per append-only.
+
+**What the oracle actually did.** The staged submission (`fixtures/_horvath_submit/{cohort}/
+server_matrix.csv`, 32,136 probes) has **2,567 (EPICv1) / 3,208 (450K) rows that are entirely NA
+and zero partial NAs**. The server filled those server-side with a per-probe constant, then -- for
+the `DNAmAge` column only -- BMIQ'd the 21k panel. Neither the fill values nor the BMIQ'd matrix
+are published. We hold the raw betas, so we drop what it filled.
+
+**Why this is provably not our bug, which is why a tolerance would be a lie.** Every one of these
+clocks is a matmul plus an intercept, so only two things can be wrong: the tensors/intercept, or
+the implementation. Score against the *submitted* matrix and the residual sorts perfectly by
+absent-probe count and by nothing else:
+
+| cohort | clock | absent probes | max rel |
+|---|---|---|---|
+| 450K | Hannum | 0 | 6.1e-08 |
+| 450K | DNAmCystatinC_GrimAgeV1 | 0 | 8.7e-08 |
+| EPICv1 | DNAmTL | 0 | 4.2e-08 |
+| EPICv1 | DNAmTIMP1 | 0 | 5.8e-08 |
+| EPICv1 | Horvath2 | 0 | 2.5e-07 |
+| EPICv1 | GrimAgeV1 | 1 | 7.9e-03 |
+| EPICv1 | DNAmPAI1 | 1 | 1.1e-01 |
+| 450K | DNAmLeptin | 32 | 5.1e-02 |
+| 450K | GrimAgeV1 | 72 | 6.4e-02 |
+
+Agreement to ~1e-8 relative on five independent clocks across both cohorts is not something a wrong
+coefficient or a wrong matmul survives. The tensors and the engine are right; the inputs differ.
+A relaxed bound would have to span 4.2e-08 to 2.7e-01 -- six orders of magnitude -- so it could
+only ever be vacuous. A skip states the truth; a tolerance would launder it.
+
+**What we ruled out, so nobody re-runs it.** Three candidate fill tables all fail: datMini4
+`ProbesMedian` (helps some, badly hurts others -- `DNAmLeptin @ 450K` goes 5.1e-2 -> 1.0), the 27k
+`overallMeanByCpGacross50data` (barely differs from no fill), and the 21k `goldstandard2` (covers
+only the 21k set; `GrimAgeV1` has 47 of 1030 probes there). `betanorm::bmiq_calibration(niter = 5,
+nfit = 21368, goldstandard.beta = probeAnnotation21kdatMethUsed$goldstandard2)` **does** reproduce
+the BMIQ step -- `Horvath1 @ cohort_450K` improves 2.7e-1 -> 1.9e-3, a 140x gain, and it is the
+only clock BMIQ helps -- but EPICv1 stays bad because its 1062 filled probes contaminate the fit.
+Upstream's reference script (`aldringsvitenskap/epigeneticclock/StepwiseAnalysis.R`) confirms the
+order (impute, then BMIQ, then score `DNAmAge` off the normalized matrix) and names
+`goldstandard2` as the fallback fill -- but only above 3000 missing, and only for the 21k
+`DNAmAge` path, so it does not cover the surrogates.
+
+**Corrections to the entry below, made the same day.**
+1. It claimed the `server_normalization` tier "asserted the oracle saw different betas for 28 pairs
+   where it demonstrably did not." Wrong: the oracle *did* see different betas. The field was
+   naming the wrong mechanism (normalization) for a real divergence (the fill), and `["none"]`
+   is a truthful statement about normalization for those 14 clocks.
+2. Mid-investigation we concluded from the run's `Comment` column ("Beta mixture quantile
+   normalization was done", present on 71/71 and 80/80 rows) that BMIQ hit every column and that
+   upstream's `["none"]` was a metadata bug on 14 clocks. **Also wrong** -- BMIQ was *run* on the
+   submission, but only `DNAmAge` consumes the normalized matrix. Measurement settled it: BMIQ
+   improves `Horvath1` 140x and makes all 14 others worse by orders of magnitude. Upstream's
+   metadata is correct as declared. No upstream bug was filed.
+
+**The skip reads the declared oracle, not a clock list**, so a regenerated fixture retires it
+automatically -- the property the `DNAmFitAge` group skip lacked, which is why that one hid 28
+*passing* tests for an unknown number of syncs.
+
+---
+
+## 2026-07-25 (later) -- parity: two axes at 1e-10, blocks split on group, correlation banned outright
+
+**Decision.** Reverses the *tier* half of the earlier entry below, and tightens the grade. Parity
+now grades **both** `max_abs_diff < 1e-10` and `max_rel_diff < 1e-10`; the blocks are **non-FitAge**
+and **DNAmFitAge**, split on `clock_group_id()`; the `DNAmFitAge` group skip is gone; and
+"no correlation as a gate" is promoted from a parity-local remark to a package-wide invariant in
+`CLAUDE.md`.
+
+**1. Correlation is banned as a rule, not as a local choice.** The earlier entry retired it from
+parity only. That left it available to the next person writing a unit test, which is how it got in
+the first time. The invariant now names the two failure modes explicitly -- it is blind to
+intercept shifts and to rescaling, and it concentrates near 1 so a few catastrophically wrong
+samples vanish into a cloud of correct ones -- and extends the same reasoning to `median`/`mean` as
+reducers, which is what `rel_diff()` was still doing. A median relative difference passes with half
+the cohort arbitrarily wrong. `rel_diff()` is now a `max` and a **gate**, not a printed diagnostic.
+
+**2. One axis was never enough, in either direction.** Absolute-only at `1e-6` was failing clocks
+that are numerically correct: measured on the current cohorts, `DNAmCystatinC_GrimAgeV1` sits at
+~4e-8 relative on both cohorts and `DNAmLeptin @ cohort_EPICv1` at ~8e-7, and both blew the
+absolute bound purely because their units are large (pg/mL-scale biomarkers, not ages). Relative-only
+has the mirror hole: a score near zero admits unbounded absolute drift. Requiring both, at the same
+harsh `1e-10`, is the only form that is scale-free without being blind. This supersedes the
+`detail-plan.md` sec 13 follow-up proposing numpy-allclose (`atol + rtol*|exp|`): that form is a
+**sum**, so a generous atol silently forgives a relative miss. Two independent bounds do not.
+
+**3. The `server_normalization` tier split was measuring the wrong thing.** It classified a fixture
+as "horvath online" when `server_normalization` was non-empty. But the field is a registry name
+list, and **28 of the 30 pairs in that tier declare `["none"]`** -- the server applied no
+normalization, so those oracles saw exactly the raw betas we score. Only `Horvath1` (both cohorts)
+is genuinely `["BMIQ"]`. The tier label therefore asserted "the oracle saw different betas" for 28
+pairs where it demonstrably did not, which is worse than no label: it excused real divergences as
+expected. "Non-empty" was in practice a proxy for `oracle == horvath_online` (the field is absent
+for every other oracle), which is a different question from the one the tier claimed to answer.
+
+**4. The blocks split on group id instead.** `DNAmFitAge` is one block, everything else is the
+other. Membership derives from `clock_group_id()`, so there is still no hand-kept clock list.
+
+**5. Unskipping FitAge found 28 passing tests, not 28 failing ones.** This is the entry's most
+useful result and it inverts the previous one. The group skip was added on the belief that the
+fixtures came from a truncated Horvath submission; upstream has since regenerated them from author
+code (every member now declares `oracle: author_code`, `server_normalization` absent), and the
+whole family clears **1e-10 on both axes, 28/28**. The skip had outlived its cause by an unknown
+number of syncs and nothing would have noticed -- a skip keyed to an upstream defect has no way to
+tell you the defect is fixed. Standing state is now FitAge green, non-FitAge 178/36/2. FitAge keeps
+its own block anyway: the retired skip should stay visible until the family has a run of clean
+history. `KNOWN_PARITY_GAP_GROUPS` is now empty but **kept as a separate map** -- the namespace
+collision that motivated it (`DNAmFitAge` is both a group id and a clock id, as are `EpiTOC2`,
+`prcPhenoAge`, `RepliTali`, `SystemsAge`) is unchanged, so folding it into `KNOWN_PARITY_GAPS`
+would reintroduce the ambiguity the moment a group needs skipping again.
+
+**6. Tightening to 1e-10 cost 7 new failures, and they were the predicted ones.** `DNAmTL @
+cohort_EPICv1` (the old lone tier-2 pass) plus `PCB2M`, `PCCystatinC`, `PCPAI1` on both cohorts.
+The PC trio is exactly the class `detail-plan.md` sec 13 flagged as scale-sensitive, so their
+appearance at a harsher bound was the instrument working, not a regression -- and it is what
+motivated the third block (point 7).
+
+**7. A third block for the external packs, relaxing only the scale-sensitive axis.** `parity_block()`
+now classifies each clock as `packs` / `fitage` / `core`, and `PARITY_ABS_TOL` became
+`c(core = 1e-10, fitage = 1e-10, packs = 1e-6)`. `PARITY_REL_TOL` stayed `1e-10` for every block
+and **must not** become per-block: it is scale-free, so a units argument can never justify moving
+it, and per-block relative slack is how a tolerance table turns back into the permission slip
+point 3 describes. Splitting the two axes is what makes "relax this block" a bounded statement
+about units rather than a blanket loosening.
+
+The pack number is measured, not chosen for convenience. Over all 56 pack rows the worst absolute
+miss is 2.05e-8 (`PCB2M @ cohort_450K`, magnitude 3.26e6) -- 6.3e-15 relative, i.e. below the float
+representation floor for a value that size before any arithmetic runs. The worst *relative* miss
+anywhere in the block is 7.5e-13, 130x inside the untouched relative bound, so the block is graded
+strictly on the axis that means something and the relaxation costs no real sensitivity. `1e-6`
+clears the observed worst by ~50x and is still ~3e-13 relative at `PCB2M`'s scale. All 56 pack rows
+pass; nothing was skipped to get there.
+
+**8. What is left red is now a single, named class.** After the split: core 128 pass / 30 fail / 2
+skip, fitage 28/28, packs 56/56, PhysAge 2/2. The 30 failures are exactly the 15 clocks whose
+fixtures declare `oracle: horvath_online`, on both cohorts, and nothing else. That is a far more
+useful queue than the 36 mixed failures it replaced -- the pack noise is gone, FitAge is gone, and
+what remains points at one oracle.
+
+**Not done here.** Root-causing the 36. The measurement of which are scale artifacts vs. real
+divergence, and the cohort asymmetry the earlier entry noted, is deliberately left for the
+follow-up; this entry only fixes the instrument. One datum worth keeping: our derived absent-CpG
+set was checked against upstream's declared `fixtures[].missing` sidecar for all 30 formerly-online
+pairs and agreed exactly, so panel resolution is not implicated. That sidecar is still unread by
+the test suite.
+
+---
+
+## 2026-07-25 -- the citation verb is `cite_clocks()`, a generic we own
+
+**Decision.** The `citation()` plain function the plans promised is now `cite_clocks()`, an S3
+generic with `character` / `mc_result` / `default` methods, returning an `mc_citation` record.
+Shape and rationale: detail-plan sec 8.1.
+
+**Both obvious names are taken, and neither is a generic.** `utils::citation` was ruled out on
+2026-07-23. `cite` looks free and is not: `utils::cite(keys, bib, ...)` is the Rd `\cite` /
+`bibstyle` helper, also a plain function, so `cite <- function(x, ...) UseMethod("cite")` masks it
+for every user who attaches us -- the identical trap one name over. Check `find()` before minting a
+generic; this is the second time the reflex name was already occupied. `cite_clocks()` is
+unclaimed and joins the family the package already has: `list_clocks()`, `calc_clocks()`,
+`cite_clocks()`.
+
+**Dispatch earns its keep at the argument, not the output.** The character method routes through
+`resolve_clocks()`, so the token vocabulary (ids, groups, tags, `"all"`) and the routed-member
+refusal are the ones `calc_clocks()` already teaches -- one namespace, not two. The `mc_result`
+method cites `colnames($scores)` and **does not walk `clock_inputs`**: if a composite owes its
+components' papers, upstream says so with a `cite_also` row. Deriving that edge from the dependency
+graph would be us manufacturing a scientific claim, and it is the same "never search, read the
+declaration" line the accessors hold.
+
+**Raw BibTeX, not `bibentry`.** Base R ships `toBibtex` (a writer, and a real generic we may method
+onto) and no reader. Real `bibentry` objects would cost either a dependency or a LaTeX-aware parser
+of our own -- for a print style. Slicing declared entries out of the vendored file is
+dependency-free and byte-faithful, which matters more than it sounds: 12 entries carry UTF-8
+author names (accented Polish/German/Spanish surnames), so the export line is
+`writeLines(toBibtex(x), "refs.bib", useBytes = TRUE)`. Accepted cost: no `style = "text"`.
+
+**No new export verb.** `print` / `as.data.frame` / `toBibtex` cover console, table and file. A
+`write_bib()` or a `file =` argument would be a third spelling of `writeLines`.
+
+**Registration is the maintainer's.** `#' @export` tags are in the source and nothing else was
+touched; the NAMESPACE entries this implies are listed at the handoff. Until they exist, dispatch
+works under `testthat` (tests run in the package namespace, where `UseMethod` finds the methods
+lexically) and **fails from a user session**, which is a green tier that proves nothing about
+reachability -- noted in CLAUDE.md so the next person does not read the tier as evidence.
+
+---
+
+## 2026-07-25 -- citations key on the clock -> paper join, not on `meta.pmid`
+
+**Decision.** `sync.R` reads `bibliography/clock_citations.csv` and ships the whole 1:N join as
+`mc_citations`. `read_papers_csv()` and the per-clock `entry$bib_key` are deleted; `mc_index$bib_key`
+is replaced by `n_citations`. Design and the resulting invariants: detail-plan sec 8.1.
+
+**The bug was invisible and would have stayed that way.** We joined a clock's *scalar* `meta.pmid`
+to `papers.csv` to get one `bib_key`. Upstream made clock -> paper 1:N on 2026-07-25: a clock can
+cite N papers with `role` `primary` or `cite_also`, and `meta.pmid` only ever names the primary one.
+Every one of the 124 rows on master today is `primary` and equals its meta's `pmid`, so the old path
+returns the right answer for every clock that currently exists. It would have started silently
+under-citing the day a human added one `cite_also` row -- no error on either side of the boundary.
+This is why the fix landed with no failing test to motivate it, and why "no test caught it" is not
+evidence it was fine.
+
+**The `cite_also` gate stays upstream, and that is the whole of it.** No assertion over the real
+table distinguishes a correct reader from a broken one while every row is `primary`, so testing the
+1:N contract needs a synthetic fixture -- which upstream already has in `tests/test_gate.py`. We do
+not repeat it: `sync.R` is maintainer-side tooling the package neither ships nor depends on, and
+reaching its functions from `tests/` means sourcing an Rbuildignored file. A downstream version was
+written and removed the same day; `tests/` covers `R/` and the shipped tables only (rule added to
+CLAUDE.md "Test altitude"). What we do assert downstream is the *shipped* result: every catalog
+clock reaches >= 1 citation, exactly one `primary` per cited clock, aliases resolve through their
+donor, and every `bib_key` exists in `clocks.bib`.
+
+**One store, and the alias points rather than copies.** Keys live once, in `mc_citations`. We
+rejected a `bib_keys` list-column on `mc_index`: it is the same join in a second place, which is the
+duplication upstream keeps deleting. A scalar `bib_key` was worse than absent -- it cannot hold N
+keys, so it silently reports the first. Sex-routed aliases are package-minted and have no upstream
+row; they carry `donor_clock_id` and cite through the donor, so the alias holds no copied key that
+could survive as the last instance of the bug. `pmid` **stays** on the entry and the index: it is
+honest primary-paper provenance, just not the citation source. We did not rename it `primary_pmid`
+-- `FIELD_REGISTRY` mirrors upstream meta field names, and diverging there costs more than the
+ambiguity a comment resolves.
+
+**`clocks.bib` did not move.** Structured join in `sysdata`, human-facing document in `inst/`: users
+want a real `.bib` on disk to feed a manuscript. Parsing it into `sysdata` would give us a second
+copy of the citation text.
+
+**Also in this sync (7db9f2c), not a package change.** `RetroAge450K` / `RetroAgeEPICv2` ->
+`Retroelement_AgeV1` / `Retroelement_AgeV2` (group `RetroAge` -> `Retroelement_Age`): the paper
+describes no 450K clock, so the old id asserted an array split the authors never made. Everything is
+derived, so `sync.R` needed no change and the panels are bit-identical. We added **no** alias from
+the old ids -- upstream's rule is that a consumer pinned to something wrong should break -- and
+nothing in `R/` or `tests/` was pinned to them. SystemsAge's primary paper also moved from the 2024
+preprint (37503069) to the 2025 publication (40954326) across 13 clocks. The three external packs
+rebuilt to **identical** `payload_hash`es, so no release upload is owed.
+
+---
+
+## 2026-07-25 -- parity: drop correlation, split the horvath online tier, skip the FitAge family
+
+**Decision.** Every parity fixture is now graded **exact** (`max_abs_diff < 1e-6`). The
+`server_normalization` field no longer selects a *tolerance*; it selects a *tier*. And the
+`DNAmFitAge` family is skipped wholesale pending regenerated upstream fixtures.
+
+**1. Correlation was the wrong gate, and loosening it further was the wrong fix.** Server-normalized
+fixtures were graded `cor > 0.99`, which is offset- and scale-invariant: it cannot distinguish "we
+match the oracle" from "we are uniformly wrong by a constant." An in-flight patch had already
+noticed this and bolted a median-relative-difference bound (`< 0.10`) alongside the correlation.
+That was still the wrong shape -- a single group-wide relative tolerance has to be set wide enough
+for the *worst* clock in the group, and the measured worst (`Horvath1 @ cohort_EPICv1`, median rel
+8.2e-2) is seven orders of magnitude looser than what most of the group actually achieves. A
+`Hannum` regression from 1e-8 to 1e-2 would have sailed through. Both the correlation bound and the
+relative bound are gone; `rel_diff()` survives only as a number printed in the failure label, to
+make root-causing faster.
+
+**2. We deliberately let the tier go red.** 29 of the 30 non-FitAge (clock, cohort) pairs now fail
+(`DNAmTL @ cohort_EPICv1` is the lone pass). That is the point: the previous policy's job was to
+keep the suite green over a divergence nobody had measured, which is how the divergence survived.
+Standing failures, one test per pair, are the work queue. Tier 1 (raw-beta oracles) is unaffected
+and fully green -- 187 pass, `Zhang2019` skipped -- which is itself evidence the exact tolerance is
+achievable and the problem is specific to the online oracle.
+
+**3. What the measurement actually says (and why the tier split is worth having).** The divergence
+sorts by *cohort*, not by clock. On `cohort_EPICv1` most of the group is exact to ~1e-8 and only
+`Horvath1`, `DNAmPAI1`, `GrimAgeV1` and `GrimAgeV2` move; on `cohort_450K` nearly everything sits
+at 1-6% median relative difference. BMIQ cannot explain that -- server normalization was applied to
+both cohorts, so it would not spare EPICv1. Absent-probe drop-vs-vendor-fill on the sparser 450K
+panel can. Naming the tier "horvath online" rather than "graded loosely" is what makes that
+question askable: a tier-2 failure means "the oracle saw different betas", a tier-1 failure means
+"our arithmetic is wrong", and they route to different people.
+
+**4. The split derives from the declared field, not a clock list.** `parity_targets(online =)`
+filters on `server_normalization` being non-empty and feeds two loops over one shared
+`run_parity_target()` body. A hand-kept "clocks that cannot be exact" table was rejected for the
+same reason it was rejected the first time: it rots the moment an oracle changes, and it turns a
+measurement into a permission slip.
+
+**5. `DNAmFitAge` is skipped as a group, in its own map.** The upstream fixtures were generated by
+a Horvath submission that omits the CpG carrying the largest coefficient, which blows the error up;
+they need regenerating from the author code upstream before the numbers mean anything. Skipping
+by group needed a second map (`KNOWN_PARITY_GAP_GROUPS`) rather than a key in `KNOWN_PARITY_GAPS`,
+because group ids and clock ids share a namespace -- `DNAmFitAge` is *both* a group and a clock
+(as are `EpiTOC2`, `prcPhenoAge`, `RepliTali`, `SystemsAge`), so a single flat map could not say
+which one a key meant.
+
+**Kept.** One file, one duckdb connection per staged cohort. The tier split is two loops inside
+`test-fixtures-parity.R`, not a second file -- splitting files would have forced the per-cohort
+connection setup into a `helper-*.R` for no behavioral gain.
+
+---
+
+## 2026-07-24 -- one noun for the external payloads ("assets"), a session-wide assets dir, and stale reclaim
+
+**Decision.** The external-pack surface said "cache" and "assets" and "data" for overlapping
+things, and one argument meant both a place and a thing. Standardized on **assets** in public
+names, split the dir getter from the resolver, added a setter, and taught the clearer to reclaim
+superseded packs.
+
+**1. "Assets" is the thing; "cache" is only the storage policy.** In SE terms an asset (GitHub
+release asset) or artifact is the payload; a cache is a location holding derived, refetchable
+copies. Both were correct, which is exactly why using them interchangeably was confusing -- and
+the package had a *second*, unrelated `partial_cache` (the cohort-mean fill, `R/missingness.R`)
+threaded through every scorer. Since `partial_cache` is internal-only and never appears in an
+exported name, taking "cache" out of the **public** names removes the collision without touching
+the scoring code. `mc_data_*` was rejected outright: `R_user_dir(which = "data")` means *user data
+you must not delete*, so "data" names the wrong lifecycle.
+
+The public set is now, and is the whole pathing surface:
+
+| `get_mc_assets_dir()` | getter -- the dir in effect |
+| `set_mc_assets_dir(path = NULL)` | setter -- `NULL` clears; returns the old value invisibly |
+| `list_mc_assets(groups)` | read-only table: size / `downloaded` / `superseded` per group |
+| `download_mc_assets(groups, ask)` | fetch kernel: bytes -> disk |
+| `load_mc_assets(groups, from, ask)` | reader: fetch-if-missing -> RAM |
+| `clear_mc_assets(groups, ask)` | delete every pack we put there, superseded included |
+
+Naming rule these follow: **every public name is `<verb>_mc_<noun>`** -- already the settled
+convention (`load_mc_assets` was renamed to the verb form on 2026-07-21), with `mc_data_download()`
+the lone outlier, now `download_mc_assets()`. That the maintainer reached for `download_mc_assets`
+and `set_mc_path` unprompted, and could not find either, is the evidence the convention was right
+and the code broke it in one place. The getter was briefly the bare noun `mc_assets_dir()` on the
+theory that getters are nouns; that left one non-verb in a five-function set and an asymmetric
+get/set pair, so it is `get_mc_assets_dir()` -- matching `getwd()`/`setwd()` and
+`usethis::proj_get()`/`proj_set()`. No bare-noun accessor survives.
+
+**2. The place/thing conflation lived in the `assets` argument.** It accepted a directory path
+*or* loaded packs, which is the confusion made executable. Split: `assets` is now always the
+things, and the argument naming the source is **`from`** (`NULL` open set, a path = closed set, or
+packs in memory) on `load_mc_assets()` / `calc_clocks()` / `sim_DNAm()`.
+
+**3. Dropped the per-call dir override from `download_mc_assets()` and `clear_mc_assets()`.**
+There it could only ever be a plain path -- no closed-set meaning -- so once a session setter
+exists it is pure duplication of the option layer, and it is the precise footgun behind the
+2026-07-23 incident (`clear_mc_cache(assets = my_pack)` resolved a pack to a garbage dir and
+deleted all three cached packs). Tests that pointed at a tempdir with `assets =` now use
+`withr::local_options(mc.assets_dir = ...)`, i.e. the same mechanism users get. Option and env var
+renamed to `mc.assets_dir` / `MC_ASSETS_DIR`; precedence is unchanged (`from` > option > env >
+default).
+
+**4. Re-introducing a setter reverses the 2026-07-22 deletion of `mc_set_cache_dir()`, and the
+reason is new.** It was deleted as unreferenced, which it was. What changed is the HPC case: the
+`R_user_dir()` default is wrong there (home quota, not visible from compute nodes), so users need
+to point at scratch. `options()` alone accepts anything and a typo'd path fails inside `mc_fetch()`
+*after* the consent prompt; `set_mc_assets_dir()` asserts a single non-empty string, expands,
+creates the dir and probes writability, so a bad path fails on line 1 of the job script. It
+returns the previous option value invisibly so `on.exit()` / `withr::defer()` can restore it, and
+`NULL` **clears** the option rather than pinning the default -- otherwise it would permanently
+shadow the env layer and could not round-trip.
+
+**5. The dir must stay `tools::R_user_dir(which = "cache")`.** With "cache" gone from the public
+names, the property CRAN cares about -- derived, reclaimable, safe to delete -- is no longer
+self-evident from the API. Writing it down here so nobody later "fixes" it to `which = "data"`,
+which would be a policy violation. `clear_mc_assets()` remains a real delete for the same reason.
+
+**6. `clear_mc_assets()` removes superseded packs unconditionally -- clear means clear.** Pack
+filenames are content-addressed (`<stem>-<sha256>.qs2`), so every `sync()` that moves a
+`payload_hash` leaves the old file orphaned: the clearer only ever deleted files it could name from
+the current manifest, so the dir grew without bound and the space was unreclaimable -- the exact
+thing the CRAN requirement exists to prevent. `mc_stale_files()` now runs on every call and its
+results always join the deletion set, labelled `<group> (superseded)`.
+
+**This settled on the third try, and the middle one was wrong.** A first draft defaulted
+`stale = TRUE`; that was walked back to `remove_stale = FALSE` plus an informational nudge, on the
+theory that a plain `clear` should not delete files the caller never named. The flag is now gone
+entirely, because that theory misplaced the safety boundary: **the consent gate is the safety, not
+the default.** Nothing is ever deleted without the user seeing the full file list and saying yes
+(or passing `ask = FALSE`), so a "safe" default bought nothing and cost the verb its meaning -- a
+`clear` that leaves files behind is the actual surprise, and it left the CRAN reclaim story needing
+a flag most users would never find. `pak::cache_clean()`, `pip cache purge` and `npm cache clean`
+all wipe; that is the settled ecosystem meaning of the word. The residual worry -- someone's own
+file caught by the scan -- requires a file inside a package-owned `R_user_dir()` cache named with
+our declared stem plus 64 hex plus `.qs2`, which is opting in, not stumbling in.
+
+`mc_delete_summary()` keeps the two kinds visible at the decision point: the prompt, the
+non-interactive refusal and the completion message all read "3 downloaded packs and 3 superseded
+packs", each part formatted separately so its `{?s}` binds to its own count.
+
+This is a deliberate, narrow carve-out from "accessors never search." The scan is not payload
+resolution: it never returns a pack to a scorer, it only enumerates files to delete. It stays
+anchored to declarations anyway -- the stem is read off the **declared** `file` field
+(`mc_asset_stem()`), never guessed from the group id, and only the 64-hex hash is a wildcard -- so
+a foreign stem, an uncontent-addressed file, or a group whose declared name does not match the
+expected shape are all skipped rather than guessed at. A stale-*only* mode is deliberately not
+exposed: minimal surface pre-alpha, and promoting later is cheap where un-exporting after release
+is not.
+
+**7. `list_mc_assets()` exists because every read-only question needed a mutating verb to answer
+it.** This reverses the same-day call to keep `mc_cached_files()` internal ("minimal surface,
+promote later"), and what changed is stale detection. With three distinct on-disk states
+(declared-and-staged, declared-and-missing, superseded) the only way to see any of them was
+`clear_mc_assets()` -- a *deleter*, which refuses non-interactively -- and the only way to preview
+download sizes was to trigger the consent prompt or actually fetch. Read-only questions get a
+read-only answer: a `list_clocks()`-style data.frame of `group_id / n_clocks / n_cpgs / size /
+downloaded / superseded / superseded_size`, no prompting, no network, no writes.
+
+**Not** an overload of `download_mc_assets()` (the considered alternative). Its no-arg form already
+means "download everything", so re-purposing it silently breaks that; the return type would vary by
+arity; and a verb named `download` that sometimes does not download is the same place/thing
+polymorphism this entry deleted from `assets`. Sizes are `fs::fs_bytes` columns -- they print as
+`8.88M` and still sum -- assigned after `data.frame()` so the class is not stripped. Maintainer-side
+plumbing (`release_tag`, `file`, URLs) stays out; it does not inform any user decision. One
+follow-on cleanup: `mc_stale_files()` now keys by plain `group_id` and the `" (superseded)"`
+decoration is applied at the display layer (`mc_stale_labels()`), so the lister does not have to
+re-parse a label to recover the group.
+
+**8. Consent prompts: cli renders, `askYesNo()` asks one line.** The prompts were built with
+`paste0()` into a single multi-line string handed to `askYesNo()`, which forwards it to
+`readline()` -- whose `prompt` argument is meant to be one short line. Embedded newlines render
+malformed on Windows, which is how this surfaced. All prompts now go through `mc_ask_yes_no()`:
+`cli_inform()` for the header and dir, `cli::cli_verbatim()` for the aligned size table (verbatim
+is the piece that matters -- cli would otherwise reflow the padding away), then a single-line
+question. Its `header` arrives pre-formatted via `cli::format_inline()` in the *caller's* frame,
+because a plural marker or interpolation evaluated inside the helper would resolve against the
+helper's variables, and interpolating the finished string as a value stops it being re-parsed for
+braces.
+
+The same pass fixed a latent instance of the documented reflow hazard: the **non-interactive**
+refusals interpolated the aligned block into a `cli_abort()` bullet (`" " = "{manifest}"`), where
+cli collapsed the whole table onto one line. Conditions cannot use `cli_verbatim`, so those paths
+now carry no alignment at all -- `mc_manifest_bullets()` emits one self-contained `group (size)`
+bullet per pack. Rule of thumb now in CLAUDE.md: aligned block -> `cli_verbatim`; anywhere reflow
+is unavoidable -> one self-contained bullet per row.
+
+**Also.** The five functions are exported for the first time (hand-written `NAMESPACE`, roxygen
+still off) -- none of them were reachable without `load_all()`, which is the other half of why
+they looked missing. `calc_clocks()` and the rest of the API remain unexported; that is a separate
+gap.
+
+---
+
 ## 2026-07-24 -- always-on tier trimmed to one golden per scoring path; sim-smoke kept for its configuration, not its clock list
 
 **Decision.** Cut ~114 lines of duplicated always-on tests, and restate why `test-sim-smoke.R`
@@ -1229,7 +1825,7 @@ Net effect is 129 lines of scorer and 85 lines of accessor removed for no behavi
 `Female` now enters the family through exactly one door (GrimAgeV1's `stack` covariate).
 
 **The trap this exposed, and why the fix is repo-wide.** The new member entries carry their `Age`
-coefficient on the recipe step, not at top level. `clock_covariate_coefs()` read
+coefficient on the recipe step, not at top level. `clock_covariates_coefs()` read
 `entry$covariates`, and `$` on a list **partial-matches** -- it silently resolved to
 `covariates_required`, the unnamed string `"Age"`, which `covariate_coefs_from()` maps to
 `numeric(0)`. Members would have scored without their Age term (-0.222 on `DNAmGrip_wAge_Female`)
@@ -2347,11 +2943,11 @@ scoring CpGs with `covers`/`shared` absent from all 113 entries.
 
 **Kept.** `components` and `recipe` stay -- they are the pack scorers' runtime instruction set,
 not group duplication. Membership at runtime comes from `mc_groups$members`, never a resurrected
-`covers`. Added `clock_covariate_coefs()` so the just-confirmed uniform `$covariates` coef map is
+`covers`. Added `clock_covariates_coefs()` so the just-confirmed uniform `$covariates` coef map is
 read through the accessor layer.
 
 **Sites.** `data-raw/sync.R` (`CATALOG_BUILD_ONLY_FIELDS`, `build_sysdata`); `R/accessors.R`
-(`clock_covariate_coefs`, `clock_coefs` now routes on `weights_format`).
+(`clock_covariates_coefs`, `clock_coefs` now routes on `weights_format`).
 
 ---
 

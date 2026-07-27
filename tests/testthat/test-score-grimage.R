@@ -57,7 +57,7 @@ test_that("GrimAge surrogates go NA only where they consume the missing covariat
 
   uses_age <- vapply(
     deps,
-    function(d) "Age" %in% names(clock_covariate_coefs(d)),
+    function(d) "Age" %in% names(clock_covariates_coefs(d)),
     logical(1L)
   )
   expect_true(any(uses_age) && !all(uses_age)) # both arms are exercised

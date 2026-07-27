@@ -16,6 +16,7 @@ CLAUDE.local.md
 # (tracked so CLAUDE.md's pointer resolves in a fresh clone).
 # Everything else -- legacy/, scratch.R, clock_tracker.csv, build scripts -- stays local.
 dev/*
+!dev/id-streaming-plan.md
 !dev/migration-plan.md
 !dev/detail-plan.md
 !dev/DECISIONS.md

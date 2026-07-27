@@ -1,6 +1,8 @@
-# external clock-data packs (content-addressed qs2, fetched on demand)
-
+# external clock-data assets (content-addressed qs2 packs, fetched on demand)
 MC_DEFAULT_RELEASE_REPO <- "hhp94/methylCIPHERv2"
+
+# content-addressed tail of a pack filename: <stem>-<sha256>.qs2
+MC_ASSET_SUFFIX <- "-[0-9a-f]{64}\\.qs2$"
 
 mc_external_groups <- function() {
   assets <- mc_provenance[["external_assets"]]
@@ -45,8 +47,8 @@ mc_asset_url <- function(row) {
   )
 }
 
-# default per-user cache dir
-mc_default_cache_dir <- function() {
+# default per-user assets dir (an R_user_dir cache: reclaimable, never "data")
+mc_default_assets_dir <- function() {
   as.character(fs::path_expand(
     tools::R_user_dir("methylCIPHERv2", which = "cache")
   ))
@@ -57,34 +59,75 @@ is_path_string <- function(x) {
   is.character(x) && length(x) == 1L && !is.na(x) && nzchar(x)
 }
 
-# active cache dir: assets arg, option, env, then default
-mc_cache_dir <- function(assets = NULL) {
-  if (!is.null(assets)) {
-    if (!is_path_string(assets)) {
+# active assets dir: `from` arg, option, env, then default
+mc_resolve_assets_dir <- function(from = NULL) {
+  if (!is.null(from)) {
+    if (!is_path_string(from)) {
       cli::cli_abort(
         c(
-          "{.arg assets} must be {.code NULL} or a single cache-dir path
-           (got {class(assets)[[1L]]} of length {length(assets)}).",
-          "i" = "A loaded pack is not a cache dir -- pass packs only to
+          "{.arg from} must be {.code NULL} or a single assets-dir path
+           (got {class(from)[[1L]]} of length {length(from)}).",
+          "i" = "A loaded pack names no directory -- pass packs only to
                  {.fn load_mc_assets}."
         ),
         call = NULL
       )
     }
-    return(as.character(fs::path_expand(assets)))
+    return(as.character(fs::path_expand(from)))
   }
-  opt <- getOption("mc.cache_dir")
+  opt <- getOption("mc.assets_dir")
   if (is_path_string(opt)) {
     return(as.character(fs::path_expand(opt)))
   }
-  env <- Sys.getenv("MC_CACHE_DIR", unset = "")
+  env <- Sys.getenv("MC_ASSETS_DIR", unset = "")
   if (is_path_string(env)) {
     return(as.character(fs::path_expand(env)))
   }
-  mc_default_cache_dir()
+  mc_default_assets_dir()
 }
 
-# cache paths for provenance rows, in order
+# the assets dir in effect for this session
+get_mc_assets_dir <- function() {
+  mc_resolve_assets_dir()
+}
+
+# set the session-wide assets dir; NULL clears it so the env var / default
+# apply again. Returns the previous option value invisibly, so a caller can
+# restore it with on.exit() or withr::defer().
+set_mc_assets_dir <- function(path = NULL) {
+  old <- getOption("mc.assets_dir")
+  if (is.null(path)) {
+    options(mc.assets_dir = NULL)
+    return(invisible(old))
+  }
+  if (!is_path_string(path)) {
+    cli::cli_abort(
+      "{.arg path} must be {.code NULL} or a single non-empty string
+       (got {class(path)[[1L]]} of length {length(path)}).",
+      call = NULL
+    )
+  }
+  dir <- as.character(fs::path_expand(path))
+  tryCatch(
+    fs::dir_create(dir),
+    error = function(e) {
+      cli::cli_abort(
+        "Can't create assets dir {.path {dir}}: {conditionMessage(e)}.",
+        call = NULL
+      )
+    }
+  )
+  if (!isTRUE(unname(fs::file_access(dir, "write")))) {
+    cli::cli_abort(
+      "Assets dir {.path {dir}} is not writable.",
+      call = NULL
+    )
+  }
+  options(mc.assets_dir = dir)
+  invisible(old)
+}
+
+# staged paths for provenance rows, in order
 mc_pack_paths <- function(dir, rows) {
   if (!length(rows)) {
     return(character(0))
@@ -93,19 +136,41 @@ mc_pack_paths <- function(dir, rows) {
   as.character(fs::path(dir, files))
 }
 
-# label + size block for consent prompts
-mc_manifest <- function(labels, sizes) {
+# aligned "label  size" lines, for cli_verbatim only -- cli reflows whitespace,
+# so these must never be interpolated into a bullet
+mc_manifest_lines <- function(labels, sizes) {
   if (!length(labels)) {
-    return("")
+    return(character(0))
   }
   sizes <- as.numeric(sizes)
   cells <- format(fs::fs_bytes(c(sizes, sum(sizes))))
   w <- max(nchar(labels), nchar("total"))
-  rows <- sprintf("  %-*s  %s", w, labels, cells[seq_along(labels)])
+  out <- sprintf("  %-*s  %s", w, labels, cells[seq_along(labels)])
   if (length(labels) > 1L) {
-    rows <- c(rows, sprintf("  %-*s  %s", w, "total", cells[[length(cells)]]))
+    out <- c(out, sprintf("  %-*s  %s", w, "total", cells[[length(cells)]]))
   }
-  paste(rows, collapse = "\n")
+  out
+}
+
+# one bullet per pack -- no alignment, so it survives cli's reflow
+mc_manifest_bullets <- function(labels, sizes) {
+  sizes <- as.numeric(sizes)
+  items <- sprintf("%s (%s)", labels, trimws(format(fs::fs_bytes(sizes))))
+  if (length(labels) > 1L) {
+    items <- c(
+      items,
+      sprintf("total (%s)", trimws(format(fs::fs_bytes(sum(sizes)))))
+    )
+  }
+  bullets(items)
+}
+
+# cli renders the context, askYesNo asks one short line
+mc_ask_yes_no <- function(header, labels, sizes, dir, question) {
+  cli::cli_inform(c("i" = "{header}", "i" = "Assets dir: {.path {dir}}"))
+  cli::cli_verbatim(mc_manifest_lines(labels, sizes))
+  utils::flush.console()
+  isTRUE(utils::askYesNo(question))
 }
 
 # stage, validate, atomic rename -- returns path + payload
@@ -159,31 +224,30 @@ mc_consent <- function(rows, dir, ask) {
   }
   ids <- vapply(rows, function(r) r[["group_id"]], character(1))
   sizes <- vapply(rows, function(r) as.numeric(r[["size_bytes"]]), numeric(1))
-  manifest <- mc_manifest(ids, sizes)
 
   if (!interactive()) {
     cli::cli_abort(
       c(
         "Can't download {length(rows)} clock-data pack{?s} without
          confirmation in a non-interactive session.",
-        "i" = "Cache dir: {.path {dir}}",
-        " " = "{manifest}",
+        "i" = "Assets dir: {.path {dir}}",
+        mc_manifest_bullets(ids, sizes),
         "i" = "Pass {.code ask = FALSE} to consent, or pre-stage the files
-               and point {.arg assets} at them."
+               and point {.arg from} at them."
       ),
       call = NULL
     )
   }
-  ok <- utils::askYesNo(paste0(
-    "Download ",
-    length(rows),
-    " clock-data pack(s) into\n  ",
-    dir,
-    "\n\n",
-    manifest,
-    "\n\nProceed?"
-  ))
-  if (!isTRUE(ok)) {
+  ok <- mc_ask_yes_no(
+    header = cli::format_inline(
+      "Download {length(rows)} clock-data pack{?s}:"
+    ),
+    labels = ids,
+    sizes = sizes,
+    dir = dir,
+    question = sprintf("Download %d pack(s)?", length(rows))
+  )
+  if (!ok) {
     cli::cli_abort(
       "Download declined for {.val {ids}}.",
       call = NULL
@@ -192,11 +256,11 @@ mc_consent <- function(rows, dir, ask) {
   invisible(TRUE)
 }
 
-# pre-fetch packs into the cache
-mc_data_download <- function(groups = "all", assets = NULL, ask = TRUE) {
+# pre-fetch packs into the assets dir
+download_mc_assets <- function(groups = "all", ask = TRUE) {
   checkmate::assert_flag(ask)
   groups <- mc_resolve_groups(groups)
-  dir <- mc_cache_dir(assets)
+  dir <- mc_resolve_assets_dir()
   rows <- lapply(groups, mc_asset)
   files <- mc_pack_paths(dir, rows)
   missing <- unname(!fs::file_exists(files))
@@ -209,51 +273,154 @@ mc_data_download <- function(groups = "all", assets = NULL, ask = TRUE) {
   invisible(stats::setNames(files, groups))
 }
 
-# packs present in the cache, named by group id
-mc_cached_files <- function(groups = "all", assets = NULL) {
+# currently declared packs present in the assets dir, named by group id
+mc_staged_files <- function(groups = "all") {
   groups <- mc_resolve_groups(groups)
-  files <- mc_pack_paths(mc_cache_dir(assets), lapply(groups, mc_asset))
+  dir <- mc_resolve_assets_dir()
+  files <- mc_pack_paths(dir, lapply(groups, mc_asset))
   files <- stats::setNames(files, groups)
   files[fs::file_exists(files)]
 }
 
-# NULL (open), cache-dir path, or loaded pack registry
-mc_canonicalize_assets <- function(assets) {
-  if (is.null(assets)) {
+# filename stem a group's packs are content-addressed under, read off the
+# declared file name -- never guessed from the group id. NA when the declared
+# name is not <stem>-<hash>.qs2.
+mc_asset_stem <- function(row) {
+  file <- as.character(row[["file"]])
+  stem <- sub(MC_ASSET_SUFFIX, "", file)
+  if (identical(stem, file)) NA_character_ else stem
+}
+
+# superseded packs: a group's declared stem carrying some other content hash,
+# left behind when a sync moved payload_hash. This is reclaim, not resolution
+# -- it never returns a payload, and only the hash is a wildcard.
+mc_stale_files <- function(groups = "all") {
+  groups <- mc_resolve_groups(groups)
+  dir <- mc_resolve_assets_dir()
+  empty <- stats::setNames(character(0), character(0))
+  if (!fs::dir_exists(dir)) {
+    return(empty)
+  }
+  on_disk <- as.character(fs::path_file(
+    fs::dir_ls(dir, type = "file", recurse = FALSE)
+  ))
+  if (!length(on_disk)) {
+    return(empty)
+  }
+  addressed <- on_disk[grepl(MC_ASSET_SUFFIX, on_disk)]
+  out <- character(0)
+  labels <- character(0)
+  for (g in groups) {
+    row <- mc_asset(g)
+    stem <- mc_asset_stem(row)
+    if (is.na(stem)) {
+      next
+    }
+    hit <- addressed[startsWith(addressed, paste0(stem, "-"))]
+    hit <- setdiff(hit, as.character(row[["file"]]))
+    if (!length(hit)) {
+      next
+    }
+    out <- c(out, as.character(fs::path(dir, hit)))
+    labels <- c(labels, rep(g, length(hit)))
+  }
+  stats::setNames(out, labels)
+}
+
+# display label for a superseded pack -- decoration lives here, never in the
+# names of the data, so callers key by group id
+mc_stale_labels <- function(stale) {
+  if (!length(stale)) {
+    return(character(0))
+  }
+  paste0(names(stale), " (superseded)")
+}
+
+# browsable table: what exists, how big, what is downloaded, what is reclaimable
+list_mc_assets <- function(groups = "all") {
+  groups <- mc_resolve_groups(groups)
+  dir <- mc_resolve_assets_dir()
+  rows <- lapply(groups, mc_asset)
+  stale <- mc_stale_files(groups)
+  stale_size <- if (length(stale)) {
+    as.numeric(fs::file_size(stale))
+  } else {
+    numeric(0)
+  }
+  from_row <- function(field, mode) {
+    vapply(rows, function(r) as.vector(r[[field]], mode), vector(mode, 1L))
+  }
+
+  out <- data.frame(
+    group_id = groups,
+    n_clocks = from_row("n_clocks", "integer"),
+    n_cpgs = from_row("n_cpgs", "integer"),
+    downloaded = unname(fs::file_exists(mc_pack_paths(dir, rows))),
+    superseded = vapply(
+      groups,
+      function(g) sum(names(stale) == g),
+      integer(1L),
+      USE.NAMES = FALSE
+    ),
+    stringsAsFactors = FALSE,
+    row.names = NULL
+  )
+  # assigned after the fact so data.frame() cannot strip the fs_bytes class
+  out[["size"]] <- fs::fs_bytes(from_row("size_bytes", "double"))
+  out[["superseded_size"]] <- fs::fs_bytes(vapply(
+    groups,
+    function(g) sum(stale_size[names(stale) == g]),
+    numeric(1L),
+    USE.NAMES = FALSE
+  ))
+  out[c(
+    "group_id",
+    "n_clocks",
+    "n_cpgs",
+    "size",
+    "downloaded",
+    "superseded",
+    "superseded_size"
+  )]
+}
+
+# NULL (open), assets-dir path, or loaded pack registry
+mc_canonicalize_from <- function(from) {
+  if (is.null(from)) {
     return(NULL)
   }
-  if (is.character(assets)) {
-    if (!is_path_string(assets)) {
+  if (is.character(from)) {
+    if (!is_path_string(from)) {
       cli::cli_abort(
-        "{.arg assets} path must be a single non-empty string.",
+        "{.arg from} path must be a single non-empty string.",
         call = NULL
       )
     }
-    return(assets)
+    return(from)
   }
   is_pack <- function(x) is.list(x) && !is.null(x[["group_id"]])
-  if (is_pack(assets)) {
-    return(stats::setNames(list(assets), assets[["group_id"]]))
+  if (is_pack(from)) {
+    return(stats::setNames(list(from), from[["group_id"]]))
   }
   if (
-    is.list(assets) &&
-      length(assets) &&
-      all(vapply(assets, is_pack, logical(1)))
+    is.list(from) &&
+      length(from) &&
+      all(vapply(from, is_pack, logical(1)))
   ) {
     return(stats::setNames(
-      assets,
-      vapply(assets, function(p) as.character(p[["group_id"]]), character(1))
+      from,
+      vapply(from, function(p) as.character(p[["group_id"]]), character(1))
     ))
   }
   cli::cli_abort(
-    "{.arg assets} must be {.code NULL}, a cache-dir path, a loaded pack,
+    "{.arg from} must be {.code NULL}, an assets-dir path, a loaded pack,
      or a list of loaded packs.",
     call = NULL
   )
 }
 
-# load packs for needed groups
-load_mc_assets <- function(groups, assets = NULL, ask = TRUE) {
+# load packs for needed groups into memory
+load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
   checkmate::assert_flag(ask)
   groups <- unique(as.character(groups))
   groups <- groups[nzchar(groups)]
@@ -265,7 +432,7 @@ load_mc_assets <- function(groups, assets = NULL, ask = TRUE) {
   }
   rows <- lapply(groups, mc_asset)
 
-  canon <- mc_canonicalize_assets(assets)
+  canon <- mc_canonicalize_from(from)
 
   if (is.list(canon)) {
     packs <- lapply(groups, function(g) {
@@ -273,9 +440,9 @@ load_mc_assets <- function(groups, assets = NULL, ask = TRUE) {
       if (is.null(pack)) {
         cli::cli_abort(
           c(
-            "Need pack {.val {g}}, but it is not in {.arg assets}.",
-            "i" = "Closed set -- no download. Include it in {.arg assets}
-                   or pass a cache dir / {.code NULL}."
+            "Need pack {.val {g}}, but it is not in {.arg from}.",
+            "i" = "Closed set -- no download. Include it in {.arg from}
+                   or pass an assets dir / {.code NULL}."
           ),
           call = NULL
         )
@@ -285,7 +452,7 @@ load_mc_assets <- function(groups, assets = NULL, ask = TRUE) {
     extra <- setdiff(names(canon), groups)
     if (length(extra)) {
       cli::cli_warn(
-        "Ignoring unused pack{?s} in {.arg assets}: {.val {extra}}.",
+        "Ignoring unused pack{?s} in {.arg from}: {.val {extra}}.",
         call = NULL
       )
     }
@@ -294,7 +461,7 @@ load_mc_assets <- function(groups, assets = NULL, ask = TRUE) {
 
   # path = closed set (no download), NULL = open set
   closed <- !is.null(canon)
-  dir <- mc_cache_dir(canon)
+  dir <- mc_resolve_assets_dir(canon)
   files <- mc_pack_paths(dir, rows)
   missing <- unname(!fs::file_exists(files))
   packs <- vector("list", length(groups))
@@ -306,7 +473,7 @@ load_mc_assets <- function(groups, assets = NULL, ask = TRUE) {
           "Pack{?s} {.val {groups[missing]}} not found in
            {.path {dir}}.",
           "i" = "Closed set -- no download. Stage the file{?s} there, or
-                 pass {.code assets = NULL} to allow download."
+                 pass {.code from = NULL} to allow download."
         ),
         call = NULL
       )
@@ -324,8 +491,21 @@ load_mc_assets <- function(groups, assets = NULL, ask = TRUE) {
   stats::setNames(packs, groups)
 }
 
-# consent for deleting cached packs
-mc_consent_delete <- function(files, dir, ask) {
+# "2 downloaded packs and 3 superseded packs" -- whichever parts are non-zero.
+# Each part is formatted on its own so its {?s} binds to its own count.
+mc_delete_summary <- function(n_downloaded, n_stale) {
+  parts <- character(0)
+  if (n_downloaded) {
+    parts <- c(parts, cli::format_inline("{n_downloaded} downloaded pack{?s}"))
+  }
+  if (n_stale) {
+    parts <- c(parts, cli::format_inline("{n_stale} superseded pack{?s}"))
+  }
+  paste(parts, collapse = " and ")
+}
+
+# consent for deleting packs
+mc_consent_delete <- function(files, dir, ask, n_stale = 0L) {
   if (!ask) {
     return(TRUE)
   }
@@ -334,41 +514,41 @@ mc_consent_delete <- function(files, dir, ask) {
   if (is.null(labels)) {
     labels <- as.character(fs::path_file(files))
   }
-  manifest <- mc_manifest(labels, sizes)
+  what <- mc_delete_summary(length(files) - n_stale, n_stale)
 
   if (!interactive()) {
     cli::cli_abort(
       c(
-        "Can't delete {length(files)} cached pack{?s} without confirmation
-         in a non-interactive session.",
-        "i" = "Cache dir: {.path {dir}}",
-        " " = "{manifest}",
+        "Can't delete {what} without confirmation in a non-interactive
+         session.",
+        "i" = "Assets dir: {.path {dir}}",
+        mc_manifest_bullets(labels, sizes),
         "i" = "Pass {.code ask = FALSE} to consent."
       ),
       call = NULL
     )
   }
-  isTRUE(utils::askYesNo(paste0(
-    "Delete ",
-    length(files),
-    " cached clock-data pack(s) from\n  ",
-    dir,
-    "\n\n",
-    manifest,
-    "\n\nProceed?"
-  )))
+  mc_ask_yes_no(
+    header = paste0("Delete ", what, ":"),
+    labels = labels,
+    sizes = sizes,
+    dir = dir,
+    question = sprintf("Delete %d pack(s)?", length(files))
+  )
 }
 
-# remove cached external packs
-clear_mc_cache <- function(groups = "all", assets = NULL, ask = TRUE) {
+# remove every pack this package put in the assets dir
+clear_mc_assets <- function(groups = "all", ask = TRUE) {
   checkmate::assert_flag(ask)
-  dir <- mc_cache_dir(assets)
-  files <- mc_cached_files(groups, assets)
+  dir <- mc_resolve_assets_dir()
+  downloaded <- mc_staged_files(groups)
+  stale <- mc_stale_files(groups)
+  files <- c(downloaded, stats::setNames(stale, mc_stale_labels(stale)))
   if (!length(files)) {
-    cli::cli_inform("No cached clock data to clear in {.path {dir}}.")
+    cli::cli_inform("No clock assets to clear in {.path {dir}}.")
     return(invisible(character(0)))
   }
-  if (!mc_consent_delete(files, dir, ask)) {
+  if (!mc_consent_delete(files, dir, ask, n_stale = length(stale))) {
     cli::cli_inform("Deletion declined -- nothing removed from {.path {dir}}.")
     return(invisible(character(0)))
   }
@@ -378,14 +558,14 @@ clear_mc_cache <- function(groups = "all", assets = NULL, ask = TRUE) {
   if (length(failed)) {
     cli::cli_abort(
       c(
-        "Could not remove {length(failed)} cached file{?s}:",
+        "Could not remove {length(failed)} file{?s}:",
         bullets(failed)
       ),
       call = NULL
     )
   }
   cli::cli_inform(
-    "Removed {length(files)} cached pack{?s}
+    "Removed {mc_delete_summary(length(downloaded), length(stale))}
      ({format(fs::fs_bytes(freed))}) from {.path {dir}}."
   )
   invisible(files)

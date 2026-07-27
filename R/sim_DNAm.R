@@ -13,7 +13,7 @@ sim_DNAm <- function(
   Age = FALSE,
   Female = FALSE,
   remove = 0,
-  assets = NULL,
+  from = NULL,
   ask = TRUE
 ) {
   checkmate::assert_flag(Age)
@@ -21,7 +21,7 @@ sim_DNAm <- function(
   checkmate::assert_int(remove, lower = 0)
 
   clock_sequence <- resolve_clocks_sequence(resolve_clocks(clocks))
-  packs <- load_mc_assets(pack_groups_needed(clock_sequence), assets, ask)
+  packs <- load_mc_assets(pack_groups_needed(clock_sequence), from, ask)
   cpgs <- clock_cpgs(clock_sequence, packs)
   if (remove > 0) {
     n_drop <- min(remove, length(cpgs))

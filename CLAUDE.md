@@ -58,8 +58,10 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   `$coverage`, `$provenance`. Never a `matrix` subclass (drops class + attrs on first subset).
   Verbs are methods (`print`, `as.matrix`, `as.data.frame`, `[`, `cbind`, `augment`, ...), with
   three settled exceptions: coverage is the plain `clocks_coverage()` / `samples_coverage()`,
-  **not** `summary()`; `rbind` **refuses**; `citation` / `codebook` are plain functions, since
-  `utils::citation` is not an S3 generic (DECISIONS 2026-07-23, 2026-07-24).
+  **not** `summary()`; `rbind` **refuses**; `codebook` is a plain function. Citations dispatch as
+  `cite_clocks()` -- a **package-owned** generic, because both `utils::citation` and `utils::cite`
+  already exist as plain functions and taking either name masks it (DECISIONS 2026-07-23,
+  2026-07-24, 2026-07-25).
 - **Scores only, and the record remembers its inputs.** `$scores` is scores and
   `as.data.frame()` is scores plus the id column -- no auto-appended phenotype columns on either.
   Separately, `$pheno` carries the *aligned* pheno narrowed to the id column plus the covariates
@@ -100,9 +102,25 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   they cannot drift.
 - **No network at install/build/check/CRAN test.** Double-precision coefficients only.
 - **No commit SHA / pin as result provenance.** Correctness is proven by fixtures.
+- **Correlation is never a numeric gate. Anywhere, for anything.** Not in parity, not in a unit
+  test, not as a "sanity check" alongside a real bound. `cor()` is offset- and scale-invariant, so
+  it cannot distinguish "we match the oracle" from "we are uniformly wrong": a constant intercept
+  shift of any size and an arbitrary rescaling both score ~1.0. It also concentrates near 1 for any
+  monotone-ish agreement, which hides catastrophic per-sample outliers in a cloud of correct
+  points. A numeric agreement gate is always a **bounded per-element difference** -- absolute and
+  relative, both, taken as a `max` -- so one bad sample fails the test. The same reasoning bans
+  `median`/`mean` as the reducer over per-element differences: any statistic that averages away a
+  minority of arbitrarily-wrong samples is the same bug wearing a different name.
 - **No roxygen yet.** Do not write roxygen blocks or run `devtools::document()`; use short `#`
   comments (see "Comments"). Turning roxygen on is a human-decided override tied to the alpha --
-  no automatic trigger. `NAMESPACE` and `man/*.Rd` stay hand-managed; do not regenerate them.
+  no automatic trigger.
+- **Never edit `NAMESPACE` or `man/*.Rd`, and never regenerate them.** The maintainer owns the
+  package's exported surface and handles it by hand. A new export or S3 method gets a bare
+  `#' @export` tag beside the function (existing precedent in `R/generics.R`) and nothing else --
+  then say in your summary which `export()` / `S3method()` entries the change implies, and stop.
+  Note that until those entries exist, S3 dispatch works inside `testthat` (tests run in the
+  package namespace) but **not** from a user session, so a green test tier is not evidence the
+  method is reachable.
 
 ## sync.R workflow (`data-raw/sync.R`)
 
@@ -112,8 +130,9 @@ contribute** (the catalog is committed). `sync()` needs read access to `methylCI
 (private, pre-release); `sync(upload = TRUE)` also needs a release-write token (maintainer-only).
 
 - **Remote:** `https://github.com/hhp94/methylCIPHER-meta.git`.
-- **Inputs R may read:** `manifest.json`, `weights/**`, `bibliography/{papers.csv,clocks.bib}`.
-  **Never** `control/`, `papers/`, or `scripts/`.
+- **Inputs R may read:** `manifest.json`, `weights/**`,
+  `bibliography/{clock_citations.csv,clocks.bib}`. **Never** `control/`, `papers/`, `scripts/`, or
+  `bibliography/papers.csv`.
 - **Entry point:** `sync(source_git_sha = NULL, upload = FALSE, force = FALSE)`.
   1. Resolve + checkout meta at `source_git_sha` (clone under `data-raw/methylCIPHER-meta/`).
   2. **Always** rebuild catalog + accessor objects + small bundles -> `R/sysdata.rda` (~2s, no
@@ -139,16 +158,40 @@ contribute** (the catalog is committed). `sync()` needs read access to `methylCI
 - **Distribution tiers:** small groups ship **bundled** in `R/sysdata.rda`; the three heavy packs
   ship **external** as release assets, cached at runtime in
   `tools::R_user_dir("methylCIPHERv2", "cache")`. No silent first-use download.
-- **The cache moves in both directions under one consent rule.** `load_mc_assets()` /
-  `mc_data_download()` fill it and `clear_mc_cache()` empties it; all three take `ask`, prompt
-  interactively, **refuse** non-interactively, and treat `ask = FALSE` as the explicit consent
-  signal. Nothing is fetched or deleted unprompted -- CRAN requires a supported way to reclaim
-  `R_user_dir()`, so `clear_mc_cache()` must stay a real delete, not a report.
-  **Both gate arguments fail closed.** `ask` is a strict flag: only `FALSE` consents, and anything
-  that is not a single non-NA logical is an error, never permission. `assets` reaching
-  `mc_cache_dir()` is a path or `NULL` only -- a loaded pack names no directory, so it stops rather
-  than falling back to the default cache dir. Both were silent widenings of "permission" once
+- **"Assets" are the packs; the dir holding them is a cache only in the CRAN sense.** Public names
+  say **assets** and nothing else, and **every one of them is `<verb>_mc_<noun>`** --
+  `get_mc_assets_dir()` / `set_mc_assets_dir()` (the setter `NULL`-clears and returns the old value
+  invisibly), `list_mc_assets()` (read-only table), `download_mc_assets()` (bytes -> disk),
+  `load_mc_assets()` (-> RAM), `clear_mc_assets()` (delete). That is the whole pathing surface;
+  there is no bare-noun accessor. **Every read-only question has a read-only answer** --
+  `list_mc_assets()` reports size / `downloaded` / `superseded` per group without prompting,
+  fetching or deleting, so no one has to call a mutating verb to find out what is on disk.
+  The word "cache" is reserved for the unrelated internal `partial_cache` (cohort-mean fill). The
+  dir itself must stay `tools::R_user_dir(..., "cache")` -- derived, reclaimable, never
+  `which = "data"` (DECISIONS 2026-07-24).
+- **Assets move in both directions under one consent rule.** `load_mc_assets()` /
+  `download_mc_assets()` fill the dir and `clear_mc_assets()` empties it; all three take `ask`,
+  prompt interactively, **refuse** non-interactively, and treat `ask = FALSE` as the explicit
+  consent signal. Nothing is fetched or deleted unprompted -- CRAN requires a supported way to
+  reclaim `R_user_dir()`, so `clear_mc_assets()` must stay a real delete, not a report.
+  **Clear means clear** (`pak::cache_clean()` semantics): it removes the currently declared packs
+  **and** every superseded one, with no opt-in flag. Filenames are content-addressed, so each sync
+  that moves a `payload_hash` orphans the old file; leaving those behind made `clear` fail to
+  reclaim and grew the dir without bound. The consent gate is what makes this safe -- the prompt
+  counts the two kinds apart ("3 downloaded packs and 3 superseded packs") and lists every file
+  before anything is deleted. The stale scan is not a search for a payload -- it never returns one,
+  and the stem comes from the declared `file` field, so only the hash is a wildcard; a foreign stem
+  or an uncontent-addressed file in the dir is never touched.
+  **The gate argument fails closed.** `ask` is a strict flag: only `FALSE` consents, and anything
+  that is not a single non-NA logical is an error, never permission. `from` reaching
+  `mc_resolve_assets_dir()` is a path or `NULL` only -- a loaded pack names no directory, so it
+  stops rather than falling back to the default. Both were silent widenings of "permission" once
   (DECISIONS 2026-07-23); do not re-introduce an `isTRUE()`-style test on either.
+- **One argument for the source, one noun for the thing.** `from` (on `load_mc_assets()`,
+  `calc_clocks()`, `sim_DNAm()`) is `NULL` (open set, may download), a path (**closed set**, never
+  downloads, missing is fatal), or loaded pack(s). Resolution order is `from` > `mc.assets_dir`
+  option > `MC_ASSETS_DIR` env > `R_user_dir` default. `download_mc_assets()` / `clear_mc_assets()`
+  take **no** dir argument -- use the setter (DECISIONS 2026-07-24).
 - **Identity key:** `payload_hash` (pack content-address) only -- it sets the pack filename and
   release tag, which is what makes re-upload of unchanged weights a no-op. It stays maintainer-side
   and never reaches a result record. Transfer integrity and bit rot are qs2's own
@@ -179,18 +222,68 @@ output**, not implementation detail (see "Test altitude").
   (`file.exists()`). Upstream ships one `fixtures[]` block per cohort; each (clock, cohort) pair is
   its own test. Run locally via the dev-only `test_parity()` (`R/dev-utils.R`). CRAN skips this
   tier; CI must stage the cohorts + set the flag.
-  **Tolerance is ours, and it is read off a declared field, not a clock list.** Upstream retired its
-  `parity` policy (weights_extraction.md sec 12). A fixture whose `server_normalization` is
-  non-empty was produced by the Horvath calculator on betas the *server* normalized (BMIQ / noob);
-  we score raw betas and deliberately vendor no BMIQ gold standard, so those are graded by
-  **correlation**. Every other fixture's oracle saw the same raw betas we do and is held to
-  **exact** tolerance -- that split is the real numeric gate.
+  **Never run this tier unless the user explicitly asks for it.** `test_parity()` -- and any
+  invocation that sets `MC_PARITY=1`, including `devtools::test()` / `test_file()` under that env
+  var -- is minutes-long and reads the staged duckdb cohorts. It is not part of "run the tests":
+  the default `devtools::test()` (parity auto-skipped) is. Verify a change against the always-on
+  tiers, say that parity was not run, and let the maintainer ask for it.
+  **Two axes, both gated, and only the scale-sensitive one ever varies.** Upstream retired its
+  `parity` policy (weights_extraction.md sec 12). Every fixture must clear **`max_abs_diff` AND
+  `max_rel_diff`** -- both, not either. They are not redundant: the absolute bound is the only one
+  with meaning near zero, the relative bound the only one with meaning at large magnitude. Both use
+  **`max`, never `median`** -- a median passes while half the samples are arbitrarily wrong.
+  **`PARITY_REL_TOL` is `1e-10` everywhere, with no per-block exception** -- it is scale-free, so
+  there is never a units-based reason to move it. Only `PARITY_ABS_TOL` is per-block, and relaxing
+  it is a statement about units, never about correctness (DECISIONS 2026-07-25).
+  **Four blocks, derived from the catalog.** `parity_block()` sends each clock to `horvath`
+  (declared `fixtures[].oracle == "horvath_online"`), `packs` (`clock_is_external()`), `fitage`
+  (group `DNAmFitAge`), or `core`; `parity_targets(block)` builds one loop per block over the
+  shared `run_parity_target()` body. There is no clock list -- every block reads a declaration, so
+  a regenerated fixture retires its block automatically. `PARITY_ABS_TOL` is
+  `c(core = 1e-10, fitage = 1e-10, packs = 1e-6, horvath = 1e-10)`. The pack relaxation is
+  measured, not guessed: those biomarkers reach ~3.3e6 (`PCB2M`), where `1e-10` absolute is below
+  the float floor before any arithmetic, and the worst absolute miss over all 56 pack rows is
+  2.05e-8 -- which is 6.3e-15 *relative*, i.e. noise. Every pack row sits within 7.5e-13 relative,
+  130x inside the unchanged relative bound.
+  **The `horvath` block is skipped, and that is a finding, not a shrug.** The oracle filled every
+  completely-absent probe server-side with an unpublished per-probe constant (the staged submission
+  has 2567/3208 all-NA rows and zero partial NAs) and BMIQ'd the 21k panel for `DNAmAge` only.
+  Scored against the *submitted* matrix, the residual tracks the absent-probe count and nothing
+  else: pairs with zero absent probes agree to ~1e-8 relative. These clocks are matmuls, so that
+  agreement proves the tensors and the engine are right and the divergence is in the oracle's
+  input. **Do not "fix" this with a tolerance** -- the residual spans 4.2e-08 to 2.7e-01, so any
+  bound wide enough is vacuous (DECISIONS 2026-07-25).
+  **A fixture is scored on the panel the oracle used, which is not always the scoring panel.** A
+  recipe that declares a `sample_scale` op z-scores each sample over **every** probe in the input
+  matrix, so feeding it the union of scoring panels moves each sample's mean/sd and the score with
+  it (measured: 1.8e1 absolute, 82% relative). `needs_full_panel()` reads that op off the declared
+  recipe -- never a clock list, today only `Zhang2019` -- and the target loads the cohort's whole
+  array with `cohort_betas_full()` instead (DECISIONS 2026-07-25).
+  **The blocks are generated, so a dropped fixture is silence, not a failure.** `parity_targets()`
+  loops over `clock_fixtures()`; a fixture upstream drops emits **no test at all** -- not a skip,
+  just two fewer passes in a green run. One ungated-by-cohort census test guards the generator:
+  every catalog clock declares a fixture for **every** `PARITY_COHORTS` cohort, except the 7
+  sex-routed aliases, which declare none because their 14 members carry them (both halves derived,
+  never listed). It needs no duckdb and no staged cohort, so `test_parity()` runs it even where
+  nothing is staged -- but it **is** behind `MC_PARITY`, so a plain `devtools::test()` does not
+  catch a dropped fixture; CI does (DECISIONS 2026-07-26).
+  **Standing state: 217 pass / 30 skip / 0 fail** -- census 1/1, core 130/130, fitage 28/28,
+  packs 56/56, PhysAge 2/2, horvath 30 skipped.
+  `KNOWN_PARITY_GAPS` (clock- or `clock@cohort`-keyed) holds only genuine skips and is **empty**
+  today. `KNOWN_PARITY_GAP_GROUPS` (group-keyed) is empty too but stays a **separate** map,
+  because group ids and clock ids share a namespace (`DNAmFitAge` is both) and one flat map could
+  not say which a key meant.
 
 ### Test altitude -- keep tests loose enough to move fast
 
 Assert what `calc_clocks()` *produces*, not how it is wired. A test that breaks on a no-behavior
 refactor is too tight -- loosen or delete it.
 
+- **Only `R/` is under test.** `tests/` covers package code and the data it ships, never
+  `data-raw/`. `sync.R` is maintainer-side tooling against an upstream contract that upstream
+  gates in its own suite; a downstream test of it duplicates that gate, and reaching it means
+  sourcing a file the package does not ship and does not depend on. Do not source, parse or
+  otherwise bind anything from `data-raw/` in a test.
 - **Errors: assert *that*, not the wording.** `expect_error(expr)` with no regex. Pin a message or
   condition class only when a test must otherwise confuse two distinct failure modes.
 - **No internal dispatch-tag tables.** Do not hard-code `clock_reduction()` / `score_type()` per
@@ -244,8 +337,17 @@ Every user-facing error, warning and note goes through `cli` (`cli_abort` / `cli
   always singular no matter how many columns are missing. A marker that follows a styled
   `{.val {x}}` is bound to `x`, not to the vector you meant.
 - **cli reflows whitespace.** A pre-aligned block (a manifest, a table) collapses onto one line
-  when interpolated into a bullet. Emit it as separate bullets, or keep it out of cli entirely --
-  the plain `utils::askYesNo()` consent prompts do the latter on purpose.
+  when interpolated into a bullet. Use `cli::cli_verbatim()`, which emits lines as-is
+  (`mc_manifest_lines()`); anywhere reflow is unavoidable -- inside `cli_abort()` / `cli_inform()`
+  bullets -- carry no alignment at all and emit one self-contained bullet per row
+  (`mc_manifest_bullets()`).
+- **Never hand `askYesNo()` a multi-line prompt.** It passes the string straight to `readline()`,
+  whose `prompt` is meant to be one short line; embedded newlines render malformed on Windows.
+  Print the context with cli first, then ask a single-line question -- `mc_ask_yes_no()`
+  (`R/mc_data.R`) is the one place that does this and every consent prompt goes through it. It
+  takes its `header` **pre-formatted** via `cli::format_inline()` in the caller's frame and
+  interpolates it as a value, so pluralization resolves against the caller's variables and the
+  text is never re-parsed for braces.
 - Tests assert *that* a message errors, never its wording -- see "Test altitude".
 
 ## Comments
