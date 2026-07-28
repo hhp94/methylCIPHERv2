@@ -148,22 +148,25 @@ expectation.
   deferred metadata sync as the score-distribution and age-range references; the functions are shaped
   to absorb that data when it lands.
 
-**10. `bibliography()` now ships full BibTeX (`inst/extdata/clocks.bib`).**
+**10. `bibliography()` reads the sync-vendored `clocks.bib` (full BibTeX).**
 
-The maintainer supplied `clocks.bib` (the upstream bibliography, ~42 entries). It ships in
-`inst/extdata` alongside `clock_reference.csv`; `bibliography()` reads it (via `system.file`, keyed by
-the catalog's `bib_key`) and emits either full verbatim BibTeX (`format = "bibtex"`) or a data.frame
-enriched with citation / title / journal / year / doi. Light in-house parser (`mc_read_bib` +
-`bib_field`, tolerating single-level `{}` nesting) -- no `bibtex`/`RefManageR` dependency. A catalog
-`bib_key` with no matching entry falls back to the old key+PMID stub, so it degrades gracefully.
+`bibliography()` emits either full verbatim BibTeX (`format = "bibtex"`) or a data.frame enriched with
+citation / title / journal / year / doi, via a light in-house parser (`mc_read_bib` + `bib_field`,
+tolerating single-level `{}` nesting) -- no `bibtex`/`RefManageR` dependency. A catalog `bib_key` with
+no matching entry falls back to a key+PMID stub, so it degrades gracefully.
 
-- **Provenance caveat:** long-term this file should flow through `sync.R` from the meta repo's
-  `bibliography/clocks.bib` (like the rest of the contract); it is hand-placed here because the meta
-  repo was not available. The R sources stay ASCII; the .bib is UTF-8 (author accents), which is
-  standard for a shipped BibTeX data file.
-- **One catalog/.bib mismatch surfaced:** SystemsAge's catalog `bib_key` is `Sehgal_2024_37503069`
-  (PMID 37503069) but the .bib has the newer `Sehgal_2025_40954326` -- different paper version, so
-  that one clock uses the stub until a re-sync aligns the catalog `bib_key` with the .bib.
+- **Provenance is already correct:** `clocks.bib` **already flows through `sync.R`** --
+  `vendor_bibliography()` copies the meta repo's `bibliography/clocks.bib` to
+  `inst/bibliography/clocks.bib`, and it is a committed, tracked file. `bibliography()` reads exactly
+  that path (`system.file("bibliography", ...)`). (An earlier redundant hand-placed copy at
+  `inst/extdata/clocks.bib` was removed -- it was the wrong location and caused the apparent mismatch
+  below.) The .bib is UTF-8 (author accents), standard for a shipped BibTeX file; R sources stay ASCII.
+- **No catalog/.bib mismatch with the vendored file:** the committed `inst/bibliography/clocks.bib`
+  and the committed catalog agree (both carry SystemsAge `Sehgal_2024_37503069`), so all 40 catalog
+  references resolve. The *correct* SystemsAge citation is the 2025 paper (`Sehgal_2025_40954326`);
+  updating it is an **upstream** change (meta repo manifest / papers.csv / clocks.bib -> 2025) picked
+  up by re-running `sync()`, which moves the catalog `bib_key` and the vendored `.bib` together.
+  Hand-editing either committed file would drift from sync, so it is left for the re-sync.
 
 **8. Coverage verdict is graded by fraction, and plots are sized down.**
 

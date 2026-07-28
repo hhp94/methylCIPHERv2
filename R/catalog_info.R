@@ -83,9 +83,10 @@ pubmed_url <- function(pmid) {
 }
 
 # read the shipped clocks.bib into a named list: cite key -> raw BibTeX entry.
-# NULL if the file is absent (older installs).
+# The file is sync-vendored to inst/bibliography/ (data-raw/sync.R,
+# vendor_bibliography()). NULL if absent (older installs).
 mc_read_bib <- function() {
-  path <- system.file("extdata", "clocks.bib", package = "methylCIPHERv2")
+  path <- system.file("bibliography", "clocks.bib", package = "methylCIPHERv2")
   if (!nzchar(path) || !file.exists(path)) {
     return(NULL)
   }

@@ -72,11 +72,11 @@ Built so far: `print`, `as.matrix`, `as.data.frame`, `augment`. Still unbuilt: `
 Not methods: `clocks_coverage()` / `samples_coverage()` format `$coverage` (never re-touch beta) and
 replace the `summary` that earlier drafts listed; `codebook()` and `bibliography()` are plain
 functions (they take a result / clock tokens / `"all"`), since `utils::citation` is not an S3 generic.
-`bibliography()` reads the shipped `inst/extdata/clocks.bib` (keyed by `bib_key`) and emits full BibTeX
-(`format = "bibtex"`) or an enriched data.frame (citation / title / journal / year / doi / pmid / url),
-falling back to a key+PMID stub for any catalog `bib_key` absent from the .bib. `codebook()`'s
-training-population fields still await the `master_source_of_truth.csv` sync. See DECISIONS 2026-07-23,
-2026-07-24, 2026-07-27.
+`bibliography()` reads the **sync-vendored** `inst/bibliography/clocks.bib` (written by `sync.R`'s
+`vendor_bibliography()`, keyed by `bib_key`) and emits full BibTeX (`format = "bibtex"`) or an enriched
+data.frame (citation / title / journal / year / doi / pmid / url), falling back to a key+PMID stub for
+any catalog `bib_key` absent from the .bib. `codebook()`'s training-population fields still await the
+`master_source_of_truth.csv` sync. See DECISIONS 2026-07-23, 2026-07-24, 2026-07-27.
 
 Rules:
 
