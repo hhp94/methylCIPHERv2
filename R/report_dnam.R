@@ -372,6 +372,7 @@ build_coverage_table <- function(cpg_list, cols, mna, seq_ids, output_ids) {
 
 # assemble the DNAm-side report list
 report_dnam <- function(DNAm, clocks = "all", assets = NULL, ask = TRUE) {
+  DNAm <- coerce_dnam(DNAm)
   fmt <- report_check_dnam(DNAm)
   arr <- detect_array(DNAm)
   beta <- check_beta_range(DNAm)

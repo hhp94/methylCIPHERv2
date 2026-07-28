@@ -566,6 +566,8 @@ deps, CRAN-safe and offline). Computation and rendering are split: `report_dnam.
 return data; `report_render.R` draws it. Tests assert the `mc_report`, never the PDF pixels.
 
 - **DNAm input QC** (`report_dnam.R`). Reuses the scoring machinery rather than re-deriving it:
+  `coerce_dnam()` (an all-numeric data.frame -- how some cleaned datasets ship DNAm -- is coerced to
+  a matrix with a note; a non-numeric column is refused; shared with `calc_clocks`);
   `report_check_dnam()` (structural gate -- aborts on a non-matrix / missing dim names, records
   softer issues like a transposed matrix); `detect_array()` (nearest-size guess over cg-probe count
   vs `MC_ARRAY_SIZES`, with an EPICv2 replicate-suffix override -- a heuristic, never a hard identity,

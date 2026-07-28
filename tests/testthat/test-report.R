@@ -269,6 +269,18 @@ test_that("report() with no usable input errors", {
   expect_error(report())
 })
 
+test_that("a numeric data.frame DNAm is coerced; non-numeric columns abort", {
+  m <- random_betas(clock_scoring_cpgs("Hannum"), n = 4L)
+  df <- as.data.frame(m)
+  # report() and calc_clocks() both coerce and run
+  expect_no_error(quiet_report(df, clocks = "Hannum", ask = FALSE))
+  expect_no_error(suppressMessages(calc_clocks(df, "Hannum")))
+  # a non-numeric column cannot be a beta matrix -> refuse
+  bad <- df
+  bad$label <- "x"
+  expect_error(suppressMessages(calc_clocks(bad, "Hannum")))
+})
+
 test_that("report survives degenerate inputs (all-NA aborts cleanly; n=1 runs)", {
   sim <- sim_DNAm(c("Horvath1", "Hannum"), n = 4L)
   allna <- sim$DNAm

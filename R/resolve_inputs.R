@@ -1,5 +1,33 @@
 # DNAm/pheno validation and clock-id resolution
 
+# accept an all-numeric data.frame by coercing it to a matrix (with a note) --
+# some cleaned datasets ship DNAm that way. A non-numeric column means it is not
+# a beta matrix, so refuse; anything not a data.frame passes through untouched
+# for check_DNAm() to judge.
+coerce_dnam <- function(DNAm) {
+  if (!is.data.frame(DNAm)) {
+    return(DNAm)
+  }
+  non_num <- names(DNAm)[!vapply(DNAm, is.numeric, logical(1L))]
+  if (length(non_num)) {
+    cli::cli_abort(
+      c(
+        "{.arg DNAm} is a data.frame with {length(non_num)} non-numeric
+         column{?s}: {.val {utils::head(non_num, 5L)}}.",
+        "i" = "A beta matrix must be all numeric -- drop those columns, or pass
+               {.code as.matrix(DNAm)} yourself."
+      ),
+      call = NULL
+    )
+  }
+  cli::cli_inform(c(
+    "i" = "Coercing the {nrow(DNAm)} x {ncol(DNAm)} {.arg DNAm} data.frame to a matrix."
+  ))
+  m <- as.matrix(DNAm)
+  storage.mode(m) <- "double"
+  m
+}
+
 check_DNAm <- function(DNAm) {
   checkmate::assert_matrix(
     DNAm,

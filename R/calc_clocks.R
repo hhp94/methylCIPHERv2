@@ -100,6 +100,7 @@ calc_clocks <- function(
   checkmate::assert_number(min_samples_coverage, lower = 0, upper = 1)
 
   # sample ids are the DNAm rownames -- mandatory, enforced by check_DNAm().
+  DNAm <- coerce_dnam(DNAm)
   check_DNAm(DNAm)
   sample_id <- rownames(DNAm)
   resolve_DNAm_extra(clock_sequence)
