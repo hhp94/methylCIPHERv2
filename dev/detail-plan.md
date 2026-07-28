@@ -919,15 +919,15 @@ was bundled by nothing and the vendored scorer could not have run.
 
 ### 9.4 External asset resolution
 
-`load_mc_assets(groups, from = NULL, ask = TRUE)` in [`R/mc_data.R`](../R/mc_data.R)
+`load_mc_assets(groups, ext_data = NULL, ask = TRUE)` in [`R/mc_data.R`](../R/mc_data.R)
 is the single runtime entry (deliberately small -- see the 2026-07-21 DECISIONS entries). It returns
 a **named list of packs keyed by `group_id`** (even for one group). `calc_clocks()` calls the
 identical function internally, so a pre-loaded object and an auto-loaded one cannot drift.
 
-**Assets are the packs; `from` is where they come from.** Those were one polymorphic `assets`
+**Assets are the packs; `ext_data` is where they come from.** Those were one polymorphic `assets`
 argument until 2026-07-24, which is what made the surface confusing. Flow:
 
-1. **Assets dir precedence:** a `from` **path** > session option `mc.assets_dir`
+1. **Assets dir precedence:** an `ext_data` **path** > session option `mc.assets_dir`
    (set via `set_mc_assets_dir()`, which validates + creates + write-probes and returns the old
    value invisibly) > `MC_ASSETS_DIR` (.Renviron) > `tools::R_user_dir(.., "cache")`
    (`mc_default_assets_dir()`). `mc_resolve_assets_dir()` takes a path or `NULL` **only** -- a
@@ -936,10 +936,11 @@ argument until 2026-07-24, which is what made the surface confusing. Flow:
    `download_mc_assets()` / `clear_mc_assets()` take **no** dir argument at all: there it could
    only ever be a plain path, i.e. duplication of the option layer, and it was the 2026-07-23
    footgun.
-2. **Open vs closed set (from `from`).** `from = NULL` -> **open**: resolve each group from the
-   assets dir; missing packs are consent-downloaded. `from` **explicitly provided** -> **closed**:
-   resolve only from what is given, **never download**; a needed group not covered is a hard error.
-   `from` accepts an assets-dir path **or** loaded object(s) -- a bare pack (a list with `$group_id`),
+2. **Open vs closed set (from `ext_data`).** `ext_data = NULL` -> **open**: resolve each group from
+   the assets dir; missing packs are consent-downloaded. `ext_data` **explicitly provided** ->
+   **closed**: resolve only from what is given, **never download**; a needed group not covered is a
+   hard error. `ext_data` accepts an assets-dir path **or** loaded object(s) -- a bare pack (a list
+   with `$group_id`),
    a list of packs, or a path all canonicalize to the named-list registry (objects key by their own
    `$group_id`); an asset the plan does not need warns and is ignored.
 3. **Expected file** = `mc_provenance$external_assets[[group_id]]$file` (`<group>-<payload_hash>.qs2`).

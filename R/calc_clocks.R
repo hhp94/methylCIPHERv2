@@ -106,7 +106,7 @@ pack_groups_needed <- function(clock_sequence) {
 #' @param min_clocks_coverage x
 #' @param min_samples_coverage x
 #' @param normalize x
-#' @param from x
+#' @param ext_data x
 #' @param ask x
 #'
 #' @returns x
@@ -119,12 +119,12 @@ calc_clocks <- function(
   min_clocks_coverage = 0.75,
   min_samples_coverage = 0.75,
   normalize = NULL,
-  from = NULL,
+  ext_data = NULL,
   ask = TRUE
 ) {
   checkmate::assert_number(min_samples_coverage, lower = 0, upper = 1)
 
-  spec <- mc_spec(clocks, pheno_id, normalize, from, ask)
+  spec <- mc_spec(clocks, pheno_id, normalize, ext_data, ask)
   facts <- mc_cohort(DNAm, spec, pheno, min_clocks_coverage)
   scored <- score_cohort(DNAm, spec, facts)
   # single-pass: finalize still runs here so both front ends share it

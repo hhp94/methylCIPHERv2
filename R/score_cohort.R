@@ -5,7 +5,7 @@ mc_spec <- function(
   clocks,
   pheno_id = "ID",
   normalize = NULL,
-  from = NULL,
+  ext_data = NULL,
   ask = TRUE
 ) {
   checkmate::assert_string(pheno_id)
@@ -28,7 +28,7 @@ mc_spec <- function(
     covariates <- character(0)
   }
 
-  packs <- load_mc_assets(pack_groups_needed(clock_sequence), from, ask)
+  packs <- load_mc_assets(pack_groups_needed(clock_sequence), ext_data, ask)
 
   list(
     clock_ids = clock_ids,

@@ -12,6 +12,34 @@ second-guessed; do not restate rules already stated in the migration / detail pl
 
 ---
 
+## 2026-07-28 -- `from` -> `ext_data`: an argument name has to be greppable
+
+**Decision.** The external-data argument on `calc_clocks()` / `sim_DNAm()` / `load_mc_assets()`
+is now **`ext_data`**. Internals follow: `mc_spec()` and `mc_resolve_assets_dir()` take `ext_data`,
+and `mc_canonicalize_from()` is `mc_canonicalize_ext_data()`. Semantics are untouched -- `NULL` is
+still the open set, a path or loaded pack(s) still the closed set, precedence still
+`ext_data` > `mc.assets_dir` > `MC_ASSETS_DIR` > `R_user_dir`.
+
+**Why this reverses 2026-07-24.** That entry split the polymorphic `assets` argument into
+"`assets` = the things, `from` = the source", and `from` was the right *semantic* choice: it names
+where the packs come from rather than what they are. The problem is operational, not semantic.
+`from` is a preposition that appears 383 times in this repo and dozens of times in `R/` alone, in
+comments, cli strings and ordinary prose. There is no search that separates the argument from the
+English word, so the one question you actually ask about an argument -- where is it used -- has no
+answer. A name you cannot grep is a name you cannot refactor safely; that outweighs reading well at
+the call site.
+
+**Why not `assets_from`,** which would have kept both halves of the vocabulary and needed no
+reversal: rejected as a compromise that keeps the preposition's reading without committing to
+either noun. `ext_data` says plainly what the argument supplies and collides with nothing.
+
+**Cost, paid in full here.** 4 formals, 3 pass-throughs, 1 renamed helper, 8 `{.arg from}` cli
+strings (an unrenamed one names an argument that no longer exists), 15 named call sites across 3
+test files, and the plan/CLAUDE.md text. Nothing serializes the argument -- `mc_spec()` stores the
+resolved `packs`, not the source -- so `$provenance` and saved `mc_result` objects are unaffected
+and there is no on-disk compatibility break. Pre-alpha, so user code calling `from =` breaks with
+no deprecation shim, which is intended.
+
 ## 2026-07-28 (latest) -- cli is front-door only; internals use plain stop()
 
 **Reverses** the earlier "every user-facing error goes through cli" rule. cli stays only on

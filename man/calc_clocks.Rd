@@ -12,7 +12,7 @@ calc_clocks(
   min_clocks_coverage = 0.75,
   min_samples_coverage = 0.75,
   normalize = NULL,
-  from = NULL,
+  ext_data = NULL,
   ask = TRUE
 )
 }
@@ -31,7 +31,7 @@ calc_clocks(
 
 \item{normalize}{x}
 
-\item{from}{x}
+\item{ext_data}{x}
 
 \item{ask}{x}
 }

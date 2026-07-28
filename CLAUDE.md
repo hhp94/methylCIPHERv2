@@ -216,15 +216,17 @@ contribute** (the catalog is committed). `sync()` needs read access to `methylCI
   and the stem comes from the declared `file` field, so only the hash is a wildcard; a foreign stem
   or an uncontent-addressed file in the dir is never touched.
   **The gate argument fails closed.** `ask` is a strict flag: only `FALSE` consents, and anything
-  that is not a single non-NA logical is an error, never permission. `from` reaching
+  that is not a single non-NA logical is an error, never permission. `ext_data` reaching
   `mc_resolve_assets_dir()` is a path or `NULL` only -- a loaded pack names no directory, so it
   stops rather than falling back to the default. Both were silent widenings of "permission" once
   (DECISIONS 2026-07-23); do not re-introduce an `isTRUE()`-style test on either.
-- **One argument for the source, one noun for the thing.** `from` (on `load_mc_assets()`,
-  `calc_clocks()`, `sim_DNAm()`) is `NULL` (open set, may download), a path (**closed set**, never
-  downloads, missing is fatal), or loaded pack(s). Resolution order is `from` > `mc.assets_dir`
-  option > `MC_ASSETS_DIR` env > `R_user_dir` default. `download_mc_assets()` / `clear_mc_assets()`
-  take **no** dir argument -- use the setter (DECISIONS 2026-07-24).
+- **One argument for the external data, one noun for the thing.** `ext_data` (on
+  `load_mc_assets()`, `calc_clocks()`, `sim_DNAm()`) is `NULL` (open set, may download), a path
+  (**closed set**, never downloads, missing is fatal), or loaded pack(s). Resolution order is
+  `ext_data` > `mc.assets_dir` option > `MC_ASSETS_DIR` env > `R_user_dir` default.
+  `download_mc_assets()` / `clear_mc_assets()` take **no** dir argument -- use the setter
+  (DECISIONS 2026-07-24). The argument was `from` until 2026-07-28; it is `ext_data` because a
+  four-letter English preposition cannot be grepped (DECISIONS 2026-07-28).
 - **Identity key:** `payload_hash` (pack content-address) only -- it sets the pack filename and
   release tag, which is what makes re-upload of unchanged weights a no-op. It stays maintainer-side
   and never reaches a result record. Transfer integrity and bit rot are qs2's own
@@ -372,7 +374,7 @@ out set notation.
 plain `stop()` / `warning()` / `message()` with `call. = FALSE`.
 
 **Keep `cli` in:**
-- assets lifecycle (`R/mc_data.R`: consent, download, clear, path/`from` validation)
+- assets lifecycle (`R/mc_data.R`: consent, download, clear, path/`ext_data` validation)
 - discovery printers (`list_tags`, `print.mc_citation`, `list_clocks` unknown-group)
 - public S3 refusals (`rbind.mc_result`, `cite_clocks.default`)
 - `calc_clocks` front door: `resolve_clocks` token errors (incl. did-you-mean), DNAm/pheno

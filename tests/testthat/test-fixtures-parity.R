@@ -265,7 +265,7 @@ run_parity_target <- function(clock_id, cohort) {
     DNAm,
     request,
     pheno = cohort_pheno(cohort),
-    from = packs,
+    ext_data = packs,
     min_clocks_coverage = 0,
     min_samples_coverage = 0
   )

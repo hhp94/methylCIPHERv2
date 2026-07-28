@@ -59,21 +59,21 @@ is_path_string <- function(x) {
   is.character(x) && length(x) == 1L && !is.na(x) && nzchar(x)
 }
 
-# active assets dir: `from` arg, option, env, then default
-mc_resolve_assets_dir <- function(from = NULL) {
-  if (!is.null(from)) {
-    if (!is_path_string(from)) {
+# active assets dir: `ext_data` arg, option, env, then default
+mc_resolve_assets_dir <- function(ext_data = NULL) {
+  if (!is.null(ext_data)) {
+    if (!is_path_string(ext_data)) {
       cli::cli_abort(
         c(
-          "{.arg from} must be {.code NULL} or a single assets-dir path
-           (got {class(from)[[1L]]} of length {length(from)}).",
+          "{.arg ext_data} must be {.code NULL} or a single assets-dir path
+           (got {class(ext_data)[[1L]]} of length {length(ext_data)}).",
           "i" = "A loaded pack names no directory -- pass packs only to
                  {.fn load_mc_assets}."
         ),
         call = NULL
       )
     }
-    return(as.character(fs::path_expand(from)))
+    return(as.character(fs::path_expand(ext_data)))
   }
   opt <- getOption("mc.assets_dir")
   if (is_path_string(opt)) {
@@ -232,7 +232,7 @@ mc_consent <- function(rows, dir, ask) {
         "i" = "Assets dir: {.path {dir}}",
         mc_manifest_bullets(ids, sizes),
         "i" = "Pass {.code ask = FALSE} to consent, or pre-stage the files
-               and point {.arg from} at them."
+               and point {.arg ext_data} at them."
       ),
       call = NULL
     )
@@ -380,36 +380,36 @@ list_mc_assets <- function(groups = "all") {
   )]
 }
 
-# from: NULL (open), assets-dir path, or loaded pack registry
-mc_canonicalize_from <- function(from) {
-  if (is.null(from)) {
+# ext_data: NULL (open), assets-dir path, or loaded pack registry
+mc_canonicalize_ext_data <- function(ext_data) {
+  if (is.null(ext_data)) {
     return(NULL)
   }
-  if (is.character(from)) {
-    if (!is_path_string(from)) {
+  if (is.character(ext_data)) {
+    if (!is_path_string(ext_data)) {
       cli::cli_abort(
-        "{.arg from} path must be a single non-empty string.",
+        "{.arg ext_data} path must be a single non-empty string.",
         call = NULL
       )
     }
-    return(from)
+    return(ext_data)
   }
   is_pack <- function(x) is.list(x) && !is.null(x[["group_id"]])
-  if (is_pack(from)) {
-    return(stats::setNames(list(from), from[["group_id"]]))
+  if (is_pack(ext_data)) {
+    return(stats::setNames(list(ext_data), ext_data[["group_id"]]))
   }
   if (
-    is.list(from) &&
-      length(from) &&
-      all(vapply(from, is_pack, logical(1)))
+    is.list(ext_data) &&
+      length(ext_data) &&
+      all(vapply(ext_data, is_pack, logical(1)))
   ) {
     return(stats::setNames(
-      from,
-      vapply(from, function(p) as.character(p[["group_id"]]), character(1))
+      ext_data,
+      vapply(ext_data, function(p) as.character(p[["group_id"]]), character(1))
     ))
   }
   cli::cli_abort(
-    "{.arg from} must be {.code NULL}, an assets-dir path, a loaded pack,
+    "{.arg ext_data} must be {.code NULL}, an assets-dir path, a loaded pack,
      or a list of loaded packs.",
     call = NULL
   )
@@ -417,7 +417,7 @@ mc_canonicalize_from <- function(from) {
 
 # load packs for needed groups into memory
 #' @export
-load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
+load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
   checkmate::assert_flag(ask)
   groups <- unique(as.character(groups))
   groups <- groups[nzchar(groups)]
@@ -429,7 +429,7 @@ load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
   }
   rows <- lapply(groups, mc_asset)
 
-  canon <- mc_canonicalize_from(from)
+  canon <- mc_canonicalize_ext_data(ext_data)
 
   if (is.list(canon)) {
     packs <- lapply(groups, function(g) {
@@ -437,8 +437,8 @@ load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
       if (is.null(pack)) {
         cli::cli_abort(
           c(
-            "Need pack {.val {g}}, but it is not in {.arg from}.",
-            "i" = "Closed set -- no download. Include it in {.arg from}
+            "Need pack {.val {g}}, but it is not in {.arg ext_data}.",
+            "i" = "Closed set -- no download. Include it in {.arg ext_data}
                    or pass an assets dir / {.code NULL}."
           ),
           call = NULL
@@ -449,7 +449,7 @@ load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
     extra <- setdiff(names(canon), groups)
     if (length(extra)) {
       cli::cli_warn(
-        "Ignoring unused pack{?s} in {.arg from}: {.val {extra}}.",
+        "Ignoring unused pack{?s} in {.arg ext_data}: {.val {extra}}.",
         call = NULL
       )
     }
@@ -471,7 +471,7 @@ load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
           "Pack{cli::qty(gone)}{?s} {.val {gone}} not found in
            {.path {dir}}.",
           "i" = "Closed set -- no download. Stage the file{cli::qty(gone)}{?s}
-                 there, or pass {.code from = NULL} to allow download."
+                 there, or pass {.code ext_data = NULL} to allow download."
         ),
         call = NULL
       )

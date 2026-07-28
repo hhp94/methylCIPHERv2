@@ -73,7 +73,7 @@ test_that("the assets dir resolves arg > option > env > default", {
   expect_equal(get_mc_assets_dir(), path.expand("from-option"))
 
   # an explicit source beats both layers
-  expect_equal(mc_resolve_assets_dir("from-arg"), path.expand("from-arg"))
+  expect_equal(mc_resolve_assets_dir("ext-data-arg"), path.expand("ext-data-arg"))
 })
 
 test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", {
@@ -204,7 +204,7 @@ test_that("load_mc_assets() rejects a corrupt staged file via the qs2 checksum",
   row <- fake_asset(withr::local_tempdir())
   local_fake_registry(row)
   writeLines("not a qs2 file", file.path(assets, row$file))
-  expect_error(load_mc_assets("FakeGroup", from = assets))
+  expect_error(load_mc_assets("FakeGroup", ext_data = assets))
 })
 
 test_that("load_mc_assets() with an explicit path is a closed set: no download, missing is fatal", {
@@ -212,7 +212,7 @@ test_that("load_mc_assets() with an explicit path is a closed set: no download, 
   row <- fake_asset(withr::local_tempdir())
   local_fake_registry(row)
 
-  expect_error(load_mc_assets("FakeGroup", from = assets, ask = FALSE))
+  expect_error(load_mc_assets("FakeGroup", ext_data = assets, ask = FALSE))
   expect_length(list.files(assets), 0)
 })
 
@@ -223,12 +223,12 @@ test_that("load_mc_assets() resolves in-memory pack(s) without touching disk", {
   local_fake_registry(stats::setNames(list(a, b), c("GroupA", "GroupB")))
 
   expect_equal(
-    load_mc_assets("GroupA", from = a$.payload)[["GroupA"]],
+    load_mc_assets("GroupA", ext_data = a$.payload)[["GroupA"]],
     a$.payload
   )
-  expect_error(load_mc_assets("GroupB", from = a$.payload))
+  expect_error(load_mc_assets("GroupB", ext_data = a$.payload))
   expect_warning(
-    res <- load_mc_assets("GroupA", from = list(a$.payload, b$.payload))
+    res <- load_mc_assets("GroupA", ext_data = list(a$.payload, b$.payload))
   )
   expect_named(res, "GroupA")
   expect_equal(res[["GroupA"]], a$.payload)
@@ -339,7 +339,7 @@ test_that("download -> load -> clear round trips and leaves the assets dir empty
   expect_length(load_mc_assets(character(0)), 0)
 })
 
-test_that("a non-path `from` errors instead of silently hitting the assets dir", {
+test_that("a non-path `ext_data` errors instead of silently hitting the assets dir", {
   assets <- withr::local_tempdir()
   withr::local_options(mc.assets_dir = assets)
   row <- fake_asset(withr::local_tempdir())
@@ -353,7 +353,7 @@ test_that("a non-path `from` errors instead of silently hitting the assets dir",
   expect_error(mc_resolve_assets_dir(5))
   expect_error(mc_resolve_assets_dir(c("a", "b")))
   expect_error(mc_resolve_assets_dir(""))
-  expect_error(load_mc_assets("FakeGroup", from = 5))
+  expect_error(load_mc_assets("FakeGroup", ext_data = 5))
   expect_true(file.exists(staged))
 })
 
