@@ -82,12 +82,14 @@ score_systemsage_group <- function(ids, block) {
 systemsage_step <- function(id, out) {
   step <- recipe_step_out(id, out)
   if (is.null(step)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} has no recipe step with out {.field {out}}.",
+    stop(
+      sprintf(
+        "%s has no recipe step with out %s. %s",
+        id,
+        out,
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   step
@@ -153,13 +155,15 @@ systemsage_pca <- function(id, packs, order) {
     comp <- component_named(comps, name, id)
     t <- pack[["tensors"]][[comp[["file"]]]]
     if (is.null(t)) {
-      cli::cli_abort(
-        c(
-          "Pack for {.val {id}} has no tensor {.file {comp[['file']]}}
-           (component {.field {name}}).",
+      stop(
+        sprintf(
+          "Pack for %s has no tensor %s (component %s). %s",
+          id,
+          comp[["file"]],
+          name,
           CATALOG_BUG
         ),
-        call = NULL
+        call. = FALSE
       )
     }
     t
@@ -173,13 +177,14 @@ systemsage_pca <- function(id, packs, order) {
   # rotation row key is declared -- no first-column fallback
   sys_col <- component_row_key(component_named(comps, "systems_pca_rotation", id))
   if (!sys_col %in% names(rot_df)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}}: rotation tensor has no declared row_key column
-         {.field {sys_col}}.",
+    stop(
+      sprintf(
+        "%s: rotation tensor has no declared row_key column %s. %s",
+        id,
+        sys_col,
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   pc_cols <- setdiff(names(rot_df), sys_col)

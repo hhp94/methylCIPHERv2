@@ -147,10 +147,13 @@ score_cohort <- function(DNAm, spec, facts) {
       MiAge = score_MiAge(p, cpgs, block, results),
       Zhang2019 = score_Zhang2019(p, cpgs, block, results),
       sex_routed = score_sex_routed(p, cpgs, block, results),
-      cli::cli_abort(
-        "No dispatch branch for score_type {.val {score_type(p)}}
-         (clock {.val {p}}).",
-        call = NULL
+      stop(
+        sprintf(
+          "No dispatch branch for score_type %s (clock %s).",
+          score_type(p),
+          p
+        ),
+        call. = FALSE
       )
     )
     # cohort-reducing clocks yield intermediates into pending
@@ -176,10 +179,13 @@ finalize_cross_sample <- function(scores, pending) {
     scores[[p]] <- switch(
       score_type(p),
       PhysAge = finalize_PhysAge(p, pending[[p]]),
-      cli::cli_abort(
-        "No finalize branch for score_type {.val {score_type(p)}}
-         (clock {.val {p}}).",
-        call = NULL
+      stop(
+        sprintf(
+          "No finalize branch for score_type %s (clock %s).",
+          score_type(p),
+          p
+        ),
+        call. = FALSE
       )
     )
   }

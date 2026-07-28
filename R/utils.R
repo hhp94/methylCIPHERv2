@@ -8,12 +8,15 @@ bullets <- function(x) {
 # betanorm is a soft dep (every normalizing branch needs it)
 require_betanorm <- function(id) {
   if (!requireNamespace("betanorm", quietly = TRUE)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} needs the {.pkg betanorm} package for normalization.",
-        "i" = "Install it from GitHub: {.code pak::pak(\"hhp94/betanorm\")}."
+    stop(
+      sprintf(
+        paste0(
+          "%s needs the betanorm package for normalization. ",
+          "Install it from GitHub: pak::pak(\"hhp94/betanorm\")."
+        ),
+        id
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   invisible(NULL)
@@ -98,12 +101,14 @@ panel_ratio <- function(present, miss, needed) {
 vendor_offset <- function(coef, absent, ref, id) {
   miss_ref <- setdiff(absent, names(ref))
   if (length(miss_ref)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}}: no vendor mean for {length(miss_ref)} absent CpG{?s}.",
-        "x" = "{.val {utils::head(miss_ref, 5L)}}"
+    stop(
+      sprintf(
+        "%s: no vendor mean for %d absent CpG(s): %s.",
+        id,
+        length(miss_ref),
+        paste(utils::head(miss_ref, 5L), collapse = ", ")
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   sum(coef[absent] * ref[absent])

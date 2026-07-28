@@ -368,8 +368,21 @@ out set notation.
 
 ## CLI messages
 
-Every user-facing error, warning and note goes through `cli` (`cli_abort` / `cli_warn` /
-`cli_inform`) with `call = NULL`.
+`cli` is **front-door only**. Keep it for the public interactive surface; everything else is
+plain `stop()` / `warning()` / `message()` with `call. = FALSE`.
+
+**Keep `cli` in:**
+- assets lifecycle (`R/mc_data.R`: consent, download, clear, path/`from` validation)
+- discovery printers (`list_tags`, `print.mc_citation`, `list_clocks` unknown-group)
+- public S3 refusals (`rbind.mc_result`, `cite_clocks.default`)
+- `calc_clocks` front door: `resolve_clocks` token errors (incl. did-you-mean), DNAm/pheno
+  structure (`validate_inputs.R`), coverage gates, value gates / dead samples
+  (`missingness.R`), missing pheno in `mc_cohort`, `sim_DNAm` unresolved panels
+
+**Plain `stop()` everywhere else** -- accessors, score branches, pack dispatch, catalog/sync
+bugs, normalize-arg validation, citation internals, soft-dep hints (`require_betanorm`), etc.
+
+Rules that still apply on the keep set:
 
 - **Bind every `{?}` plural marker with an explicit `cli::qty()` unless the quantity is the
   interpolation immediately before it.** cli resolves a marker against the *last interpolated

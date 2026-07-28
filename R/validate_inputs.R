@@ -45,10 +45,15 @@ note_full_panel_clocks <- function(clock_ids) {
   if (!length(full)) {
     return(invisible(NULL))
   }
-  cli::cli_inform(c(
-    "i" = "{.val {full}} take{?s/} per-sample moments over all CpGs -- a large
-           subset is usually enough."
-  ))
+  message(
+    sprintf(
+      paste0(
+        "%s take(s) per-sample moments over all CpGs -- a large subset ",
+        "is usually enough."
+      ),
+      paste(full, collapse = ", ")
+    )
+  )
   invisible(NULL)
 }
 

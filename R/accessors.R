@@ -1,19 +1,19 @@
 # catalog accessors -- always `[[`, never `$`
 
 # shared suffix for catalog/sync faults
-CATALOG_BUG <- c("i" = "Catalog/sync bug -- please report it.")
+CATALOG_BUG <- "Catalog/sync bug -- please report it."
 
 # one catalog entry, or error
 clock_entry <- function(id) {
   if (length(id) != 1L) {
-    cli::cli_abort(
-      "{.fn clock_entry} takes a single clock id, got {length(id)}.",
-      call = NULL
+    stop(
+      sprintf("clock_entry() takes a single clock id, got %d.", length(id)),
+      call. = FALSE
     )
   }
   entry <- mc_catalog[[id]]
   if (is.null(entry)) {
-    cli::cli_abort("Unknown clock id: {.val {id}}.", call = NULL)
+    stop(sprintf("Unknown clock id: %s.", id), call. = FALSE)
   }
   entry
 }
@@ -22,9 +22,14 @@ clock_entry <- function(id) {
 required_field <- function(id, field) {
   value <- clock_entry(id)[[field]]
   if (is.null(value)) {
-    cli::cli_abort(
-      c("Catalog entry {.val {id}} is missing {.field {field}}.", CATALOG_BUG),
-      call = NULL
+    stop(
+      sprintf(
+        "Catalog entry %s is missing %s. %s",
+        id,
+        field,
+        CATALOG_BUG
+      ),
+      call. = FALSE
     )
   }
   value
@@ -40,12 +45,15 @@ optional_field <- function(id, field, default) {
 require_fields <- function(x, need, what, id) {
   miss <- setdiff(need, names(x))
   if (length(miss)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}}: {what} lacks {cli::qty(miss)} field{?s} {.field {miss}}.",
+    stop(
+      sprintf(
+        "%s: %s lacks field(s) %s. %s",
+        id,
+        what,
+        paste(miss, collapse = ", "),
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   x
@@ -55,34 +63,42 @@ require_fields <- function(x, need, what, id) {
 bundle_tensor <- function(group_id, path) {
   bundle <- mc_bundles[[group_id]]
   if (is.null(bundle)) {
-    cli::cli_abort(
-      c(
-        "No shipped bundle for group {.val {group_id}}.",
-        "i" = "External or unshipped group?"
+    stop(
+      sprintf(
+        "No shipped bundle for group %s. External or unshipped group?",
+        group_id
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   tensor <- bundle[["tensors"]][[path]]
   if (is.null(tensor)) {
-    cli::cli_abort(
-      c(
-        "Bundle {.val {group_id}} has no tensor {.file {path}}.",
+    stop(
+      sprintf(
+        "Bundle %s has no tensor %s. %s",
+        group_id,
+        path,
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   tensor
 }
 
-# the single element of `items` matching `pred`, or a cli stop naming `what`
+# the single element of `items` matching `pred`, or a stop naming `what`
 pick_one <- function(items, pred, what, id) {
   hits <- Filter(pred, items)
   if (length(hits) != 1L) {
-    cli::cli_abort(
-      c("{.val {id}} has {length(hits)} {what} (expected 1).", CATALOG_BUG),
-      call = NULL
+    stop(
+      sprintf(
+        "%s has %d %s (expected 1). %s",
+        id,
+        length(hits),
+        what,
+        CATALOG_BUG
+      ),
+      call. = FALSE
     )
   }
   hits[[1]]
@@ -114,12 +130,13 @@ component_named <- function(comps, name, id) {
 component_row_key <- function(comp) {
   key <- as.character(comp[["row_key"]])
   if (length(key) != 1L || !nzchar(key)) {
-    cli::cli_abort(
-      c(
-        "Component {.field {comp[['name']]}} declares no {.field row_key}.",
+    stop(
+      sprintf(
+        "Component %s declares no row_key. %s",
+        comp[["name"]],
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   key
@@ -179,12 +196,13 @@ norm_background_probe_set <- function(id) {
     id
   )
   if (!length(ps[["file"]])) {
-    cli::cli_abort(
-      c(
-        "{.val {id}}: normalization background probe_set has no file pointer.",
+    stop(
+      sprintf(
+        "%s: normalization background probe_set has no file pointer. %s",
+        id,
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   ps
@@ -251,13 +269,18 @@ clock_norm_scheme <- function(id) {
     return("none")
   }
   if (length(scheme) > 1L) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} declares {length(scheme)} normalization schemes
-         ({.val {scheme}}); exactly one is supported.",
+    stop(
+      sprintf(
+        paste0(
+          "%s declares %d normalization schemes (%s); ",
+          "exactly one is supported. %s"
+        ),
+        id,
+        length(scheme),
+        paste(scheme, collapse = ", "),
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   scheme
@@ -289,13 +312,13 @@ clock_impute_ref <- function(id, packs = NULL) {
     pack <- clock_pack(id, packs)
     ref <- pack[["impute"]]
     if (is.null(ref)) {
-      cli::cli_abort(
-        c(
-          "External group {.val {entry[['group_id']]}} pack has no
-           impute vector.",
+      stop(
+        sprintf(
+          "External group %s pack has no impute vector. %s",
+          entry[["group_id"]],
           CATALOG_BUG
         ),
-        call = NULL
+        call. = FALSE
       )
     }
     ref <- as.numeric(ref)
@@ -305,13 +328,14 @@ clock_impute_ref <- function(id, packs = NULL) {
   imp <- entry[["imputation"]]
   ref <- imp[["ref"]]
   if (is.null(ref) || !is.character(ref) || length(ref) != 1L || !nzchar(ref)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} has no scalar vendor-mean ref path
-         (policy {.val {imp[['policy']]}}).",
+    stop(
+      sprintf(
+        "%s has no scalar vendor-mean ref path (policy %s). %s",
+        id,
+        imp[["policy"]],
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   bundle_tensor(entry[["group_id"]], ref)
@@ -334,12 +358,13 @@ clock_coefs <- function(id) {
   if (identical(wf, "cpg_coefficient")) {
     path <- entry[["coef_path"]]
     if (length(path) != 1L || !nzchar(path)) {
-      cli::cli_abort(
-        c(
-          "{.val {id}} is cpg_coefficient but has no coef tensor path.",
+      stop(
+        sprintf(
+          "%s is cpg_coefficient but has no coef tensor path. %s",
+          id,
           CATALOG_BUG
         ),
-        call = NULL
+        call. = FALSE
       )
     }
     return(bundle_tensor(entry[["group_id"]], path))
@@ -353,14 +378,17 @@ clock_coefs <- function(id) {
       return(bundle_tensor(entry[["group_id"]], cpg_comps[[1]][["file"]]))
     }
   }
-  cli::cli_abort(
-    c(
-      "{.val {id}} is weights_format {.val {wf}} and does not reduce to a
-       single cpg->coef vector.",
-      "i" = "Use {.fn clock_group_bundle} + {.fn bundle_tensor}, or the
-             clock's family orchestrator."
+  stop(
+    sprintf(
+      paste0(
+        "%s is weights_format %s and does not reduce to a ",
+        "single cpg->coef vector. Use clock_group_bundle() + ",
+        "bundle_tensor(), or the clock's family orchestrator."
+      ),
+      id,
+      wf
     ),
-    call = NULL
+    call. = FALSE
   )
 }
 
@@ -387,13 +415,15 @@ recipe_step_out <- function(id, out) {
     return(NULL)
   }
   if (length(step) > 1L) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} has {length(step)} recipe steps with out
-         {.field {out}} (expected at most 1).",
+    stop(
+      sprintf(
+        "%s has %d recipe steps with out %s (expected at most 1). %s",
+        id,
+        length(step),
+        out,
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   step[[1]]
@@ -457,12 +487,16 @@ clock_pack <- function(id, packs) {
   gid <- clock_group_id(id)
   pack <- if (is.null(packs)) NULL else packs[[gid]]
   if (is.null(pack)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}}: pack for external group {.val {gid}} is not loaded.",
-        "i" = "Pass {.fn load_mc_assets} output via {.arg packs}."
+    stop(
+      sprintf(
+        paste0(
+          "%s: pack for external group %s is not loaded. ",
+          "Pass load_mc_assets() output via packs."
+        ),
+        id,
+        gid
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   pack
@@ -509,13 +543,15 @@ stack_label_map <- function(step, id) {
   }
   labels <- as.character(unlist(declared))
   if (length(labels) != length(operands)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}}: stack declares {length(labels)} column label{?s} for
-         {length(operands)} operand{?s}.",
+    stop(
+      sprintf(
+        "%s: stack declares %d column label(s) for %d operand(s). %s",
+        id,
+        length(labels),
+        length(operands),
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   stats::setNames(labels, operands)

@@ -149,9 +149,12 @@ resolve_clocks_sequence <- function(clocks) {
     }
     if (id %in% stack) {
       cycle <- c(stack[match(id, stack):length(stack)], id)
-      cli::cli_abort(
-        "Dependency cycle among clocks: {paste(cycle, collapse = ' -> ')}",
-        call = NULL
+      stop(
+        sprintf(
+          "Dependency cycle among clocks: %s",
+          paste(cycle, collapse = " -> ")
+        ),
+        call. = FALSE
       )
     }
     for (dep in clock_depends_on(id)) {
@@ -203,14 +206,16 @@ resolve_normalize <- function(normalize, clock_sequence) {
 
     if (is.null(nm)) {
       if (length(normalize) != 1L) {
-        cli::cli_abort(
-          c(
-            "{.arg normalize} must be one {.code TRUE}/{.code FALSE} or a
-             named logical vector, got {length(normalize)} unnamed values.",
-            "i" = "Name them by clock id, e.g.
-                   {.code normalize = c(Horvath1 = TRUE)}."
+        stop(
+          sprintf(
+            paste0(
+              "normalize must be one TRUE/FALSE or a named logical vector, ",
+              "got %d unnamed values. Name them by clock id, e.g. ",
+              "normalize = c(Horvath1 = TRUE)."
+            ),
+            length(normalize)
           ),
-          call = NULL
+          call. = FALSE
         )
       }
       # bare policy applies where the clock can honor it
@@ -220,41 +225,49 @@ resolve_normalize <- function(normalize, clock_sequence) {
     } else {
       unknown <- setdiff(nm, clock_sequence)
       if (length(unknown)) {
-        cli::cli_abort(
-          c(
-            "{.arg normalize} names {cli::qty(unknown)} clock{?s}
-             {.val {unknown}} that {cli::qty(unknown)}{?is/are} not being
-             scored.",
-            "i" = "Name only clocks reached by {.arg clocks}."
+        stop(
+          sprintf(
+            paste0(
+              "normalize names clock(s) %s that are not being scored. ",
+              "Name only clocks reached by clocks."
+            ),
+            paste(unknown, collapse = ", ")
           ),
-          call = NULL
+          call. = FALSE
         )
       }
       # unknown scheme is an error, declining an undeclared one is redundant
       unusable <- nm[normalize & !(schemes[nm] %in% NORM_SCHEMES)]
       if (length(unusable)) {
         declared <- unique(unname(schemes[unusable]))
-        cli::cli_abort(
-          c(
-            "Cannot normalize {.val {unusable}}: {cli::qty(unusable)}
-             {?it declares/they declare} {.val {declared}}.",
-            "i" = "Only {.val {NORM_SCHEMES}} are expressible as a declared
-                   panel plus a vendored target."
+        stop(
+          sprintf(
+            paste0(
+              "Cannot normalize %s: declare(s) %s. ",
+              "Only %s are expressible as a declared panel plus a ",
+              "vendored target."
+            ),
+            paste(unusable, collapse = ", "),
+            paste(declared, collapse = ", "),
+            paste(NORM_SCHEMES, collapse = ", ")
           ),
-          call = NULL
+          call. = FALSE
         )
       }
       fixed <- nm[!normalize & schemes[nm] %in% NORM_CONSTITUTIVE]
       if (length(fixed)) {
         declared <- unique(unname(schemes[fixed]))
-        cli::cli_abort(
-          c(
-            "Cannot decline normalization for {.val {fixed}}.",
-            "i" = "{cli::qty(fixed)}{?Its/Their} {.val {declared}}
-                   normalization is part of the clock definition, not
-                   preprocessing."
+        stop(
+          sprintf(
+            paste0(
+              "Cannot decline normalization for %s. ",
+              "Its/their %s normalization is part of the clock definition, ",
+              "not preprocessing."
+            ),
+            paste(fixed, collapse = ", "),
+            paste(declared, collapse = ", ")
           ),
-          call = NULL
+          call. = FALSE
         )
       }
       out[nm] <- normalize

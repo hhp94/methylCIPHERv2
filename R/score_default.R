@@ -12,10 +12,7 @@ resolve_output_transform <- function(name) {
     name,
     identity = function(x) x,
     anti.trafo = anti_trafo,
-    cli::cli_abort(
-      "Unknown output_transform {.val {name}}.",
-      call = NULL
-    )
+    stop(sprintf("Unknown output_transform %s.", name), call. = FALSE)
   )
 }
 
@@ -42,13 +39,13 @@ linear_predictor <- function(
     need <- names(cov_coefs)
     pheno <- block[["pheno"]]
     if (is.null(pheno) || !all(need %in% names(pheno))) {
-      cli::cli_abort(
-        c(
-          "{.val {id}} needs {cli::qty(need)} pheno column{?s}
-           {.field {need}}.",
-          "i" = "Add {cli::qty(need)}{?it/them} to {.arg pheno}."
+      stop(
+        sprintf(
+          "%s needs pheno column(s) %s. Add them to pheno.",
+          id,
+          paste(need, collapse = ", ")
         ),
-        call = NULL
+        call. = FALSE
       )
     }
     cov_mat <- as.matrix(pheno[, need, drop = FALSE])

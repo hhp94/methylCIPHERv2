@@ -20,12 +20,9 @@ score_GrimAge <- function(id, cpgs, block, results) {
   for (nm in stack_names) {
     if (identical(roles[[nm]], "covariates")) {
       if (is.null(pheno) || !nm %in% names(pheno)) {
-        cli::cli_abort(
-          c(
-            "{.val {id}} needs pheno column {.field {nm}}.",
-            "i" = "Add it to {.arg pheno}."
-          ),
-          call = NULL
+        stop(
+          sprintf("%s needs pheno column %s. Add it to pheno.", id, nm),
+          call. = FALSE
         )
       }
       X[, nm] <- as.numeric(pheno[[nm]])
@@ -97,14 +94,17 @@ grimage_stack_roles <- function(id, order) {
   roles <- stack_roles(stack_step(id))
   undeclared <- setdiff(order, names(roles))
   if (length(undeclared)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}}: {length(undeclared)} Cox coefficient{?s} not declared as
-         a stack operand.",
-        "x" = "{.field {undeclared}}",
+    stop(
+      sprintf(
+        paste0(
+          "%s: %d Cox coefficient(s) not declared as a stack operand: %s. %s"
+        ),
+        id,
+        length(undeclared),
+        paste(undeclared, collapse = ", "),
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   roles[order]

@@ -12,7 +12,29 @@ second-guessed; do not restate rules already stated in the migration / detail pl
 
 ---
 
-## 2026-07-28 (latest) -- comment hygiene: short `#` notes only; kernel *why* lives here
+## 2026-07-28 (latest) -- cli is front-door only; internals use plain stop()
+
+**Reverses** the earlier "every user-facing error goes through cli" rule. cli stays only on
+the top interactive surface; catalog/score-branch/package-bug paths use `stop()` /
+`warning()` / `message()` with `call. = FALSE`.
+
+**Keep:** assets consent/download/clear (`mc_data.R`); discovery (`list_tags`,
+`print.mc_citation`, `list_clocks` unknown group); public refusals (`rbind.mc_result`,
+`cite_clocks.default`); calc_clocks front door -- `resolve_clocks` token errors +
+did-you-mean, DNAm/pheno structure, coverage gates, value gates / all-NA samples,
+`mc_cohort` missing pheno, `sim_DNAm` unresolved panels.
+
+**Strip:** accessors, score branches, pack dispatch/finalize, `unroutable()`, normalize
+arg validation, dependency-cycle, citation internals, `check_mc_result`, soft-dep
+(`require_betanorm` plain stop with install hint), BMIQ sample-failure `warning()`,
+`note_full_panel_clocks` -> `message()`.
+
+Why: cli pluralization/`{.val}` machinery is high cost for package-bug and mid-score
+paths the user cannot act on beyond "report it" or "fix the matrix"; the keep set is
+exactly where multi-line guidance and consent UX earn their keep. `cli` remains in
+Imports.
+
+## 2026-07-28 -- comment hygiene: short `#` notes only; kernel *why* lives here
 
 Package sources (`R/`, `src/`, `tests/`, `data-raw/*.R`) keep **short lowercase `#`
 comments** that say *what* only when the code does not. Rationale essays, measured

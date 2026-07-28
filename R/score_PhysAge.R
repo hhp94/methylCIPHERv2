@@ -45,12 +45,16 @@ physage_raws <- function(id, cpgs, block, results) {
 check_zscoreable <- function(id, raws) {
   n <- nrow(raws)
   if (n < 2L) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} needs at least 2 samples (cohort z-score), got {n}.",
-        "i" = "Score it with a larger DNAm matrix."
+    stop(
+      sprintf(
+        paste0(
+          "%s needs at least 2 samples (cohort z-score), got %d. ",
+          "Score it with a larger DNAm matrix."
+        ),
+        id,
+        n
       ),
-      call = NULL
+      call. = FALSE
     )
   }
 
@@ -66,22 +70,26 @@ check_zscoreable <- function(id, raws) {
     vapply(surrogates, function(s) length(s[["coef"]]), integer(1L)),
     vapply(surrogates, function(s) s[["name"]], character(1L))
   )
-  cli::cli_abort(
-    c(
-      "{.val {id}} cannot be scored: {length(flat)} surrogate{?s} {?is/are}
-       constant across the cohort, so {?its/their} z-score is undefined.",
-      bullets(vapply(
-        flat,
-        function(nm) {
-          cli::format_inline("{.field {nm}}: {needed[[nm]]} declared CpG{?s}")
-        },
-        character(1L)
-      )),
-      "i" = "A surrogate goes constant when none of its CpGs were observed --
-             every sample then gets the same vendor-filled value.",
-      "i" = "{.fn clocks_coverage} reports the panel counts for {.val {id}}."
+  detail <- paste(
+    vapply(
+      flat,
+      function(nm) sprintf("%s: %d declared CpG(s)", nm, needed[[nm]]),
+      character(1L)
     ),
-    call = NULL
+    collapse = "; "
+  )
+  stop(
+    sprintf(
+      paste0(
+        "%s cannot be scored: %d surrogate(s) constant across the cohort, ",
+        "so z-score is undefined (%s). A surrogate goes constant when none ",
+        "of its CpGs were observed. clocks_coverage() reports panel counts."
+      ),
+      id,
+      length(flat),
+      detail
+    ),
+    call. = FALSE
   )
 }
 
@@ -127,13 +135,14 @@ physage_surrogates <- function(id) {
   lapply(order, function(raw_name) {
     op <- by_out[[raw_name]]
     if (is.null(op)) {
-      cli::cli_abort(
-        c(
-          "{.val {id}}: stack input {.field {raw_name}} has no matching
-           linear_mean op.",
+      stop(
+        sprintf(
+          "%s: stack input %s has no matching linear_mean op. %s",
+          id,
+          raw_name,
           CATALOG_BUG
         ),
-        call = NULL
+        call. = FALSE
       )
     }
     comp <- component_named(entry[["components"]], op[["coef"]], id)
@@ -155,12 +164,14 @@ physage_poly_coef <- function(id) {
     return(NULL)
   }
   if (length(step) != 1L) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} has {length(step)} poly ops (expected 0 or 1).",
+    stop(
+      sprintf(
+        "%s has %d poly ops (expected 0 or 1). %s",
+        id,
+        length(step),
         CATALOG_BUG
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   as.numeric(unlist(step[[1]][["coef"]]))

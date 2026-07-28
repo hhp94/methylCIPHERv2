@@ -67,14 +67,16 @@ new_mc_citation <- function(ids) {
 
   absent <- setdiff(keys, names(entries))
   if (length(absent)) {
-    cli::cli_abort(
-      c(
-        "{length(absent)} bib key{?s} missing from the vendored bibliography:
-         {.val {absent}}.",
-        "i" = "The catalog and {.file clocks.bib} are out of step -- please
-               report it."
+    stop(
+      sprintf(
+        paste0(
+          "%d bib key(s) missing from the vendored bibliography: %s. ",
+          "The catalog and clocks.bib are out of step -- please report it."
+        ),
+        length(absent),
+        paste(absent, collapse = ", ")
       ),
-      call = NULL
+      call. = FALSE
     )
   }
 
@@ -95,13 +97,16 @@ citation_links <- function(ids) {
     key <- as.character(clock_entry(id)[["donor_clock_id"]] %||% id)
     hit <- mc_citations[mc_citations[["clock_id"]] == key, , drop = FALSE]
     if (!nrow(hit)) {
-      cli::cli_abort(
-        c(
-          "{.val {id}} has no citation on record.",
-          "i" = "The catalog is out of step with its bibliography -- please
-                 report it."
+      stop(
+        sprintf(
+          paste0(
+            "%s has no citation on record. ",
+            "The catalog is out of step with its bibliography -- please ",
+            "report it."
+          ),
+          id
         ),
-        call = NULL
+        call. = FALSE
       )
     }
     hit[["clock_id"]] <- id
@@ -120,9 +125,9 @@ bib_entries <- function() {
     package = "methylCIPHERv2"
   )
   if (!nzchar(path)) {
-    cli::cli_abort(
-      "The vendored {.file clocks.bib} is missing from the package.",
-      call = NULL
+    stop(
+      "The vendored clocks.bib is missing from the package.",
+      call. = FALSE
     )
   }
   con <- file(path, encoding = "UTF-8")

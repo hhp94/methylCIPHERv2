@@ -2,9 +2,9 @@
 
 check_mc_result <- function(x, arg = "x") {
   if (!inherits(x, "mc_result")) {
-    cli::cli_abort(
-      "{.arg {arg}} must be an {.cls mc_result} from {.fn calc_clocks}.",
-      call = NULL
+    stop(
+      sprintf("%s must be an mc_result from calc_clocks().", arg),
+      call. = FALSE
     )
   }
   invisible(x)

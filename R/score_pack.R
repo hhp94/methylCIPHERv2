@@ -37,13 +37,12 @@ pack_cov_contrib <- function(ids, pheno, n) {
     return(matrix(0, nrow = n, ncol = length(ids)))
   }
   if (is.null(pheno) || !all(need %in% names(pheno))) {
-    cli::cli_abort(
-      c(
-        "These pack clocks need {cli::qty(need)} pheno column{?s}
-         {.field {need}}.",
-        "i" = "Add {cli::qty(need)}{?it/them} to {.arg pheno}."
+    stop(
+      sprintf(
+        "These pack clocks need pheno column(s) %s. Add them to pheno.",
+        paste(need, collapse = ", ")
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   Cmat <- matrix(0, length(need), length(ids), dimnames = list(need, ids))
@@ -62,9 +61,12 @@ score_pack_group <- function(ids, block) {
     score_type(ids[[1]]),
     pack_systemsage = score_systemsage_group(ids, block),
     pack_linear = score_linear_pack(ids, block),
-    cli::cli_abort(
-      "No batched scorer for score_type {.val {score_type(ids[[1]])}}.",
-      call = NULL
+    stop(
+      sprintf(
+        "No batched scorer for score_type %s.",
+        score_type(ids[[1]])
+      ),
+      call. = FALSE
     )
   )
 }

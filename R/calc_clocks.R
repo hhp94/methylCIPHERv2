@@ -1,15 +1,19 @@
 # stop for an unroutable catalog entry (names all four routing facts)
 unroutable <- function(p) {
-  cli::cli_abort(
-    c(
-      "No scoring path for clock {.val {p}}.",
-      "*" = "group {.val {clock_group_id(p)}},
-             weights_format {.val {clock_weights_format(p)}},
-             computation_type {.val {clock_type(p)}},
-             normalization {.val {clock_norm_scheme(p)}}",
-      "i" = "This is a package bug -- please report it."
+  stop(
+    sprintf(
+      paste0(
+        "No scoring path for clock %s ",
+        "(group %s, weights_format %s, computation_type %s, ",
+        "normalization %s). This is a package bug -- please report it."
+      ),
+      p,
+      clock_group_id(p),
+      clock_weights_format(p),
+      clock_type(p),
+      clock_norm_scheme(p)
     ),
-    call = NULL
+    call. = FALSE
   )
 }
 

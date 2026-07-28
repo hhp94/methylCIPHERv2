@@ -16,10 +16,13 @@ score_normalized <- function(id, cpgs, block, results) {
   calibrated <- switch(
     scheme,
     bmiq = bmiq_panel(obs, target, id, block),
-    cli::cli_abort(
-      "No normalization branch for scheme {.val {scheme}} (clock
-       {.val {id}}).",
-      call = NULL
+    stop(
+      sprintf(
+        "No normalization branch for scheme %s (clock %s).",
+        scheme,
+        id
+      ),
+      call. = FALSE
     )
   )
 
@@ -47,14 +50,17 @@ bmiq_panel <- function(obs, target, id, block) {
   failed <- block[["sample_id"]][!fit[["success"]]]
   if (length(failed)) {
     note_scoring_failure(block, id, failed)
-    cli::cli_warn(
-      c(
-        "BMIQ calibration failed for {length(failed)} sample{?s} scoring
-         {.val {id}}.",
-        "!" = "Scored NA: {.val {failed}}.",
-        "i" = "Also recorded in {.code $provenance$scoring_failures}."
+    warning(
+      sprintf(
+        paste0(
+          "BMIQ calibration failed for %d sample(s) scoring %s. ",
+          "Scored NA: %s. Also recorded in $provenance$scoring_failures."
+        ),
+        length(failed),
+        id,
+        paste(failed, collapse = ", ")
       ),
-      call = NULL
+      call. = FALSE
     )
   }
   fit[["calibrated"]]
