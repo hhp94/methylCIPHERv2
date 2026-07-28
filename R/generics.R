@@ -47,10 +47,14 @@ as.data.frame.mc_result <- function(x, ...) {
 
 # analysis-ready table: scores + id + the aligned covariates the record carries
 # (Age/Female/...), plus an optional user data.frame joined by the id column.
-# This is the covariate-appended view for downstream modelling -- e.g.
-# lm(Horvath1 ~ Age + Female, data = augment(res)).
+# With adjust=, additionally append per-clock residual columns (age acceleration
+# when adjust = "Age") -- see augment_residualize().
+#
+#   augment(res)                          # scores + the run's covariates
+#   augment(res, data = pheno)            # + user covariates joined by id
+#   augment(res, adjust = c("Age","Female"))  # + <clock>_resid columns
 #' @export
-augment <- function(x, data = NULL, ...) {
+augment <- function(x, data = NULL, adjust = NULL) {
   check_mc_result(x)
   id <- x[["provenance"]][["pheno_id"]]
   out <- as.data.frame(x)
@@ -90,6 +94,42 @@ augment <- function(x, data = NULL, ...) {
       )
     }
     out <- merge(out, data, by = id, all.x = TRUE, sort = FALSE)
+  }
+
+  if (!is.null(adjust)) {
+    out <- augment_residualize(out, x[["provenance"]][["clocks"]], adjust)
+  }
+  out
+}
+
+# append one <clock>_resid column per clock = residual of lm(clock ~ adjust)
+# fit within this table. adjust on "Age" gives age acceleration. The residual is
+# cohort-dependent (fit over the supplied samples), so it shifts if the sample
+# set changes.
+augment_residualize <- function(out, clocks, adjust) {
+  checkmate::assert_character(adjust, min.len = 1L, any.missing = FALSE)
+  missing <- setdiff(adjust, names(out))
+  if (length(missing)) {
+    cli::cli_abort(
+      c(
+        "{.arg adjust} {cli::qty(missing)}column{?s} {.field {missing}}
+         {cli::qty(missing)}{?is/are} not in the table.",
+        "i" = "The record only carries covariates a clock required -- pass the rest
+               via {.arg data}."
+      ),
+      call = NULL
+    )
+  }
+  clocks <- intersect(clocks, names(out))
+  form_rhs <- paste(sprintf("`%s`", adjust), collapse = " + ")
+  for (cl in clocks) {
+    form <- stats::as.formula(sprintf("`%s` ~ %s", cl, form_rhs))
+    out[[paste0(cl, "_resid")]] <- tryCatch(
+      as.numeric(stats::residuals(
+        stats::lm(form, data = out, na.action = stats::na.exclude)
+      )),
+      error = function(e) rep(NA_real_, nrow(out))
+    )
   }
   out
 }

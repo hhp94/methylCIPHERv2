@@ -65,7 +65,7 @@ methods so no operation loses data:
 | `[` | subset rows/cols of `$scores` **and** the matching pheno/coverage/provenance -> `mc_result` |
 | `cbind` | bind score columns; require equal `sample_id` sets (read straight off `$provenance$sample_id`) |
 | `rbind` | **refuses** -- stacking samples leaves any cohort-dependent score computed against the wrong cohort. Score per cohort, bind the `as.data.frame()` outputs |
-| `augment` | analysis-ready table: `as.data.frame()` + the record's aligned covariates (`$pheno`) + an optional user `data` joined by sample id. Plain exported function, not a `broom` generic (avoids the clash). Built. |
+| `augment` | analysis-ready table: `as.data.frame()` + the record's aligned covariates (`$pheno`) + an optional user `data` joined by sample id. `adjust =` (covariate names) additionally appends `<clock>_resid` = `resid(lm(clock ~ adjust))` (age acceleration when adjusting on Age; cohort-dependent) -- join is the default, residualization opt-in. Plain exported function, not a `broom` generic (avoids the clash). Built. |
 
 Built so far: `print`, `as.matrix`, `as.data.frame`, `augment`. Still unbuilt: `[`, `cbind`.
 

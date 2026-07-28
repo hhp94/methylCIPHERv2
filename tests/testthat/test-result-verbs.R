@@ -57,6 +57,26 @@ test_that("augment refuses duplicate ids and warns on column collisions", {
   expect_warning(augment(res, data = clash)) # column already on the table
 })
 
+test_that("augment(adjust=) appends residual columns orthogonal to the covariates", {
+  sim <- sim_DNAm(c("Horvath1", "Hannum"), n = 12L, Age = TRUE, Female = TRUE)
+  res <- calc_clocks(sim$DNAm, c("Horvath1", "Hannum"), pheno = sim$pheno)
+
+  # these clocks need no covariates, so Age is not on the record -> needs data=
+  expect_error(augment(res, adjust = "Age"))
+
+  a <- augment(res, data = sim$pheno, adjust = c("Age", "Female"))
+  expect_true(all(c("Horvath1_resid", "Hannum_resid") %in% names(a)))
+  # a residual is orthogonal to its adjustment set
+  expect_lt(abs(stats::cor(a$Horvath1_resid, a$Age)), 1e-6)
+})
+
+test_that("augment(adjust=) uses record covariates when a clock required them", {
+  sim <- sim_DNAm("DNAmGrip_wAge", n = 8L, Age = TRUE, Female = TRUE)
+  res <- suppressWarnings(calc_clocks(sim$DNAm, "DNAmGrip_wAge", pheno = sim$pheno))
+  a <- augment(res, adjust = c("Age", "Female")) # no data= needed
+  expect_true("DNAmGrip_wAge_resid" %in% names(a))
+})
+
 test_that("codebook reports panel size for sex-routed aliases (not 0)", {
   cb <- codebook("DNAmFitAge")
   expect_true(all(cb$n_cpgs > 0L))
