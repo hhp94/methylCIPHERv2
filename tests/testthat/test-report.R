@@ -268,3 +268,22 @@ test_that("report(DNAm, result) produces both sections", {
 test_that("report() with no usable input errors", {
   expect_error(report())
 })
+
+test_that("report survives degenerate inputs (all-NA aborts cleanly; n=1 runs)", {
+  sim <- sim_DNAm(c("Horvath1", "Hannum"), n = 4L)
+  allna <- sim$DNAm
+  allna[] <- NA_real_
+  # clean diagnostic, not the cli "Cannot pluralize" crash (distinct failure mode)
+  err <- tryCatch(
+    quiet_report(allna, clocks = c("Horvath1", "Hannum"), ask = FALSE),
+    error = function(e) conditionMessage(e)
+  )
+  expect_false(grepl("pluralize", err))
+  expect_match(err, "observed CpGs")
+
+  # a single sample must not crash the renderer (hist / heatmap guards)
+  s1 <- sim_DNAm(c("Horvath1", "Hannum"), n = 1L, Age = TRUE)
+  r1 <- suppressWarnings(calc_clocks(s1$DNAm, c("Horvath1", "Hannum"), pheno = s1$pheno))
+  f <- withr::local_tempfile(fileext = ".pdf")
+  expect_no_error(quiet_report(result = r1, pheno = s1$pheno, file = f))
+})

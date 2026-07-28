@@ -70,6 +70,25 @@ augment <- function(x, data = NULL, ...) {
         call = NULL
       )
     }
+    # duplicate ids would fan out the join and multiply score rows -- refuse
+    if (anyDuplicated(data[[id]])) {
+      cli::cli_abort(
+        c(
+          "{.arg data} has duplicate ids in {.field {id}}.",
+          "i" = "Each sample id must appear once, or the scores get multiplied."
+        ),
+        call = NULL
+      )
+    }
+    # a column already on the table would be silently suffixed .x/.y -- flag it
+    clash <- setdiff(intersect(names(out), names(data)), id)
+    if (length(clash)) {
+      cli::cli_warn(
+        "{.arg data} {cli::qty(clash)}column{?s} {.field {clash}} {cli::qty(clash)}{?is/are}
+         already in the table; both kept, suffixed {.val .x}/{.val .y}.",
+        call = NULL
+      )
+    }
     out <- merge(out, data, by = id, all.x = TRUE, sort = FALSE)
   }
   out

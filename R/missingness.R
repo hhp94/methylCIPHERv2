@@ -21,9 +21,9 @@ scan_missing_cpgs <- function(DNAm, needed_cpgs) {
   if (length(dead)) {
     cli::cli_abort(
       c(
-        "{length(dead)} sample{?s} {?has/have} no observed CpGs (all NA):
-         {.val {utils::head(dead, 10L)}}.",
-        "i" = "Remove or fix {?it/them} before scoring."
+        "{length(dead)} sample{?s} {cli::qty(dead)}{?has/have} no observed CpGs
+         (all NA): {.val {utils::head(dead, 10L)}}.",
+        "i" = "Remove or fix {cli::qty(dead)}{?it/them} before scoring."
       ),
       call = NULL
     )

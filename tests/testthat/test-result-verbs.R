@@ -46,6 +46,22 @@ test_that("codebook describes the requested clocks", {
   expect_gte(nrow(codebook("all")), 60L)
 })
 
+test_that("augment refuses duplicate ids and warns on column collisions", {
+  sim <- sim_DNAm(c("Horvath1", "Hannum"), n = 5L, Age = TRUE, Female = TRUE)
+  res <- suppressWarnings(calc_clocks(sim$DNAm, c("Horvath1", "Hannum"), pheno = sim$pheno))
+
+  dup <- data.frame(ID = rep(sim$pheno$ID[1L], 2L), X = 1:2)
+  expect_error(augment(res, data = dup)) # would fan out the join
+
+  clash <- data.frame(ID = sim$pheno$ID, Horvath1 = 1)
+  expect_warning(augment(res, data = clash)) # column already on the table
+})
+
+test_that("codebook reports panel size for sex-routed aliases (not 0)", {
+  cb <- codebook("DNAmFitAge")
+  expect_true(all(cb$n_cpgs > 0L))
+})
+
 test_that("bibliography returns unique references with PubMed links and BibTeX", {
   b <- bibliography(c("Horvath1", "Hannum"))
   expect_true(all(c("reference", "citation", "pmid", "url") %in% names(b)))

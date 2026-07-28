@@ -10,6 +10,20 @@ codebook_ids <- function(x) {
   resolve_clocks(x)
 }
 
+# CpG count for the codebook. A sex-routed alias has no scoring panel of its own,
+# so report the union of its routed members' panels rather than a misleading 0.
+codebook_n_cpgs <- function(id) {
+  if (identical(clock_kind(id), "sex_routed_alias")) {
+    members <- unlist(clock_routing(id), use.names = FALSE)
+    cpgs <- unique(unlist(lapply(
+      members,
+      function(m) tryCatch(clock_scoring_cpgs(m), error = function(e) character(0))
+    )))
+    return(length(cpgs))
+  }
+  tryCatch(length(clock_scoring_cpgs(id)), error = function(e) NA_integer_)
+}
+
 # one descriptive row per clock: what it is, what it needs, and its reference.
 # Presents the scoring-contract metadata the catalog carries; training-population
 # / phenotype fields are not synced into the package yet (see dev notes).
@@ -18,11 +32,7 @@ codebook <- function(x = "all") {
   ids <- codebook_ids(x)
   idx <- match(ids, mc_index[["clock_id"]])
 
-  n_cpgs <- vapply(
-    ids,
-    function(id) tryCatch(length(clock_scoring_cpgs(id)), error = function(e) NA_integer_),
-    integer(1L)
-  )
+  n_cpgs <- vapply(ids, codebook_n_cpgs, integer(1L))
   covariates <- vapply(
     ids,
     function(id) {

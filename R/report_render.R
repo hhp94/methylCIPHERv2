@@ -441,6 +441,18 @@ rp_draw_score_hists <- function(w, s) {
   for (id in show) {
     v <- scores[, id]
     v <- v[is.finite(v)]
+    # hist(breaks = "FD") fails on <2 finite or constant values (e.g. n = 1);
+    # draw a labelled placeholder instead of crashing
+    if (length(v) < 2L || diff(range(v)) == 0) {
+      graphics::plot.new()
+      graphics::title(main = id, cex.main = 0.9)
+      graphics::text(
+        0.5, 0.5,
+        if (!length(v)) "no data" else sprintf("constant (%.3g)", v[1L]),
+        cex = 0.8, col = "grey40"
+      )
+      next
+    }
     graphics::hist(
       v,
       breaks = "FD",
@@ -459,7 +471,9 @@ rp_draw_score_hists <- function(w, s) {
 # clock-clock correlation heatmap (blue -1 / white 0 / red +1)
 rp_draw_cor_heatmap <- function(w, s) {
   cm <- s[["correlations"]]
-  if (is.null(cm) || ncol(cm) < 2L) {
+  # skip when there is nothing to show: <2 clocks, or every off-diagonal
+  # correlation is NA (n = 1, or constant scores)
+  if (is.null(cm) || ncol(cm) < 2L || all(!is.finite(cm[upper.tri(cm)]))) {
     return(invisible())
   }
   k <- ncol(cm)
