@@ -1,10 +1,13 @@
-# unroutable catalog entry
-unroutable <- function(p, gid, wf, ct) {
+# unroutable catalog entry. Reads the four routing facts off the entry itself so
+# no call site can report a subset of them.
+unroutable <- function(p) {
   cli::cli_abort(
     c(
       "No scoring path for clock {.val {p}}.",
-      "*" = "group {.val {gid}}, weights_format {.val {wf}},
-             computation_type {.val {ct}}",
+      "*" = "group {.val {clock_group_id(p)}},
+             weights_format {.val {clock_weights_format(p)}},
+             computation_type {.val {clock_type(p)}},
+             normalization {.val {clock_norm_scheme(p)}}",
       "i" = "This is a package bug -- please report it."
     ),
     call = NULL
@@ -29,7 +32,7 @@ score_type <- function(p) {
     if (wf == "cpg_coefficient" && ct %in% c("linear", "linear_transformed")) {
       return("pack_linear")
     }
-    unroutable(p, gid, wf, ct)
+    unroutable(p)
   }
 
   # group-specific tags first
@@ -62,14 +65,22 @@ score_type <- function(p) {
   # a declared normalization scheme routes to normalize-then-linear; the
   # Dunedin group keeps its own tag above. Catalog-only, never the request --
   # the branch itself reads `cpgs$normalizes` to decide whether to apply it.
-  if (clock_norm_scheme(p) %in% NORM_SCHEMES) {
+  #
+  # A scheme score_normalized() does not implement stops here rather than
+  # falling through: the fall-through lands on `linear`, which would score the
+  # clock raw and silently drop a normalization step the catalog declared.
+  scheme <- clock_norm_scheme(p)
+  if (scheme %in% NORM_SCHEMES) {
+    if (!scheme %in% NORM_SCHEMES_ROUTED) {
+      unroutable(p)
+    }
     return("normalized")
   }
 
   if (wf == "cpg_coefficient" && ct %in% c("linear", "linear_transformed")) {
     return("linear")
   }
-  unroutable(p, gid, wf, ct)
+  unroutable(p)
 }
 
 # pack groups use score_pack_group()
@@ -121,22 +132,23 @@ calc_clocks <- function(
   scored <- score_cohort(DNAm, spec, facts)
   # one block, so assembly is the identity -- but the reduction still runs
   # here rather than in the loop, so both front ends share this step
-  scores <- finalize_cross_sample(scored$scores, scored$pending)
+  scores <- finalize_cross_sample(scored[["scores"]], scored[["pending"]])
 
   # row-gate every clock actually computed (including routed members). Warn
   # only, so it reads assembled counts and runs after scoring.
-  check_row_coverage(scored$coverage, min_samples_coverage)
+  check_row_coverage(scored[["coverage"]], min_samples_coverage)
 
   construct_mc_result(
     scores,
-    scored$coverage,
-    spec$output_ids,
-    spec$clock_ids,
-    facts$sample_id,
-    pheno = facts$pheno,
+    scored[["coverage"]],
+    spec[["output_ids"]],
+    spec[["clock_ids"]],
+    facts[["sample_id"]],
+    pheno = facts[["pheno"]],
     pheno_id = pheno_id,
-    covariates_used = spec$covariates,
-    normalized = names(spec$normalize)[spec$normalize]
+    covariates_used = spec[["covariates"]],
+    normalized = names(spec[["normalize"]])[spec[["normalize"]]],
+    scoring_failures = scored[["notes"]]
   )
 }
 
@@ -164,16 +176,17 @@ construct_mc_result <- function(
   output_ids,
   requested_ids,
   sample_id,
-  pheno = NULL,
-  pheno_id = "ID",
-  covariates_used = character(0),
-  normalized = character(0)
+  pheno,
+  pheno_id,
+  covariates_used,
+  normalized,
+  scoring_failures = list()
 ) {
   scores <- do.call(cbind, results[output_ids])
   dimnames(scores) <- list(sample_id, output_ids)
 
   # sample_miss is per panel role: score for every column, norm for normalizers only
-  per_clock <- coverage$per_clock
+  per_clock <- coverage[["per_clock"]]
   # normalizers from the record's `normalizes` flag (aliases are NULL / dropped)
   norm_ids <- output_ids[vapply(
     output_ids,
@@ -181,8 +194,8 @@ construct_mc_result <- function(
     logical(1L)
   )]
   sample_miss <- list(
-    score = miss_matrix(coverage$sample_miss$score, output_ids, sample_id),
-    norm = miss_matrix(coverage$sample_miss$norm, norm_ids, sample_id)
+    score = miss_matrix(coverage[["sample_miss"]][["score"]], output_ids, sample_id),
+    norm = miss_matrix(coverage[["sample_miss"]][["norm"]], norm_ids, sample_id)
   )
 
   structure(
@@ -198,7 +211,11 @@ construct_mc_result <- function(
         dependencies = setdiff(output_ids, requested_ids),
         covariates_used = covariates_used,
         # which clocks were actually normalized -- absent means scored raw
-        normalized = normalized
+        normalized = normalized,
+        # clock id -> sample ids the scorer could not fit, so an NA score is
+        # readable as a failure rather than as absent input. Empty is the
+        # normal case; coverage cannot carry this (it precedes scoring).
+        scoring_failures = scoring_failures
       )
     ),
     class = "mc_result"

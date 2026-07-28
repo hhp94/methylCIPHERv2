@@ -1,22 +1,22 @@
 # coverage/QC, built once upstream of scoring and keyed by clock id
 
 # per-sample partial-fill count over one panel's present CpGs
-panel_sample_miss <- function(present, DNAm, partial_cache) {
-  count_sample_miss(DNAm, cached_cols(present, partial_cache))
+panel_sample_miss <- function(present, block) {
+  count_sample_miss(
+    block[["DNAm"]],
+    cached_cols(present, block[["partial_cache"]])
+  )
 }
 
 # alias score-panel miss: stitch each row from the member that scored it
 stitch_routed_sample_miss <- function(alias, score_miss, female, sample_id) {
   miss <- rep(NA_integer_, length(sample_id))
   names(miss) <- sample_id
-  if (is.null(female)) {
-    return(miss)
-  }
   route <- clock_routing(alias)
-  rows <- list(female = which(female == 1), male = which(female == 0))
+  rows <- sex_rows(female, length(sample_id))
   for (key in names(rows)) {
     i <- rows[[key]]
-    if (!length(i)) {
+    if (!any(i)) {
       next
     }
     sm <- score_miss[[as.character(route[[key]])]]
@@ -28,14 +28,8 @@ stitch_routed_sample_miss <- function(alias, score_miss, female, sample_id) {
 }
 
 # full coverage for the compute sequence (per_clock records + per-panel sample_miss)
-compute_coverage <- function(
-  clock_sequence,
-  cpg_list,
-  DNAm,
-  partial_cache,
-  pheno
-) {
-  sample_id <- rownames(DNAm)
+compute_coverage <- function(clock_sequence, cpg_list, block) {
+  sample_id <- block[["sample_id"]]
   routed <- sex_routed_members()
   is_alias <- vapply(
     clock_sequence,
@@ -43,18 +37,18 @@ compute_coverage <- function(
     logical(1L)
   )
   seqi <- seq_along(clock_sequence)
-  pidx <- cpg_list$panel_index
+  pidx <- cpg_list[["panel_index"]]
 
   # count each distinct panel's per-sample miss once, then fan out via the index
   score_part_miss <- lapply(
-    pidx$score$parts,
-    function(p) panel_sample_miss(p$present, DNAm, partial_cache)
+    pidx[["score"]][["parts"]],
+    function(p) panel_sample_miss(p[["present"]], block)
   )
-  norm_part_miss <- lapply(pidx$norm$parts, function(p) {
-    if (!length(p$needed)) {
+  norm_part_miss <- lapply(pidx[["norm"]][["parts"]], function(p) {
+    if (!length(p[["needed"]])) {
       NULL
     } else {
-      panel_sample_miss(p$present, DNAm, partial_cache)
+      panel_sample_miss(p[["present"]], block)
     }
   })
 
@@ -68,10 +62,11 @@ compute_coverage <- function(
   # 1. raw per-panel miss for every non-alias clock
   for (i in seqi[!is_alias]) {
     id <- clock_sequence[[i]]
-    score_miss[[id]] <- score_part_miss[[pidx$score$idx[[i]]]]
-    norm_miss[[id]] <- norm_part_miss[[pidx$norm$idx[[i]]]]
+    score_miss[[id]] <- score_part_miss[[pidx[["score"]][["idx"]][[i]]]]
+    norm_miss[[id]] <- norm_part_miss[[pidx[["norm"]][["idx"]][[i]]]]
   }
 
+  pheno <- block[["pheno"]]
   female <- if (is.null(pheno)) NULL else as.numeric(pheno[["Female"]])
 
   # 2. aliases: stitch score-panel miss from the raw member counts
@@ -86,25 +81,18 @@ compute_coverage <- function(
   }
 
   # 3. blank member rows that this sex did not score
-  if (!is.null(female)) {
-    for (id in intersect(clock_sequence, names(routed$sex))) {
-      applies <- if (identical(routed$sex[[id]], "female")) {
-        female == 1
-      } else {
-        female == 0
-      }
-      applies[is.na(applies)] <- FALSE
-      sm <- score_miss[[id]]
-      sm[!applies] <- NA_integer_
-      score_miss[[id]] <- sm
-    }
+  rows <- sex_rows(female, length(sample_id))
+  for (id in intersect(clock_sequence, names(routed[["sex"]]))) {
+    sm <- score_miss[[id]]
+    sm[!rows[[routed[["sex"]][[id]]]]] <- NA_integer_
+    score_miss[[id]] <- sm
   }
 
   # 4. records last (aliases keep NULL -- panels differ by member)
   for (i in seqi[!is_alias]) {
     id <- clock_sequence[[i]]
     per_clock[[id]] <- coverage_record(
-      cpg_list$per_clock[[id]],
+      cpg_list[["per_clock"]][[id]],
       score_miss[[id]],
       norm_miss[[id]]
     )

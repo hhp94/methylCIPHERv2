@@ -12,10 +12,28 @@
 check_col_values <- function(scan, DNAm, cols) {
   at <- scan[["inf_at"]]
   if (!is.null(at)) {
+    cpg <- cols[at[[2L]]]
+    # the kernel finds a bad column by its sum going non-finite, so it reports
+    # a column always and a row only when an actual Inf sits in it. A missing
+    # row means the column is finite but overflowed, which is a different
+    # defect and needs a different sentence.
+    if (is.na(at[[1L]])) {
+      cli::cli_abort(
+        c(
+          "DNAm column {.val {cpg}} does not sum to a finite value.",
+          "i" = "Its entries are finite but astronomically large -- far outside
+                 the {.val {0}} to {.val {1}} beta range. Fix the matrix before
+                 scoring.",
+          "i" = "The scan stops at the first such column, so there may be
+                 others."
+        ),
+        call = NULL
+      )
+    }
     cli::cli_abort(
       c(
         "DNAm contains an infinite value: sample {.val {rownames(DNAm)[at[[1L]]]}},
-         CpG {.val {cols[at[[2L]]]}}.",
+         CpG {.val {cpg}}.",
         "i" = "Infinite values are not missing values -- no imputation can
                repair one. Fix the matrix before scoring.",
         "i" = "The scan stops at the first one, so there may be others."
@@ -49,17 +67,20 @@ check_col_values <- function(scan, DNAm, cols) {
       call = NULL
     )
   }
-  invisible(TRUE)
+  invisible(NULL)
 }
 
 # NA scan over needed columns. One `col_stats()` traversal yields the column
-# classification, the means the fill uses, and the value gates, so none of the
-# three can disagree with the others. It runs unconditionally: gating it on
-# `anyNA()` would skip the value gates on a matrix whose only defect is an
-# Inf, since `anyNA()` does not see one. The row half (all-NA sample abort) is
-# per row, stays correct against any subset of the cohort, and is the one part
-# still worth skipping when the matrix has no NAs at all -- it scans the full
-# width rather than the needed panel.
+# classification, the means the fill uses, the value gates and the per-row
+# observed count, so none of the four can disagree with the others. It runs
+# unconditionally: gating it on `anyNA()` would skip the value gates on a
+# matrix whose only defect is an Inf, since `anyNA()` does not see one.
+#
+# The row half (all-NA sample abort) is per row and stays correct against any
+# subset of the cohort. It reads `row_obs`, which is counted over the panel
+# slice, not the full array: a sample with nothing observed on any scoring
+# panel is unscoreable however many off-panel CpGs it carries, and the old
+# full-width test let exactly that case through.
 scan_missing_cpgs <- function(DNAm, needed_cpgs) {
   present_needed <- intersect(needed_cpgs, colnames(DNAm))
   nr <- nrow(DNAm)
@@ -67,15 +88,15 @@ scan_missing_cpgs <- function(DNAm, needed_cpgs) {
   scan <- col_stats(DNAm[, present_needed, drop = FALSE])
   check_col_values(scan, DNAm, present_needed)
 
-  if (anyNA(DNAm)) {
-    row_miss <- slideimp::mat_miss(DNAm, col = FALSE)
-    dead <- rownames(DNAm)[row_miss == ncol(DNAm)]
+  # no panel columns at all is the coverage gate's diagnostic, not this one's
+  if (length(present_needed)) {
+    dead <- rownames(DNAm)[scan[["row_obs"]] == 0L]
     if (length(dead)) {
       cli::cli_abort(
         c(
-          "{length(dead)} sample{?s} {?has/have} no observed CpGs (all NA):
-           {.val {utils::head(dead, 10L)}}.",
-          "i" = "Remove or fix {?it/them} before scoring."
+          "{length(dead)} sample{?s} {?has/have} no observed CpGs on any
+           scoring panel: {.val {utils::head(dead, 10L)}}.",
+          "i" = "Remove or fix {cli::qty(dead)}{?it/them} before scoring."
         ),
         call = NULL
       )

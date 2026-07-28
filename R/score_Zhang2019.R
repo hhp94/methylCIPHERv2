@@ -1,23 +1,23 @@
 # Zhang2019: full-matrix sample z-score, then linear sum over present EN CpGs
-score_Zhang2019 <- function(id, cpgs, DNAm, partial_cache = NULL) {
-  sample_id <- rownames(DNAm)
+score_Zhang2019 <- function(id, cpgs, block, results) {
   coef <- clock_coefs(id)
-  present <- cpgs$score_present
+  present <- cpgs[["score_present"]]
 
-  # moments over every available probe (not the EN subset)
-  m <- matrixStats::rowMeans2(DNAm, na.rm = TRUE)
-  s <- matrixStats::rowSds(DNAm, na.rm = TRUE)
+  # the declared sample_scale op is over every probe in the input matrix, not
+  # the panel union -- so this is the one branch that reads the full width
+  full <- block[["DNAm_full"]]
+  m <- matrixStats::rowMeans2(full, na.rm = TRUE)
+  s <- matrixStats::rowSds(full, na.rm = TRUE)
 
   lp <- linear_predictor(
     coef = coef,
     intercept = 0,
     cov_coefs = numeric(0),
     score_present = present,
-    DNAm = DNAm,
-    partial_cache = partial_cache,
+    block = block,
     id = id
   )
   csum <- sum(coef[present])
-  z_sum <- (as.numeric(lp$cpg_contrib) - m * csum) / s
-  score_matrix(clock_intercept(id) + z_sum, sample_id, id)
+  z_sum <- (as.numeric(lp[["cpg_contrib"]]) - m * csum) / s
+  score_matrix(clock_intercept(id) + z_sum, block[["sample_id"]], id)
 }

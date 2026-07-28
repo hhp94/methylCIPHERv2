@@ -1,4 +1,5 @@
 # n x length(cpgs) U(0,1) beta matrix over the ambient RNG (unseeded)
+#' @export
 random_betas <- function(cpgs, n = 10L) {
   matrix(
     stats::runif(n * length(cpgs)),
@@ -7,6 +8,7 @@ random_betas <- function(cpgs, n = 10L) {
   )
 }
 
+#' @export
 sim_DNAm <- function(
   clocks,
   n = 10,
@@ -33,11 +35,11 @@ sim_DNAm <- function(
   DNAm <- random_betas(cpgs, n = n)
   pheno <- data.frame(ID = ID)
   if (Age) {
-    pheno$Age <- stats::rnorm(n, mean = 45, sd = 5)
+    pheno[["Age"]] <- stats::rnorm(n, mean = 45, sd = 5)
   }
   if (Female) {
-    pheno$Female <- numeric(n)
-    pheno$Female[sample.int(n, floor(n / 2))] <- 1
+    pheno[["Female"]] <- numeric(n)
+    pheno[["Female"]][sample.int(n, floor(n / 2))] <- 1
   }
   out <- list(
     DNAm = DNAm,
@@ -50,8 +52,8 @@ sim_DNAm <- function(
 # print mc_sim (DNAm + pheno preview)
 #' @export
 print.mc_sim <- function(x, n = 6, p = 6, ...) {
-  DNAm <- x$DNAm
-  pheno <- x$pheno
+  DNAm <- x[["DNAm"]]
+  pheno <- x[["pheno"]]
   nr <- nrow(DNAm)
   nc <- ncol(DNAm)
   ni <- min(n, nr)
@@ -74,10 +76,7 @@ print.mc_sim <- function(x, n = 6, p = 6, ...) {
   invisible(x)
 }
 
-clock_cpgs <- function(clock_ids, packs = NULL, normalize = NULL) {
-  if (is.null(normalize)) {
-    normalize <- resolve_normalize(NULL, clock_ids)
-  }
+clock_cpgs <- function(clock_ids, packs, normalize) {
   results <- lapply(clock_ids, function(cid) {
     scoring <- clock_scoring_cpgs(cid, packs)
     if (!length(scoring)) {

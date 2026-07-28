@@ -1397,6 +1397,15 @@ component_file <- function(entry, name, cid) {
   vendored_path(hits[[1L]][["file"]], "components[].file", cid)
 }
 
+# every member clock of a group, in catalog order
+group_member_ids <- function(catalog, gid) {
+  names(catalog[["clocks"]])[vapply(
+    catalog[["clocks"]],
+    function(e) identical(as.character(e[["group_id"]] %||% ""), gid),
+    logical(1L)
+  )]
+}
+
 # member clocks that own a coefficient file, clock_id -> coef_path
 member_coef_files <- function(catalog, gid) {
   ids <- names(catalog[["clocks"]])[vapply(
@@ -1474,22 +1483,63 @@ encode_pcclocks <- function(bundle, catalog) {
   bundle
 }
 
-# component a linear step multiplies to produce raw_{system}
+# stack operand -> declared column label. The label is the matrix index the
+# later center/scale/rotation tensors are keyed by; default is the operand's
+# own name, and an optional parallel `columns` list overrides it elementwise.
+systemsage_stack_labels <- function(entry) {
+  stack <- Filter(
+    function(s) identical(s[["op"]], "stack"),
+    entry[["recipe"]] %||% list()
+  )
+  if (length(stack) != 1L) {
+    stop(
+      "SystemsAge: expected exactly 1 stack step, found ",
+      length(stack),
+      call. = FALSE
+    )
+  }
+  stack <- stack[[1L]]
+  # inputs, then internal, then covariates -- the concatenation IS column order
+  operands <- as.character(c(
+    unlist(stack[["inputs"]] %||% character()),
+    unlist(stack[["internal"]] %||% character()),
+    unlist(stack[["covariates"]] %||% character())
+  ))
+  labels <- if (is.null(stack[["columns"]])) {
+    operands
+  } else {
+    as.character(unlist(stack[["columns"]]))
+  }
+  if (length(labels) != length(operands)) {
+    stop(
+      "SystemsAge: stack declares ",
+      length(labels),
+      " column labels for ",
+      length(operands),
+      " operands",
+      call. = FALSE
+    )
+  }
+  stats::setNames(labels, operands)
+}
+
+# component a linear step multiplies to produce each labelled stack column
 systemsage_system_components <- function(entry) {
+  map <- systemsage_stack_labels(entry)
   steps <- Filter(
     function(s) {
       identical(s[["op"]], "linear") &&
         !is.null(s[["out"]]) &&
-        startsWith(as.character(s[["out"]]), "raw_")
+        as.character(s[["out"]]) %in% names(map)
     },
     entry[["recipe"]] %||% list()
   )
   stats::setNames(
     vapply(steps, function(s) as.character(s[["coef"]]), character(1L)),
-    sub(
-      "^raw_",
-      "",
-      vapply(steps, function(s) as.character(s[["out"]]), character(1L))
+    vapply(
+      steps,
+      function(s) unname(map[[as.character(s[["out"]])]]),
+      character(1L)
     )
   )
 }
@@ -1505,7 +1555,25 @@ encode_systemsage <- function(bundle, catalog) {
   labels <- names(organs)
   composite <- catalog[["clocks"]][[gid]]
   sys_comp <- systemsage_system_components(composite)
-  # organs and systems must line up both ways
+
+  # every declared stack column label is a member clock of the group. This is
+  # the check that reaches Age_prediction, which owns no coefficient tensor and
+  # so never enters member_coef_files() -- the label produced by the old strip
+  # was the one label nothing compared.
+  declared <- setdiff(unname(systemsage_stack_labels(composite)), gid)
+  members <- setdiff(group_member_ids(catalog, gid), gid)
+  if (!setequal(declared, members)) {
+    stop(
+      gid,
+      ": stack column labels and group members disagree -- only in labels: ",
+      paste(setdiff(declared, members), collapse = ", "),
+      "; only in members: ",
+      paste(setdiff(members, declared), collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  # the labels with a CpG front are exactly the coefficient-owning members
   if (!setequal(labels, names(sys_comp))) {
     stop(
       gid,

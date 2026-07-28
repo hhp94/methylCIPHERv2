@@ -1,31 +1,17 @@
 # sex-routed alias: pick the member score matching each sample's sex
-score_sex_routed <- function(id, results, DNAm, pheno) {
-  sample_id <- rownames(DNAm)
-  n <- nrow(DNAm)
+score_sex_routed <- function(id, cpgs, block, results) {
+  sample_id <- block[["sample_id"]]
+  n <- length(sample_id)
   route <- clock_routing(id)
 
-  member_score <- function(key) {
-    member <- route[[key]]
-    r <- results[[member]]
-    if (is.null(r)) {
-      cli::cli_abort(
-        "{.val {id}} needs member {.val {member}}, which was not scored
-         upstream.",
-        call = NULL
-      )
-    }
-    r
-  }
-
-  female <- as.numeric(pheno[["Female"]])
   score_vec <- rep(NA_real_, n)
-  rows <- list(female = which(female == 1), male = which(female == 0))
+  rows <- sex_rows(block[["pheno"]][["Female"]], n)
   for (key in names(rows)) {
     i <- rows[[key]]
-    if (!length(i)) {
+    if (!any(i)) {
       next
     }
-    score_vec[i] <- as.numeric(member_score(key))[i]
+    score_vec[i] <- as.numeric(results[[route[[key]]]])[i]
   }
 
   score_matrix(score_vec, sample_id, id)
@@ -33,5 +19,5 @@ score_sex_routed <- function(id, results, DNAm, pheno) {
 
 # routed members are internal: scored and kept for coverage, never a column
 drop_routed_members <- function(ids) {
-  setdiff(ids, names(sex_routed_members()$sex))
+  setdiff(ids, names(sex_routed_members()[["sex"]]))
 }

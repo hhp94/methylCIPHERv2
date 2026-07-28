@@ -76,18 +76,20 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   remain the shared shape helpers (see DECISIONS 2026-07-24).
 - **Result is an S3 record over `list`** (class `mc_result`): `$scores` (n x k double), `$pheno`,
   `$coverage`, `$provenance`. Never a `matrix` subclass (drops class + attrs on first subset).
-  Verbs are methods (`print`, `as.matrix`, `as.data.frame`, `[`, `cbind`, `augment`, ...), with
-  three settled exceptions: coverage is the plain `clocks_coverage()` / `samples_coverage()`,
-  **not** `summary()`; `rbind` **refuses**; `codebook` is a plain function. Citations dispatch as
-  `cite_clocks()` -- a **package-owned** generic, because both `utils::citation` and `utils::cite`
-  already exist as plain functions and taking either name masks it (DECISIONS 2026-07-23,
-  2026-07-24, 2026-07-25).
-- **Scores only, and the record remembers its inputs.** `$scores` is scores and
-  `as.data.frame()` is scores plus the id column -- no auto-appended phenotype columns on either.
-  Separately, `$pheno` carries the *aligned* pheno narrowed to the id column plus the covariates
-  the run actually required, so a saved record can answer what was fed in; keeping it off the
-  `as.data.frame()` path is what stops it leaking by accident. Align pheno by sample id, never row
-  order.
+  **Where a verb exists it is a method**, and the built surface today is exactly `print`,
+  `as.matrix` and `cite_clocks` -- plus `rbind`, which exists in order to **refuse**. Coverage is
+  deliberately not a method: it is the plain `clocks_coverage()` / `samples_coverage()`, **not**
+  `summary()`. Citations dispatch as `cite_clocks()` -- a **package-owned** generic, because both
+  `utils::citation` and `utils::cite` already exist as plain functions and taking either name
+  masks it (DECISIONS 2026-07-23, 2026-07-24, 2026-07-25). Nothing else is promised: `as.data.frame`,
+  `[`, `cbind`, `augment` and `codebook` were listed here for a year without being written, so
+  they are **unbuilt ideas, not contracts** -- adding one is a new API decision, and until a human
+  makes it there is no behaviour to match (DECISIONS 2026-07-27).
+- **Scores only, and the record remembers its inputs.** `$scores` is scores -- no auto-appended
+  phenotype columns. Separately, `$pheno` carries the *aligned* pheno narrowed to the id column
+  plus the covariates the run actually required, so a saved record can answer what was fed in.
+  Align pheno by sample id, never row order. If a frame conversion is ever built, it inherits this
+  rule: scores plus the id column, and pheno stays off that path so it cannot leak by accident.
 - **Imputation in one place, never crossing sources.** Partial NA on a present probe -> cohort mean
   (shared cache); a fully absent probe -> the clock's vendored ref, or drop by policy.
 - **Accessors are the executable schema.** `calc_clocks` consumes accessors (`get_clock`,
@@ -298,8 +300,12 @@ output**, not implementation detail (see "Test altitude").
   never listed). It needs no duckdb and no staged cohort, so `test_parity()` runs it even where
   nothing is staged -- but it **is** behind `MC_PARITY`, so a plain `devtools::test()` does not
   catch a dropped fixture; CI does (DECISIONS 2026-07-26).
-  **Standing state: 217 pass / 30 skip / 0 fail** -- census 1/1, core 130/130, fitage 28/28,
-  packs 56/56, PhysAge 2/2, horvath 30 skipped.
+  **Standing state: 217 tests / 30 skip / 0 fail** -- census 1/1, core 130/130, fitage 28/28,
+  packs 56/56, PhysAge 2/2, horvath 30 skipped. **The runner reports this as `PASS 657`**, because
+  testthat counts *expectations*, not `test_that` blocks, and `expect_parity()` carries three
+  (an all-finite check plus the abs and rel bounds): 214 x 3 + PhysAge 2 x 6 + census 3 = 657.
+  Read a parity run by its **fail and skip** counts -- 0 and 30 -- and check the two against each
+  other before concluding anything from the pass number.
   `KNOWN_PARITY_GAPS` (clock- or `clock@cohort`-keyed) holds only genuine skips and is **empty**
   today. `KNOWN_PARITY_GAP_GROUPS` (group-keyed) is empty too but stays a **separate** map,
   because group ids and clock ids share a namespace (`DNAmFitAge` is both) and one flat map could

@@ -95,15 +95,10 @@ is_horvath_online <- function(id) {
 # A `sample_scale` op z-scores each sample over EVERY probe in the input matrix,
 # so the scoring panel is not a sufficient input: subsetting first moves each
 # sample's mean/sd and the score with it (~1.8e1 off, 82% relative, measured).
-# The oracle ran on the whole array, so the fixture must too. Read off the
-# declared recipe, never a clock list -- today only Zhang2019 declares the op.
-needs_full_panel <- function(id) {
-  any(vapply(
-    clock_entry(id)[["recipe"]] %||% list(),
-    function(step) identical(as.character(step[["op"]]), "sample_scale"),
-    logical(1)
-  ))
-}
+# The oracle ran on the whole array, so the fixture must too. The predicate is
+# the package's own -- calc_clocks() reads the same declared op to decide which
+# matrix to hand that clock's branch, so the two cannot drift.
+needs_full_panel <- clock_needs_full_panel
 
 # which block a clock is graded in. Derived from the catalog, never a clock list.
 parity_block <- function(id) {

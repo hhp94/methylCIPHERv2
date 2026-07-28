@@ -87,6 +87,7 @@ mc_resolve_assets_dir <- function(from = NULL) {
 }
 
 # the assets dir in effect for this session
+#' @export
 get_mc_assets_dir <- function() {
   mc_resolve_assets_dir()
 }
@@ -94,6 +95,7 @@ get_mc_assets_dir <- function() {
 # set the session-wide assets dir; NULL clears it so the env var / default
 # apply again. Returns the previous option value invisibly, so a caller can
 # restore it with on.exit() or withr::defer().
+#' @export
 set_mc_assets_dir <- function(path = NULL) {
   old <- getOption("mc.assets_dir")
   if (is.null(path)) {
@@ -257,6 +259,7 @@ mc_consent <- function(rows, dir, ask) {
 }
 
 # pre-fetch packs into the assets dir
+#' @export
 download_mc_assets <- function(groups = "all", ask = TRUE) {
   checkmate::assert_flag(ask)
   groups <- mc_resolve_groups(groups)
@@ -337,6 +340,7 @@ mc_stale_labels <- function(stale) {
 }
 
 # browsable table: what exists, how big, what is downloaded, what is reclaimable
+#' @export
 list_mc_assets <- function(groups = "all") {
   groups <- mc_resolve_groups(groups)
   dir <- mc_resolve_assets_dir()
@@ -420,6 +424,7 @@ mc_canonicalize_from <- function(from) {
 }
 
 # load packs for needed groups into memory
+#' @export
 load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
   checkmate::assert_flag(ask)
   groups <- unique(as.character(groups))
@@ -468,12 +473,13 @@ load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
 
   if (any(missing)) {
     if (closed) {
+      gone <- groups[missing]
       cli::cli_abort(
         c(
-          "Pack{?s} {.val {groups[missing]}} not found in
+          "Pack{cli::qty(gone)}{?s} {.val {gone}} not found in
            {.path {dir}}.",
-          "i" = "Closed set -- no download. Stage the file{?s} there, or
-                 pass {.code from = NULL} to allow download."
+          "i" = "Closed set -- no download. Stage the file{cli::qty(gone)}{?s}
+                 there, or pass {.code from = NULL} to allow download."
         ),
         call = NULL
       )
@@ -538,6 +544,7 @@ mc_consent_delete <- function(files, dir, ask, n_stale = 0L) {
 }
 
 # remove every pack this package put in the assets dir
+#' @export
 clear_mc_assets <- function(groups = "all", ask = TRUE) {
   checkmate::assert_flag(ask)
   dir <- mc_resolve_assets_dir()

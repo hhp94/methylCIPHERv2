@@ -127,6 +127,50 @@ test_that("an all-missing column classifies rather than erroring", {
   expect_true(all(is.finite(mna$col_mean)))
 })
 
+test_that("a column that overflows its own sum stops, and names no sample", {
+  b <- gate_betas()
+  DNAm <- b$DNAm
+  # finite entries, non-finite sum. The kernel flags a bad column by its sum,
+  # so it reports a column always and a row only when an actual Inf sits in
+  # one. Overflow has no single bad row and the abort must not invent one.
+  DNAm[, b$panel[4]] <- 1e308
+
+  scan <- col_stats(DNAm[, b$panel[1:8], drop = FALSE])
+  expect_true(is.na(scan$inf_at[[1L]]))
+  expect_equal(scan$inf_at[[2L]], 4L)
+  expect_null(scan$stats)
+
+  # naming the column is the feature, same as for Inf above
+  err <- tryCatch(calc_clocks(DNAm, "Hannum"), error = function(e) e)
+  expect_s3_class(err, "error")
+  expect_true(grepl(b$panel[4], conditionMessage(err), fixed = TRUE))
+})
+
+test_that("a sample with nothing on the scoring panel stops, off-panel or not", {
+  b <- gate_betas()
+  extra <- paste0("cg_offpanel_", seq_len(20L))
+  DNAm <- cbind(b$DNAm, random_betas(extra, n = nrow(b$DNAm)))
+
+  # every panel CpG is only partially NA cohort-wide, so the cohort-mean fill
+  # would happily impute this sample end to end from other people's data
+  DNAm[1, b$panel] <- NA
+  expect_error(calc_clocks(DNAm, "Hannum"))
+
+  # the observed off-panel columns are what the old full-width test saw --
+  # they say nothing about whether the clock can be scored
+  expect_true(all(is.finite(DNAm[1, extra])))
+})
+
+test_that("col_stats counts observed entries per row as well as per column", {
+  b <- gate_betas(n = 6L)
+  DNAm <- b$DNAm
+  DNAm[2, b$panel[1:4]] <- NA
+  DNAm[3, ] <- NA
+
+  scan <- col_stats(DNAm[, b$panel[1:4], drop = FALSE])
+  expect_equal(scan$row_obs, c(4L, 0L, 0L, 4L, 4L, 4L))
+})
+
 test_that("col_stats sums and counts observed entries in one sweep", {
   b <- gate_betas(n = 10L)
   DNAm <- b$DNAm

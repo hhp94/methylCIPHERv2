@@ -22,9 +22,61 @@ test_that("under-covered clocks stop instead of scoring", {
 })
 
 test_that("zero observed CpGs stops even at min_clocks_coverage = 0", {
+  # these three declare `omit`, so an absent CpG takes its term with it and a
+  # fully absent panel leaves no score to compute at any threshold
   DNAm <- random_betas(foreign_panel(c("Hannum", "Horvath1", "EpiTOC")), n = 4L)
   for (id in c("Hannum", "Horvath1", "EpiTOC")) {
     expect_error(calc_clocks(DNAm, id, min_clocks_coverage = 0))
+  }
+})
+
+test_that("min_clocks_coverage = 0 really is off for a vendor-filled clock", {
+  # DNAmCRP declares `vendor_mean`: a fully absent panel is scoreable by
+  # design, so 0 must mean no gate rather than a hidden floor. The parity tier
+  # scores at exactly this threshold.
+  expect_equal(clock_impute("DNAmCRP")$policy, "vendor_mean")
+  DNAm <- random_betas(foreign_panel("DNAmCRP"), n = 4L)
+
+  res <- suppressWarnings(calc_clocks(
+    DNAm,
+    "DNAmCRP",
+    min_clocks_coverage = 0,
+    min_samples_coverage = 0
+  ))
+  expect_true(all(is.finite(res$scores[, "DNAmCRP"])))
+  # every CpG came from the vendored ref, so every sample gets the same score
+  expect_equal(length(unique(res$scores[, "DNAmCRP"])), 1L)
+
+  # the gate is still a gate one notch up
+  expect_error(calc_clocks(DNAm, "DNAmCRP", min_clocks_coverage = 0.01))
+})
+
+test_that("the gates name a clock the caller is allowed to request", {
+  routed <- sex_routed_members()
+  member <- names(routed$alias)[[1]]
+  alias <- routed$alias[[member]]
+
+  # the member is not requestable, so a gate that names it is not actionable
+  expect_error(calc_clocks(random_betas(clock_scoring_cpgs(member), 4L), member))
+  expect_true(startsWith(gate_label(member, routed), alias))
+  expect_equal(gate_label("Hannum", routed), "Hannum")
+
+  # end to end: a thin matrix on the alias must not print any member id
+  cpgs <- clock_scoring_cpgs(member)
+  DNAm <- random_betas(cpgs[seq_len(round(0.3 * length(cpgs)))], n = 4L)
+  pheno <- data.frame(
+    ID = rownames(DNAm),
+    Age = c(40, 50, 60, 70),
+    Female = c(1L, 0L, 1L, 0L)
+  )
+  msg <- conditionMessage(tryCatch(
+    calc_clocks(DNAm, alias, pheno = pheno),
+    error = function(e) e
+  ))
+  # it must be the coverage gate talking, not a missing-pheno abort
+  expect_true(grepl("min_clocks_coverage", msg, fixed = TRUE))
+  for (nm in names(routed$alias)) {
+    expect_false(grepl(nm, msg, fixed = TRUE))
   }
 })
 

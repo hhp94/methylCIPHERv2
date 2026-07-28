@@ -203,36 +203,50 @@ test_that("calc_clocks() vendor-fills absent SystemsAge CpGs from the pack $impu
   expect_equal(cov$score_imputed_full, 4L)
 })
 
+# stack column labels: the tensors a later step names are keyed by these, so
+# the labels are read off the declaration, never recovered from the operand
+# spelling. Three families exercise both halves of the rule.
+
+test_that("a stack that declares no columns labels each column by its operand", {
+  for (id in c("GrimAgeV1", "GrimAgeV2", "DNAmPhysAge")) {
+    step <- stack_step(id)
+    expect_equal(stack_labels(step, id), stack_operands(step))
+  }
+})
+
+test_that("SystemsAge takes its stack labels from the declared columns", {
+  step <- stack_step("SystemsAge")
+  expect_equal(
+    stack_labels(step, "SystemsAge"),
+    as.character(unlist(step[["columns"]]))
+  )
+  # the labels are the group's member clocks, Age_prediction included
+  expect_setequal(
+    stack_labels(step, "SystemsAge"),
+    setdiff(sa_members, "SystemsAge")
+  )
+  # ...and each one pairs with the operand at its own position
+  map <- stack_label_map(step, "SystemsAge")
+  expect_equal(names(map), stack_operands(step))
+  expect_equal(unname(map[["ap_scaled"]]), "Age_prediction")
+})
+
+test_that("a columns list that does not cover every operand is a hard stop", {
+  step <- stack_step("SystemsAge")
+  step[["columns"]] <- step[["columns"]][1:3]
+  expect_error(stack_labels(step, "SystemsAge"))
+})
+
 # accessors over a pack (shares the pack builders above).
 
-test_that("external accessors read the named column and impute vector from the pack", {
-  packs <- list(PCClocks = pcc_pack)
+test_that("external accessors read the impute vector from the pack", {
   expect_equal(
-    clock_coefs("PCADM", packs),
-    stats::setNames(pcc_pack$coefficient_matrix[, "PCADM"], pcc_cpgs)
-  )
-  expect_equal(
-    clock_impute_ref("PCADM", packs),
+    clock_impute_ref("PCADM", list(PCClocks = pcc_pack)),
     stats::setNames(pcc_pack$impute, pcc_cpgs)
   )
 })
 
-test_that("external accessors error without the group's pack, or without its column", {
-  expect_error(clock_coefs("PCADM", NULL))
-  expect_error(clock_coefs("PCADM", list()))
+test_that("external accessors error without the group's pack", {
   expect_error(clock_impute_ref("PCADM", list()))
-
-  no_column <- pcc_pack
-  no_column$coefficient_matrix <- no_column$coefficient_matrix[,
-    setdiff(pcc_members, "PCADM"),
-    drop = FALSE
-  ]
-  expect_error(clock_coefs("PCADM", list(PCClocks = no_column)))
-})
-
-test_that("bundled clocks ignore `packs` and still resolve from mc_bundles", {
-  expect_equal(
-    clock_coefs("Hannum"),
-    clock_coefs("Hannum", list(PCClocks = pcc_pack))
-  )
+  expect_error(clock_impute_ref("PCADM", NULL))
 })

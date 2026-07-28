@@ -5,6 +5,7 @@ request_token <- function(clock_id, alias) {
   ifelse(clock_id %in% names(alias), alias[clock_id], clock_id)
 }
 
+#' @export
 list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
   checkmate::assert_character(group, null.ok = TRUE, any.missing = FALSE)
   checkmate::assert_subset(tag, names(MC_TAGS), empty.ok = TRUE)
@@ -12,7 +13,7 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
 
   routed <- sex_routed_members()
   idx <- mc_index
-  callable <- !idx[["clock_id"]] %in% names(routed$alias)
+  callable <- !idx[["clock_id"]] %in% names(routed[["alias"]])
 
   # how many callable clocks a group token expands to
   group_size <- table(idx[["group_id"]][callable])
@@ -20,7 +21,7 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
   out <- data.frame(
     clock_id = idx[["clock_id"]],
     group_id = idx[["group_id"]],
-    request_as = unname(request_token(idx[["clock_id"]], routed$alias)),
+    request_as = unname(request_token(idx[["clock_id"]], routed[["alias"]])),
     callable = callable,
     group_size = as.integer(group_size[idx[["group_id"]]]),
     covariates = vapply(
@@ -54,7 +55,7 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
   if (!is.null(group)) {
     unknown <- setdiff(group, out[["group_id"]])
     if (length(unknown)) {
-      pool <- suggestion_pools()$group
+      pool <- suggestion_pools()[["group"]]
       cli::cli_abort(
         c(
           "Unknown group{cli::qty(length(unknown))}{?s}: {.val {unknown}}.",

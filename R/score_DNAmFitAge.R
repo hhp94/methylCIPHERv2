@@ -1,27 +1,27 @@
 # DNAmFitAge_{Sex}: Klemera-Doubal mix of upstream member scores
-score_DNAmFitAge <- function(id, results, DNAm) {
-  sample_id <- rownames(DNAm)
-  n <- nrow(DNAm)
+score_DNAmFitAge <- function(id, cpgs, block, results) {
+  sample_id <- block[["sample_id"]]
+  n <- length(sample_id)
 
   kdm <- fitage_kdm_params(id)
 
-  comp_score <- function(component) {
-    r <- results[[component]]
-    if (is.null(r)) {
-      cli::cli_abort(
-        "{.val {id}} needs {.val {component}}, which was not scored upstream.",
-        call = NULL
-      )
-    }
-    as.numeric(r)
-  }
-
+  # components are scored first -- resolve_clocks_sequence() guarantees the order
   score_vec <- numeric(n)
   for (i in seq_len(nrow(kdm))) {
-    cv <- comp_score(kdm[["component"]][i])
+    cv <- as.numeric(results[[kdm[["component"]][i]]])
     score_vec <- score_vec +
       kdm[["weight"]][i] * (cv - kdm[["center"]][i]) / kdm[["scale"]][i]
   }
 
   score_matrix(score_vec, sample_id, id)
+}
+
+# klemera-Doubal mixing table (component, weight, center, scale)
+fitage_kdm_params <- function(id) {
+  require_fields(
+    component_tensor(id, "component"),
+    c("component", "weight", "center", "scale"),
+    "KDM table",
+    id
+  )
 }

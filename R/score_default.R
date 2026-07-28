@@ -1,8 +1,10 @@
 # shared linear scorers
 
-# Horvath age back-transform (adult.age = 20)
-anti_trafo <- function(x, adult.age = 20) {
-  ifelse(x < 0, (1 + adult.age) * exp(x) - 1, (1 + adult.age) * x + adult.age)
+# Horvath age back-transform, at the published adult age of 20
+ADULT_AGE <- 20
+
+anti_trafo <- function(x) {
+  ifelse(x < 0, (1 + ADULT_AGE) * exp(x) - 1, (1 + ADULT_AGE) * x + ADULT_AGE)
 }
 
 resolve_output_transform <- function(name) {
@@ -23,23 +25,22 @@ linear_predictor <- function(
   intercept,
   cov_coefs,
   score_present,
-  DNAm,
-  partial_cache = NULL,
-  pheno = NULL,
-  id = "<component>",
+  block,
+  id,
   observed = NULL
 ) {
   # `observed` lets a pre-transform branch supply already-normalized betas
   obs <- if (is.null(observed)) {
-    observed_panel(score_present, DNAm, partial_cache)
+    observed_panel(score_present, block)
   } else {
     observed
   }
-  cpg_contrib <- obs$values %*% coef[obs$cols]
+  cpg_contrib <- obs[["values"]] %*% coef[obs[["cols"]]]
 
   cov_contrib <- 0
   if (length(cov_coefs)) {
     need <- names(cov_coefs)
+    pheno <- block[["pheno"]]
     if (is.null(pheno) || !all(need %in% names(pheno))) {
       cli::cli_abort(
         c(
@@ -63,63 +64,30 @@ linear_predictor <- function(
 }
 
 # linear engine for one cpg_coefficient clock
-linear_score <- function(
-  cpgs,
-  DNAm,
-  partial_cache = NULL,
-  pheno = NULL,
-  packs = NULL,
-  observed = NULL
-) {
-  id <- cpgs$clock_id
-  policy <- clock_impute(id)[["policy"]]
+linear_score <- function(cpgs, block, observed = NULL) {
+  id <- cpgs[["clock_id"]]
   reduction <- clock_reduction(id)
-  coef <- clock_coefs(id, packs)
-  sample_id <- rownames(DNAm)
-
-  absent <- cpgs$score_absent
-  vendor_mean <- length(absent) && identical(policy, "vendor_mean")
-  if (length(absent) && !policy %in% c("omit", "drop", "vendor_mean")) {
-    cli::cli_abort(
-      "Clock {.val {id}} has unsupported imputation policy {.val {policy}}
-       for {length(absent)} absent CpG{?s}.",
-      call = NULL
-    )
-  }
+  coef <- clock_coefs(id)
+  fill <- absent_fill(id, coef, cpgs[["score_absent"]])
 
   lp <- linear_predictor(
     coef = coef,
     intercept = clock_intercept(id),
     cov_coefs = clock_covariates_coefs(id),
-    score_present = cpgs$score_present,
-    DNAm = DNAm,
-    partial_cache = partial_cache,
-    pheno = pheno,
+    score_present = cpgs[["score_present"]],
+    block = block,
     id = id,
     observed = observed
   )
 
-  if (vendor_mean) {
-    absent_offset <- vendor_offset(
-      coef,
-      absent,
-      clock_impute_ref(id, packs),
-      id
-    )
-    vendor_filled <- absent
-  } else {
-    absent_offset <- 0
-    vendor_filled <- character(0)
-  }
-
   if (identical(reduction, "mean")) {
-    n_terms <- length(cpgs$score_present) + length(vendor_filled)
-    cpg_num <- lp$cpg_contrib + absent_offset
-    linpred <- cpg_num / n_terms + lp$cov_contrib + clock_intercept(id)
+    n_terms <- length(cpgs[["score_present"]]) + length(fill[["filled"]])
+    cpg_num <- lp[["cpg_contrib"]] + fill[["offset"]]
+    linpred <- cpg_num / n_terms + lp[["cov_contrib"]] + clock_intercept(id)
   } else {
-    linpred <- lp$linpred + absent_offset
+    linpred <- lp[["linpred"]] + fill[["offset"]]
   }
 
   transform <- resolve_output_transform(clock_output_transform(id))
-  score_matrix(transform(linpred), sample_id, id)
+  score_matrix(transform(linpred), block[["sample_id"]], id)
 }

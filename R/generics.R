@@ -48,7 +48,7 @@ as.matrix.mc_result <- function(x, ...) {
 
 # rbind is refused -- re-run calc_clocks() on the combined DNAm instead
 #' @export
-rbind.mc_result <- function(...) {
+rbind.mc_result <- function(..., deparse.level = 1) {
   cli::cli_abort(
     c(
       "{.cls mc_result} records cannot be {.fn rbind}-ed.",

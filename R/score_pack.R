@@ -1,27 +1,27 @@
 # batched scorers for external packs (PCClocks, PCBrainAge, SystemsAge)
 
 # pack CpG panel: subset, present/absent, vendor ref
-pack_design <- function(pack, usable, DNAm, partial_cache) {
+pack_design <- function(id, pack, block) {
   panel <- pack[["cpgs"]]
-  hit <- match(panel, usable, 0L) > 0L
+  hit <- match(panel, block[["usable"]], 0L) > 0L
   present <- panel[hit]
   absent <- panel[!hit]
-  obs <- observed_panel(present, DNAm, partial_cache)
+  obs <- observed_panel(present, block)
   list(
     present = present,
     absent = absent,
-    used = obs$cols,
-    X = obs$values,
-    ref = stats::setNames(as.numeric(pack[["impute"]]), pack[["cpgs"]])
+    used = obs[["cols"]],
+    X = obs[["values"]],
+    ref = clock_impute_ref(id, block[["packs"]])
   )
 }
 
 # vendor-mean-filled linear predictors over cols
 pack_linpred <- function(design, M, cols) {
-  contrib <- design$X %*% M[design$used, cols, drop = FALSE]
-  if (length(design$absent)) {
+  contrib <- design[["X"]] %*% M[design[["used"]], cols, drop = FALSE]
+  if (length(design[["absent"]])) {
     off <- as.numeric(
-      design$ref[design$absent] %*% M[design$absent, cols, drop = FALSE]
+      design[["ref"]][design[["absent"]]] %*% M[design[["absent"]], cols, drop = FALSE]
     )
     contrib <- sweep(contrib, 2L, off, "+")
   }
@@ -56,70 +56,28 @@ pack_cov_contrib <- function(ids, pheno, n) {
   as.matrix(pheno[, need, drop = FALSE]) %*% Cmat
 }
 
-# dispatch a pack group to its batched scorer
-score_pack_group <- function(
-  group_id,
-  ids,
-  usable,
-  DNAm,
-  partial_cache,
-  pheno,
-  packs
-) {
+# dispatch a pack group to its batched scorer. Routing totality is score_type()'s
+# job, so an unclaimed tag stops there, not here.
+score_pack_group <- function(ids, block) {
   switch(
     score_type(ids[[1]]),
-    pack_systemsage = score_systemsage_group(
-      ids,
-      usable,
-      DNAm,
-      partial_cache,
-      pheno,
-      packs
-    ),
-    pack_linear = score_linear_pack(
-      ids,
-      usable,
-      DNAm,
-      partial_cache,
-      pheno,
-      packs
-    ),
-    stop(
-      "score_pack_group(): group '",
-      group_id,
-      "' has no batched scorer.",
-      call. = FALSE
+    pack_systemsage = score_systemsage_group(ids, block),
+    pack_linear = score_linear_pack(ids, block),
+    cli::cli_abort(
+      "No batched scorer for score_type {.val {score_type(ids[[1]])}}.",
+      call = NULL
     )
   )
 }
 
 # coefficient_matrix packs (PCClocks, PCBrainAge)
-score_linear_pack <- function(
-  ids,
-  usable,
-  DNAm,
-  partial_cache,
-  pheno,
-  packs
-) {
-  pack <- clock_pack(ids[[1]], packs)
-  for (id in ids) {
-    if (!identical(clock_impute(id)[["policy"]], "vendor_mean")) {
-      stop(
-        "score_linear_pack(): '",
-        id,
-        "' policy != vendor_mean.",
-        call. = FALSE
-      )
-    }
-    if (!identical(clock_reduction(id), "sum")) {
-      stop("score_linear_pack(): '", id, "' reduction != sum.", call. = FALSE)
-    }
-  }
-
+score_linear_pack <- function(ids, block) {
+  # every clock here is declared vendor_mean + sum; that is upstream's contract
+  pack <- clock_pack(ids[[1]], block[["packs"]])
   M <- pack[["coefficient_matrix"]]
   rownames(M) <- pack[["cpgs"]]
-  design <- pack_design(pack, usable, DNAm, partial_cache)
+  design <- pack_design(ids[[1]], pack, block)
+  sample_id <- block[["sample_id"]]
 
   linpred <- sweep(
     pack_linpred(design, M, ids),
@@ -127,9 +85,8 @@ score_linear_pack <- function(
     vapply(ids, clock_intercept, numeric(1)),
     "+"
   ) +
-    pack_cov_contrib(ids, pheno, nrow(DNAm))
+    pack_cov_contrib(ids, block[["pheno"]], length(sample_id))
 
-  sample_id <- rownames(DNAm)
   out <- vector("list", length(ids))
   names(out) <- ids
   for (id in ids) {

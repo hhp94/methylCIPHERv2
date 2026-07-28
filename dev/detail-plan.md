@@ -61,18 +61,22 @@ Inherits `list`, **not** `matrix`: a matrix subclass drops class + attributes on
 `x[, "Horvath"]` / `t()` / arithmetic, silently discarding coverage and provenance. Verbs are
 methods so no operation loses data:
 
-| Method | Behavior |
-|---|---|
-| `print` | dims, then a labelled preview per component (`<$pheno>`, `<$scores>`, ...) so the record reads as the list it is; never a full matrix dump |
-| `as.matrix` | `$scores` -- the naked-numbers escape hatch |
-| `as.data.frame` | scores as a data.frame (sample id column + score columns). **Never** `$pheno` -- see sec 5.1 |
-| `[` | subset rows/cols of `$scores` **and** the matching pheno/coverage/provenance -> `mc_result` |
-| `cbind` | bind score columns; require equal `sample_id` sets (read straight off `$provenance$sample_id`) |
-| `rbind` | **refuses** -- stacking samples leaves any cohort-dependent score computed against the wrong cohort. Score per cohort, bind the `as.data.frame()` outputs |
-| `augment` | join `$scores` to a table by sample id (generic imported from `generics`) |
+The **Built** column is the fact; the rest of this table is a design, and a designed verb binds
+nobody until someone writes it (DECISIONS 2026-07-27). Do not cite an unbuilt row as a contract.
+
+| Method | Built | Behavior |
+|---|---|---|
+| `print` | yes | dims, then a labelled preview per component (`<$pheno>`, `<$scores>`, ...) so the record reads as the list it is; never a full matrix dump |
+| `as.matrix` | yes | `$scores` -- the naked-numbers escape hatch |
+| `rbind` | yes | **refuses** -- stacking samples leaves any cohort-dependent score computed against the wrong cohort. Score per cohort and bind downstream |
+| `as.data.frame` | no | scores as a data.frame (sample id column + score columns). **Never** `$pheno` -- see sec 5.1 |
+| `[` | no | subset rows/cols of `$scores` **and** the matching pheno/coverage/provenance -> `mc_result` |
+| `cbind` | no | bind score columns; require equal `sample_id` sets (read straight off `$provenance$sample_id`) |
+| `augment` | no | join `$scores` to a table by sample id (generic imported from `generics`) |
 
 Not methods: `clocks_coverage()` / `samples_coverage()` format `$coverage` (never re-touch beta) and
-replace the `summary` that earlier drafts listed; `codebook()` is a plain function. Citations are a
+replace the `summary` that earlier drafts listed -- both are built. `codebook()` is specified as a
+plain function and is **not** built. Citations are a
 method -- `cite_clocks(x)`, sec 8.1 -- on a generic this package owns, since `utils::citation` and
 `utils::cite` are both plain functions we would mask. See DECISIONS 2026-07-23, 2026-07-24,
 2026-07-25.
@@ -122,8 +126,10 @@ calc_clocks
 clocks_coverage(x) / samples_coverage(x)  # pure reads of x$coverage
 ```
 
-**Resolve + prepare-once front end** (in `R/resolve_inputs.R`). Two phases, both *before* any
-scoring, both run exactly once — never inside the per-clock loop:
+**Resolve + prepare-once front end.** Two phases, both *before* any scoring, both run exactly once
+— never inside the per-clock loop. Three files, split by phase: `R/validate_inputs.R` (DNAm/pheno
+structure checks), `R/resolve_inputs.R` (tokens -> compute sequence -> per-clock panels), and
+`R/coverage_gates.R` (the pre-score gates over those panels).
 
 - `resolve_clocks(clocks)` — **pure namespace resolution**: user tokens -> catalog `clock_id`s.
   Accepts (any mix) the alias `"all"`, a **keyword** from `MC_TAGS` (`gestational`, `mitotic`,
@@ -322,20 +328,22 @@ not just a speed win). Prepare-side pipeline, gated so clean betas pay nothing:
   mean, so it never biases other samples; the damage is confined to its own fake score, but that is
   reason enough to refuse it. Like the mandatory-rownames rule in §5.1, this is a hard error with no
   permissive mode; the honest output is `NA`, not a fabricated number.)
-- **Cache build.** `cache_cpgs = intersect(present_needed_union, partial_na_cols)` — present (a mean
-  exists), needed by some clock (don't cache dead columns), and actually partial. Subset **first**,
-  then impute: `slideimp::mean_imp_col(DNAm[, cache_cpgs])`. `mean_imp_col` returns a matrix the same
-  width as its input (untouched columns are `memcpy`'d), so calling it on the full panel would
-  allocate a second `n × p` copy (the §3 spike); narrowing columns first bounds the cache to the
-  handful of partial-NA needed probes (empty when clean). The cache is an `n × k` matrix scorers read
-  from; raw `DNAm` is never mutated.
+- **Cache build.** `cache_cpgs = partial_na_cols` — a column the scan classified as partial is by
+  construction present (a mean exists), needed by some clock (the scan only ever looked at the panel
+  union) and actually partial, so no further intersection buys anything. Subset **first**, then
+  impute: `fill_imp_col()` mutates in place, so it must be handed a fresh slice and never the
+  caller's own `DNAm`; narrowing columns first also bounds the cache to the handful of partial-NA
+  needed probes (empty when clean) instead of allocating a second `n × p` copy (the §3 spike). The
+  cache is an `n × k` matrix scorers read from; raw `DNAm` is never mutated.
 
 Front end split (which function owns what): `scan_missing_cpgs()` (numeric — the gate, the classify,
 the empty-row throw, `usable_cols`) and `build_partial_cache()` live with the impute machinery
-(`R/impute_DNAm.R`); `resolve_cpgs()` (pure set math over `usable_cols`, §4 aggregate skeleton +
-`present_needed_union`) lives with the other resolvers (`R/resolve_inputs.R`). Order in
-`calc_clocks()`: `scan_missing_cpgs → resolve_cpgs → build_partial_cache` (the cache needs
-`resolve_cpgs`'s present union; `resolve_cpgs` needs `scan`'s `usable_cols`).
+(`R/missingness.R`); `resolve_cpgs()` (pure set math over `usable_cols`, §4 aggregate skeleton)
+lives with the other resolvers (`R/resolve_inputs.R`). Order: `mc_cohort()` runs
+`scan_missing_cpgs → resolve_cpgs` and carries `usable_cols` plus the partial-fill means on
+`facts`; `build_partial_cache()` then runs **per block**, inside `mc_block()`, over the already
+narrowed matrix. Every cohort-partial column is by construction a usable panel column, so the fill
+set needs no intersection against a separate present union.
 
 ### 2.4 Zhang / `sample_scale` transform
 

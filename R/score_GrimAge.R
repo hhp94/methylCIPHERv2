@@ -1,16 +1,10 @@
 # GrimAgeV1/V2: Cox stack of surrogates + Age/Female, then rescale to years
-score_GrimAge <- function(
-  id,
-  results,
-  usable,
-  DNAm,
-  partial_cache = NULL,
-  pheno = NULL
-) {
-  sample_id <- rownames(DNAm)
-  n <- nrow(DNAm)
+score_GrimAge <- function(id, cpgs, block, results) {
+  sample_id <- block[["sample_id"]]
+  n <- length(sample_id)
+  pheno <- block[["pheno"]]
 
-  group_id <- clock_group_bundle(id)[["group_id"]]
+  group_id <- clock_group_id(id)
   cox <- grimage_cox_coef(id)
   comps <- clock_components(id)
   stack_names <- names(cox)
@@ -21,8 +15,11 @@ score_GrimAge <- function(
     ncol = length(stack_names),
     dimnames = list(sample_id, stack_names)
   )
+  # each operand's source is the namespace the stack step declared it in, not
+  # anything readable off its name
+  roles <- grimage_stack_roles(id, stack_names)
   for (nm in stack_names) {
-    if (nm %in% c("Age", "Female")) {
+    if (identical(roles[[nm]], "covariates")) {
       if (is.null(pheno) || !nm %in% names(pheno)) {
         cli::cli_abort(
           c(
@@ -33,35 +30,25 @@ score_GrimAge <- function(
         )
       }
       X[, nm] <- as.numeric(pheno[[nm]])
-    } else if (startsWith(nm, "_internal_")) {
-      comp <- pick_one(
-        comps,
-        function(c) identical(c[["name"]], nm),
-        sprintf("internal surrogate components named '%s'", nm),
-        id
-      )
+    } else if (identical(roles[[nm]], "internal")) {
+      comp <- component_named(comps, nm, id)
       coef <- bundle_tensor(group_id, comp[["file"]])
       intercept <- if (is.null(comp[["intercept"]])) 0 else comp[["intercept"]]
+      present <- intersect(names(coef), block[["usable"]])
+      # the surrogate follows the clock's declared absent-CpG policy, same as
+      # the counts coverage_record() reports for it
+      fill <- absent_fill(id, coef, setdiff(names(coef), present), label = nm)
       lp <- linear_predictor(
         coef = coef,
         intercept = intercept,
         cov_coefs = covariate_coefs_from(comp[["covariates"]]),
-        score_present = intersect(names(coef), usable),
-        DNAm = DNAm,
-        partial_cache = partial_cache,
-        pheno = pheno,
+        score_present = present,
+        block = block,
         id = nm
       )
-      X[, nm] <- lp$linpred
+      X[, nm] <- lp[["linpred"]] + fill[["offset"]]
     } else {
-      r <- results[[nm]]
-      if (is.null(r)) {
-        cli::cli_abort(
-          "{.val {id}} depends on {.val {nm}}, which was not scored upstream.",
-          call = NULL
-        )
-      }
-      X[, nm] <- as.numeric(r)
+      X[, nm] <- as.numeric(results[[nm]])
     }
   }
 
@@ -79,4 +66,48 @@ grimage_rescale <- function(cox_score, params) {
     params[["sd_cox"]] *
     params[["sd_age"]] +
     params[["m_age"]]
+}
+
+# GrimAge Cox coef vector
+grimage_cox_coef <- function(id) {
+  component_tensor(id, "component")
+}
+
+# grimage_rescale params: m_cox, sd_cox, m_age, sd_age
+grimage_rescale_params <- function(id) {
+  step <- pick_one(
+    clock_entry(id)[["recipe"]],
+    function(s) {
+      identical(s[["op"]], "transform") &&
+        identical(s[["name"]], "grimage_rescale")
+    },
+    "grimage_rescale transform steps",
+    id
+  )
+  need <- c("m_cox", "sd_cox", "m_age", "sd_age")
+  p <- require_fields(
+    step[["params"]],
+    need,
+    "grimage_rescale transform",
+    id
+  )
+  vapply(p[need], as.numeric, numeric(1))
+}
+
+# Cox stack operands in coefficient order, each tagged with its namespace
+grimage_stack_roles <- function(id, order) {
+  roles <- stack_roles(stack_step(id))
+  undeclared <- setdiff(order, names(roles))
+  if (length(undeclared)) {
+    cli::cli_abort(
+      c(
+        "{.val {id}}: {length(undeclared)} Cox coefficient{?s} not declared as
+         a stack operand.",
+        "x" = "{.field {undeclared}}",
+        CATALOG_BUG
+      ),
+      call = NULL
+    )
+  }
+  roles[order]
 }

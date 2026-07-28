@@ -43,3 +43,20 @@ test_that("PhysAge composites run and need >= 2 samples", {
   one <- random_betas(physage_union(), n = 1L)
   expect_error(calc_clocks(one, "DNAmPhysAge"))
 })
+
+test_that("a surrogate that goes constant stops instead of NaN-ing the cohort", {
+  # DNAmPulsePr is 60 CpGs of a 1711-CpG panel, so losing all of it still
+  # clears the default min_clocks_coverage. Every sample then vendor-fills to
+  # the same value, scale() returns a NaN column, and rowSums() spreads it to
+  # every sample of every other surrogate.
+  surr <- physage_surrogates("DNAmPhysAge")
+  flat <- names(surr[[which(vapply(
+    surr,
+    function(s) identical(s[["name"]], "raw_DNAmPulsePr"),
+    logical(1)
+  ))]][["coef"]])
+
+  panel <- setdiff(physage_union(), flat)
+  DNAm <- random_betas(panel, n = 6L)
+  expect_error(suppressWarnings(calc_clocks(DNAm, "DNAmPhysAge")))
+})

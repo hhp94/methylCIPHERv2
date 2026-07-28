@@ -27,6 +27,7 @@ Imports:
 Suggests:
     betanorm,
     DBI,
+    digest,
     duckdb,
     testthat (>= 3.0.0),
     withr

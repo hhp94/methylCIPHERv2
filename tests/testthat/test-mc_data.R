@@ -1,5 +1,9 @@
 # external clock-data asset tests (file://, live network opt-in)
 
+# digest is a Suggests-only dep: it content-addresses the fake pack filenames
+# and nothing here works without it
+skip_if_not_installed("digest")
+
 # fake external pack on disk, returns its provenance row
 fake_asset <- function(dir, group = "FakeGroup", payload = NULL) {
   if (is.null(payload)) {

@@ -144,6 +144,40 @@ test_that("a normalizing clock gains a norm panel and its coverage column", {
   expect_true("Horvath1" %in% colnames(res$coverage$sample_miss$norm))
 })
 
+# Coverage is computed before any score, so a sample whose mixture will not fit
+# gets an NA score with its panel still reported whole -- indistinguishable on a
+# saved record from any other NA. A constant sample has no three-component
+# mixture to fit, so the failure is provoked rather than mocked. The warning
+# comes off the same branch as the record, so asserting the record covers both.
+test_that("a sample BMIQ cannot fit is on the record, not a bare NA", {
+  skip_if_not_installed("betanorm")
+  gold <- clock_norm_target("Horvath1")
+  DNAm <- methylation_betas(gold, n = 4L)
+  DNAm[2, ] <- 0.5
+
+  res <- suppressWarnings(
+    calc_clocks(DNAm, "Horvath1", normalize = c(Horvath1 = TRUE))
+  )
+  got <- res$scores[, "Horvath1"]
+
+  expect_equal(res$provenance$scoring_failures$Horvath1, rownames(DNAm)[2])
+  expect_true(is.na(got[[2]]))
+  expect_false(anyNA(got[-2]))
+
+  # coverage says the panel was whole, which is exactly why provenance has to
+  # carry this: nothing in the counts distinguishes that NA from absent input
+  cov <- res$coverage$per_clock$Horvath1
+  expect_equal(cov$score_used, cov$score_needed)
+})
+
+# the empty case is the normal one, and it has to be an empty list rather than
+# an absent field -- a reader must not have to test for NULL
+test_that("a clean run records no scoring failures", {
+  DNAm <- random_betas(clock_scoring_cpgs("Hannum"), n = 3L)
+  res <- calc_clocks(DNAm, "Hannum")
+  expect_equal(res$provenance$scoring_failures, list())
+})
+
 # absent background CpGs are dropped from the fit, never filled from the target
 test_that("BMIQ drops absent background CpGs rather than filling them", {
   skip_if_not_installed("betanorm")

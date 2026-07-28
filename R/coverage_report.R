@@ -98,7 +98,7 @@ clock_sample_rows <- function(x, id, sample_id) {
     sample_id
   )
   # norm panel (the gate) only when the clock normalizes
-  if (isTRUE(rec[["normalizes"]])) {
+  if (rec[["normalizes"]]) {
     rows[["norm"]] <- panel_rows(
       id,
       "norm",
@@ -125,14 +125,14 @@ alias_sample_rows <- function(x, alias, sample_id) {
   n_needed <- rep(NA_integer_, length(sample_id))
   coverage <- rep(NA_real_, length(sample_id))
 
-  for (sx in c("female", "male")) {
+  rows <- sex_rows(female, length(sample_id))
+  for (sx in names(rows)) {
     member <- as.character(route[[sx]])
     rec <- x[["coverage"]][["per_clock"]][[member]]
     if (is.null(rec)) {
       next
     }
-    applies <- if (identical(sx, "female")) female == 1 else female == 0
-    applies[is.na(applies)] <- FALSE
+    applies <- rows[[sx]]
     if (!any(applies)) {
       next
     }

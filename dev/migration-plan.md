@@ -62,7 +62,6 @@ calc_clocks(DNAm, clocks, pheno = NULL, ...)
   mask routing targets  # blank rows a one-sex model does not apply to
   assemble              # mc_result record: scores + coverage + provenance
 clocks_coverage(result) / samples_coverage(result)  # data.frames from coverage
-augment(result, data)   # join scores to analysis tables
 ```
 
 | Bucket | Role |
@@ -98,19 +97,17 @@ batch rules ->
 | `calc_clocks(DNAm, clocks, pheno = NULL, ...)` | Score -> `mc_result` record |
 | `clocks_coverage(x)` | Per-clock coverage table (per-role needed / used / imputed / missing) |
 | `samples_coverage(x)` | Per-(sample, clock, panel) coverage table (long; carries per-row denominators) |
-| `augment()` | Join scores to phenotype / analysis data |
 | `cite_clocks(x)` | Citations for ids/groups or an `mc_result` -> `mc_citation` (print / `as.data.frame` / `toBibtex`) |
 | `get_mc_assets_dir()` / `set_mc_assets_dir()` / `list_mc_assets()` / `download_mc_assets()` / `load_mc_assets()` / `clear_mc_assets()` | Heavy external assets |
 | Optional legacy `calc*()` | Thin -> `calc_clocks`; not the engine |
 
 `calc_clocks()` returns an S3 record over `list` (class `"mc_result"`): `$scores` (n x k
-double), `$pheno`, `$coverage`, `$provenance`. Verbs are methods (`print`, `as.matrix`,
-`as.data.frame`, `[`, `cbind`, `augment`) -- so subsetting never silently drops
-coverage/provenance; `rbind` refuses, and `clocks_coverage()` / `samples_coverage()` / `codebook()`
-are plain functions, while citations dispatch on the package's own `cite_clocks()` generic
-(detail-plan sec 1.3, sec 8.1). `$scores` and `as.data.frame()` are **scores only** (no
-auto-appended pheno); `$pheno` separately retains the aligned id column plus required
-covariates, which is what `augment()` reads. Align
+double), `$pheno`, `$coverage`, `$provenance`. The built verbs are `print`, `as.matrix` and
+`cite_clocks` (the package's own generic), plus `rbind`, which exists to refuse;
+`clocks_coverage()` / `samples_coverage()` are plain functions (detail-plan sec 1.3, sec 8.1).
+`as.data.frame`, `[`, `cbind`, `augment` and `codebook` are **not built** and are not promised --
+see DECISIONS 2026-07-27. `$scores` is **scores only** (no auto-appended pheno); `$pheno`
+separately retains the aligned id column plus required covariates. Align
 pheno by sample id, never row order. `rownames(DNAm)` is the canonical sample id and is
 **mandatory** -- rowname-less DNAm is a hard error that hands the caller the one-liner to name
 anonymous rows themselves; the package never manufactures ids (DECISIONS 2026-07-24). Canonical

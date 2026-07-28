@@ -110,6 +110,22 @@ component_named <- function(comps, name, id) {
   )
 }
 
+# the column a data-frame tensor's rows are keyed by, as the component declares
+# it. An absent declaration stops -- there is no first-column fallback.
+component_row_key <- function(comp) {
+  key <- as.character(comp[["row_key"]])
+  if (length(key) != 1L || !nzchar(key)) {
+    cli::cli_abort(
+      c(
+        "Component {.field {comp[['name']]}} declares no {.field row_key}.",
+        CATALOG_BUG
+      ),
+      call = NULL
+    )
+  }
+  key
+}
+
 probe_sets_cpgs <- function(entry, role) {
   hits <- Filter(
     function(p) identical(p[["role"]], role),
@@ -135,6 +151,11 @@ NORM_ROLES <- c("quantile_normalization_background", "bmiq_gold_standard")
 
 # schemes expressible as a declared panel + a vendored target
 NORM_SCHEMES <- c("quantile", "bmiq")
+
+# of those, the ones score_normalized() actually implements. `quantile` is
+# missing on purpose: today its only clock is DunedinPACE, which the Dunedin
+# group tag claims first, so nothing reaches score_normalized() with it.
+NORM_SCHEMES_ROUTED <- "bmiq"
 
 # schemes that are part of the clock's definition and cannot be declined
 NORM_CONSTITUTIVE <- "quantile"
@@ -313,32 +334,14 @@ clock_reduction <- function(id) {
   if ("linear_mean" %in% ops) "mean" else "sum"
 }
 
-# named cpg->coef for single-vector clocks
-clock_coefs <- function(id, packs = NULL) {
+# named cpg->coef for one bundled single-vector clock. External clocks never
+# reach here: score_type() sends every one of them to a pack_* tag, and the
+# batched pack scorers multiply the whole coefficient matrix rather than one
+# column at a time.
+clock_coefs <- function(id) {
   entry <- clock_entry(id)
   wf <- entry[["weights_format"]]
   if (identical(wf, "cpg_coefficient")) {
-    if (isTRUE(entry[["external_group"]])) {
-      pack <- clock_pack(id, packs)
-      m <- if (identical(entry[["group_id"]], "SystemsAge")) {
-        pack[["organs"]]
-      } else {
-        pack[["coefficient_matrix"]]
-      }
-      if (is.null(m) || is.null(colnames(m)) || !id %in% colnames(m)) {
-        cli::cli_abort(
-          c(
-            "External clock {.val {id}} is not a column of group
-             {.val {entry[['group_id']]}}'s coefficient_matrix.",
-            CATALOG_BUG
-          ),
-          call = NULL
-        )
-      }
-      coef <- as.numeric(m[, id])
-      names(coef) <- pack[["cpgs"]]
-      return(coef)
-    }
     path <- entry[["coef_path"]]
     if (length(path) != 1L || !nzchar(path)) {
       cli::cli_abort(
@@ -384,13 +387,29 @@ covariate_coefs_from <- function(cov) {
   stats::setNames(vapply(cov, as.numeric, numeric(1)), nms)
 }
 
-# unique recipe step producing `out`, or NULL when the clock has no such step
+# unique recipe step producing `out`, or NULL when the clock has no such step.
+# Ambiguity is not absence: callers read the returned step's coefficients, so
+# folding >1 into NULL would score the clock with the term dropped entirely
+# rather than say the catalog is ambiguous.
 recipe_step_out <- function(id, out) {
   step <- Filter(
     function(s) identical(s[["out"]], out),
     clock_entry(id)[["recipe"]]
   )
-  if (length(step) == 1L) step[[1]] else NULL
+  if (!length(step)) {
+    return(NULL)
+  }
+  if (length(step) > 1L) {
+    cli::cli_abort(
+      c(
+        "{.val {id}} has {length(step)} recipe steps with out
+         {.field {out}} (expected at most 1).",
+        CATALOG_BUG
+      ),
+      call = NULL
+    )
+  }
+  step[[1]]
 }
 
 # covariate weights, numeric(0) when none
@@ -401,6 +420,19 @@ clock_covariates_coefs <- function(id) {
     cov <- if (is.null(step)) NULL else step[["covariates"]]
   }
   covariate_coefs_from(cov)
+}
+
+# Does this clock's recipe take per-sample moments over the whole input matrix?
+# A `sample_scale` op z-scores each sample over every probe it was handed, so
+# the score moves with the width of the caller's matrix, not just with the
+# scoring panel. Declared, never a clock list -- the parity tier reads the same
+# op to decide which matrix to feed a fixture.
+clock_needs_full_panel <- function(id) {
+  any(vapply(
+    clock_entry(id)[["recipe"]],
+    function(s) identical(as.character(s[["op"]]), "sample_scale"),
+    logical(1)
+  ))
 }
 
 # covariate names required for pheno checks
@@ -454,22 +486,6 @@ clock_pack <- function(id, packs) {
   pack
 }
 
-# shipped group bundle: $group_id, $clocks, $tensors
-clock_group_bundle <- function(id) {
-  group_id <- clock_group_id(id)
-  bundle <- mc_bundles[[group_id]]
-  if (is.null(bundle)) {
-    cli::cli_abort(
-      c(
-        "No shipped bundle for group {.val {group_id}}.",
-        "i" = "External or unshipped group?"
-      ),
-      call = NULL
-    )
-  }
-  bundle
-}
-
 # family/group label for pack dispatch
 clock_group_id <- function(id) {
   required_field(id, "group_id")
@@ -480,241 +496,68 @@ clock_components <- function(id) {
   optional_field(id, "components", list())
 }
 
-# GrimAge Cox coef vector
-grimage_cox_coef <- function(id) {
-  component_tensor(id, "component")
-}
+# a stack step's three operand namespaces, in column order
+STACK_NAMESPACES <- c("inputs", "internal", "covariates")
 
-# grimage_rescale params: m_cox, sd_cox, m_age, sd_age
-grimage_rescale_params <- function(id) {
-  step <- pick_one(
-    clock_entry(id)[["recipe"]],
-    function(s) {
-      identical(s[["op"]], "transform") &&
-        identical(s[["name"]], "grimage_rescale")
-    },
-    "grimage_rescale transform steps",
-    id
+# operand -> the namespace that declares it. The namespace is what says where a
+# stack column comes from: another clock's score, a component this clock
+# computes itself, or a pheno column. Only the declaration says which -- the
+# operand's name does not, and reading it off the name means a covariate that
+# is not Age or Female silently falls through to the wrong source.
+stack_roles <- function(step) {
+  ns <- stats::setNames(
+    lapply(STACK_NAMESPACES, function(k) {
+      as.character(unlist(step[[k]] %||% character()))
+    }),
+    STACK_NAMESPACES
   )
-  need <- c("m_cox", "sd_cox", "m_age", "sd_age")
-  p <- require_fields(
-    step[["params"]],
-    need,
-    "grimage_rescale transform",
-    id
-  )
-  vapply(p[need], as.numeric, numeric(1))
-}
-
-# klemera-Doubal mixing table (component, weight, center, scale)
-fitage_kdm_params <- function(id) {
-  require_fields(
-    component_tensor(id, "component"),
-    c("component", "weight", "center", "scale"),
-    "KDM table",
-    id
+  stats::setNames(
+    rep(names(ns), lengths(ns)),
+    unlist(ns, use.names = FALSE)
   )
 }
 
 # stack column order: inputs, then internal, then covariates
 stack_operands <- function(step) {
-  c(
-    as.character(unlist(step[["inputs"]] %||% character())),
-    as.character(unlist(step[["internal"]] %||% character())),
-    as.character(unlist(step[["covariates"]] %||% character()))
-  )
+  names(stack_roles(step))
 }
 
-# ordered surrogates: each {name, coef, negate}
-physage_surrogates <- function(id) {
-  entry <- clock_entry(id)
-  recipe <- entry[["recipe"]]
+# operand -> column label, in column order. A label is a matrix index: the
+# tensors a later step names (center, scale, rotation, coef) are keyed by it,
+# by name. The default label is the operand's own name; an optional `columns`
+# list, parallel to the operand concatenation, overrides it elementwise -- so
+# a step that declares `columns` is saying its labels are not its operands.
+stack_label_map <- function(step, id) {
+  operands <- stack_operands(step)
+  declared <- step[["columns"]]
+  if (is.null(declared)) {
+    return(stats::setNames(operands, operands))
+  }
+  labels <- as.character(unlist(declared))
+  if (length(labels) != length(operands)) {
+    cli::cli_abort(
+      c(
+        "{.val {id}}: stack declares {length(labels)} column label{?s} for
+         {length(operands)} operand{?s}.",
+        CATALOG_BUG
+      ),
+      call = NULL
+    )
+  }
+  stats::setNames(labels, operands)
+}
 
-  stack_step <- pick_one(
-    recipe,
+# stack column labels, in column order
+stack_labels <- function(step, id) {
+  unname(stack_label_map(step, id))
+}
+
+# the one stack step of a clock that has one
+stack_step <- function(id) {
+  pick_one(
+    clock_entry(id)[["recipe"]],
     function(s) identical(s[["op"]], "stack"),
     "stack ops",
     id
-  )
-  order <- stack_operands(stack_step)
-
-  zs <- pick_one(
-    recipe,
-    function(s) {
-      identical(s[["op"]], "cohort_zscore") && identical(s[["in"]], "raws")
-    },
-    "cohort_zscore ops over 'raws'",
-    id
-  )
-  negate_set <- as.character(unlist(zs[["negate"]]))
-
-  lm_ops <- Filter(function(s) identical(s[["op"]], "linear_mean"), recipe)
-  by_out <- stats::setNames(
-    lm_ops,
-    vapply(lm_ops, function(s) s[["out"]], character(1))
-  )
-
-  lapply(order, function(raw_name) {
-    op <- by_out[[raw_name]]
-    if (is.null(op)) {
-      cli::cli_abort(
-        c(
-          "{.val {id}}: stack input {.field {raw_name}} has no matching
-           linear_mean op.",
-          CATALOG_BUG
-        ),
-        call = NULL
-      )
-    }
-    comp <- component_named(entry[["components"]], op[["coef"]], id)
-    list(
-      name = raw_name,
-      coef = bundle_tensor(entry[["group_id"]], comp[["file"]]),
-      negate = raw_name %in% negate_set
-    )
-  })
-}
-
-# poly coef for DNAmPhysAge_years, or NULL
-physage_poly_coef <- function(id) {
-  step <- Filter(
-    function(s) identical(s[["op"]], "poly"),
-    clock_entry(id)[["recipe"]]
-  )
-  if (!length(step)) {
-    return(NULL)
-  }
-  if (length(step) != 1L) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} has {length(step)} poly ops (expected 0 or 1).",
-        CATALOG_BUG
-      ),
-      call = NULL
-    )
-  }
-  as.numeric(unlist(step[[1]][["coef"]]))
-}
-
-# EpiTOC2 per-CpG ground state: named delta (de-novo rate) and beta0 vectors
-epitoc2_params <- function(id) {
-  tab <- require_fields(
-    component_tensor(id, "cpg"),
-    c("cpg", "delta", "beta0"),
-    "params tensor",
-    id
-  )
-  list(
-    delta = stats::setNames(as.numeric(tab[["delta"]]), tab[["cpg"]]),
-    beta0 = stats::setNames(as.numeric(tab[["beta0"]]), tab[["cpg"]])
-  )
-}
-
-# MiAge site-specific params: named b, c, d vectors in panel order
-miage_params <- function(id) {
-  tab <- component_tensor(id, "cpg")
-  lapply(
-    list(b = tab[["b"]], c = tab[["c"]], d = tab[["d"]]),
-    function(x) stats::setNames(as.numeric(x), tab[["cpg"]])
-  )
-}
-
-# unique recipe step producing out, or error
-systemsage_step <- function(id, out) {
-  step <- recipe_step_out(id, out)
-  if (is.null(step)) {
-    cli::cli_abort(
-      c(
-        "{.val {id}} has no unique recipe step with out {.field {out}}.",
-        CATALOG_BUG
-      ),
-      call = NULL
-    )
-  }
-  step
-}
-
-# intercept of the age-linear front
-systemsage_age_intercept <- function(id) {
-  as.numeric(systemsage_step(id, "L")[["intercept"]])
-}
-
-# quadratic poly coef for the poly step producing out
-systemsage_poly <- function(id, out) {
-  as.numeric(unlist(systemsage_step(id, out)[["coef"]]))
-}
-
-# raw-system linear intercepts, named by organ
-systemsage_raw_intercepts <- function(id) {
-  steps <- Filter(
-    function(s) {
-      identical(s[["op"]], "linear") &&
-        !is.null(s[["out"]]) &&
-        startsWith(s[["out"]], "raw_")
-    },
-    clock_entry(id)[["recipe"]]
-  )
-  ints <- vapply(steps, function(s) as.numeric(s[["intercept"]]), numeric(1))
-  names(ints) <- sub(
-    "^raw_",
-    "",
-    vapply(steps, function(s) s[["out"]], character(1))
-  )
-  ints
-}
-
-# stack column order as system labels
-systemsage_stack_order <- function(id) {
-  inputs <- stack_operands(systemsage_step(id, "sysscores"))
-  vapply(
-    inputs,
-    function(x) {
-      if (identical(x, "ap_scaled")) "Age_prediction" else sub("^raw_", "", x)
-    },
-    character(1),
-    USE.NAMES = FALSE
-  )
-}
-
-# intercept of the final systems_model linear head
-systemsage_final_intercept <- function(id) {
-  as.numeric(systemsage_step(id, "score")[["intercept"]])
-}
-
-# systems_PCA tensors from the pack, ordered to stack rows/PC cols
-systemsage_pca <- function(id, packs, order) {
-  pack <- clock_pack(id, packs)
-  comps <- clock_components(id)
-  tensor_by_component <- function(name) {
-    comp <- component_named(comps, name, id)
-    t <- pack[["tensors"]][[comp[["file"]]]]
-    if (is.null(t)) {
-      cli::cli_abort(
-        c(
-          "Pack for {.val {id}} has no tensor {.file {comp[['file']]}}
-           (component {.field {name}}).",
-          CATALOG_BUG
-        ),
-        call = NULL
-      )
-    }
-    t
-  }
-
-  center <- tensor_by_component("systems_pca_center")
-  scale <- tensor_by_component("systems_pca_scale")
-  model <- tensor_by_component("systems_model")
-  rot_df <- tensor_by_component("systems_pca_rotation")
-
-  sys_col <- if ("system" %in% names(rot_df)) "system" else names(rot_df)[1]
-  pc_cols <- setdiff(names(rot_df), sys_col)
-  rot <- as.matrix(rot_df[, pc_cols, drop = FALSE])
-  rownames(rot) <- as.character(rot_df[[sys_col]])
-
-  list(
-    center = center[order],
-    scale = scale[order],
-    rotation = rot[order, pc_cols, drop = FALSE],
-    model = model[pc_cols]
   )
 }
