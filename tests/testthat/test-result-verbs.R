@@ -70,6 +70,20 @@ test_that("augment(adjust=) appends residual columns orthogonal to the covariate
   expect_lt(abs(stats::cor(a$Horvath1_resid, a$Age)), 1e-6)
 })
 
+test_that("augment accepts a formula for adjust and rejects other types clearly", {
+  sim <- sim_DNAm(c("Horvath1", "Hannum"), n = 10L, Age = TRUE, Female = TRUE)
+  res <- calc_clocks(sim$DNAm, c("Horvath1", "Hannum"), pheno = sim$pheno)
+  a <- augment(res, data = sim$pheno, adjust = ~ Age + Female)
+  expect_true(all(c("Horvath1_resid", "Hannum_resid") %in% names(a)))
+  expect_error(augment(res, data = sim$pheno, adjust = 1)) # not names / formula
+})
+
+test_that("codebook / bibliography reject non-clock input clearly", {
+  expect_error(codebook(NULL))
+  expect_error(codebook(123))
+  expect_error(bibliography(NULL))
+})
+
 test_that("augment(adjust=) uses record covariates when a clock required them", {
   sim <- sim_DNAm("DNAmGrip_wAge", n = 8L, Age = TRUE, Female = TRUE)
   res <- suppressWarnings(calc_clocks(sim$DNAm, "DNAmGrip_wAge", pheno = sim$pheno))

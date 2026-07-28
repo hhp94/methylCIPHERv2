@@ -7,6 +7,15 @@ codebook_ids <- function(x) {
   if (inherits(x, "mc_result")) {
     return(x[["provenance"]][["clocks"]])
   }
+  if (!is.character(x) || !length(x)) {
+    cli::cli_abort(
+      c(
+        "Pass a clock name, group, tag, {.val all}, or a {.fn calc_clocks} result.",
+        "i" = "e.g. {.code codebook(\"Horvath1\")}, {.code codebook(\"all\")}, or a result."
+      ),
+      call = NULL
+    )
+  }
   resolve_clocks(x)
 }
 

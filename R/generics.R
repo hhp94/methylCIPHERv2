@@ -103,12 +103,29 @@ augment <- function(x, data = NULL, adjust = NULL) {
 }
 
 # append one <clock>_resid column per clock = residual of lm(clock ~ adjust)
-# fit within this table. adjust on "Age" gives age acceleration. The residual is
+# fit within this table. adjust is covariate names c("Age","Female") or a formula
+# ~ Age + Female. adjust on "Age" gives age acceleration. The residual is
 # cohort-dependent (fit over the supplied samples), so it shifts if the sample
 # set changes.
 augment_residualize <- function(out, clocks, adjust) {
-  checkmate::assert_character(adjust, min.len = 1L, any.missing = FALSE)
-  missing <- setdiff(adjust, names(out))
+  if (inherits(adjust, "formula")) {
+    rhs_expr <- adjust[[length(adjust)]] # RHS of a one- or two-sided formula
+    rhs <- paste(deparse(rhs_expr), collapse = " ")
+    vars <- all.vars(rhs_expr)
+  } else if (is.character(adjust) && length(adjust) && !anyNA(adjust)) {
+    rhs <- paste(sprintf("`%s`", adjust), collapse = " + ")
+    vars <- adjust
+  } else {
+    cli::cli_abort(
+      c(
+        "{.arg adjust} must be covariate names or a formula.",
+        "i" = "e.g. {.code c(\"Age\", \"Female\")} or {.code ~ Age + Female}."
+      ),
+      call = NULL
+    )
+  }
+
+  missing <- setdiff(vars, names(out))
   if (length(missing)) {
     cli::cli_abort(
       c(
@@ -120,15 +137,29 @@ augment_residualize <- function(out, clocks, adjust) {
       call = NULL
     )
   }
+
   clocks <- intersect(clocks, names(out))
-  form_rhs <- paste(sprintf("`%s`", adjust), collapse = " + ")
+  failed <- character(0)
   for (cl in clocks) {
-    form <- stats::as.formula(sprintf("`%s` ~ %s", cl, form_rhs))
-    out[[paste0(cl, "_resid")]] <- tryCatch(
+    form <- stats::as.formula(sprintf("`%s` ~ %s", cl, rhs))
+    r <- tryCatch(
       as.numeric(stats::residuals(
         stats::lm(form, data = out, na.action = stats::na.exclude)
       )),
       error = function(e) rep(NA_real_, nrow(out))
+    )
+    if (all(is.na(r)) && any(is.finite(out[[cl]]))) {
+      failed <- c(failed, cl)
+    }
+    out[[paste0(cl, "_resid")]] <- r
+  }
+  if (length(failed)) {
+    cli::cli_warn(
+      c(
+        "Could not residualize {length(failed)} clock{?s}: {.field {failed}}.",
+        "i" = "Too few samples, or an all-NA / constant {.arg adjust} covariate."
+      ),
+      call = NULL
     )
   }
   out
