@@ -62,12 +62,16 @@ test_that("codebook reports panel size for sex-routed aliases (not 0)", {
   expect_true(all(cb$n_cpgs > 0L))
 })
 
-test_that("bibliography returns unique references with PubMed links and BibTeX", {
+test_that("bibliography enriches from clocks.bib and emits full BibTeX", {
   b <- bibliography(c("Horvath1", "Hannum"))
-  expect_true(all(c("reference", "citation", "pmid", "url") %in% names(b)))
+  expect_true(all(c("reference", "citation", "title", "journal", "year", "doi", "pmid", "url")
+  %in% names(b)))
   expect_true(all(grepl("pubmed", b$url)))
-  expect_gte(nrow(b), 1L)
+  # both are in clocks.bib, so titles/journals resolve
+  expect_false(any(is.na(b$title)))
+  expect_false(any(is.na(b$journal)))
 
   bt <- utils::capture.output(bibliography("Horvath1", format = "bibtex"))
   expect_true(any(grepl("@article", bt)))
+  expect_true(any(grepl("title = \\{", bt))) # full entry, not just a stub
 })

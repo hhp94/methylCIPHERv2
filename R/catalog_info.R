@@ -73,9 +73,56 @@ bib_citation <- function(key) {
   )
 }
 
-# references for the requested clocks, one row per unique publication. Full
-# BibTeX (titles/authors) needs the upstream clocks.bib, which is not bundled;
-# until then this emits the citation key, PMID, and a PubMed URL.
+pubmed_url <- function(pmid) {
+  pmid <- as.character(pmid)
+  ifelse(
+    !is.na(pmid) & nzchar(pmid) & pmid != "NA",
+    paste0("https://pubmed.ncbi.nlm.nih.gov/", pmid),
+    NA_character_
+  )
+}
+
+# read the shipped clocks.bib into a named list: cite key -> raw BibTeX entry.
+# NULL if the file is absent (older installs).
+mc_read_bib <- function() {
+  path <- system.file("extdata", "clocks.bib", package = "methylCIPHERv2")
+  if (!nzchar(path) || !file.exists(path)) {
+    return(NULL)
+  }
+  lines <- readLines(path, warn = FALSE, encoding = "UTF-8")
+  starts <- grep("^@", lines)
+  if (!length(starts)) {
+    return(NULL)
+  }
+  ends <- c(starts[-1L] - 1L, length(lines))
+  out <- lapply(seq_along(starts), function(i) {
+    block <- lines[starts[i]:ends[i]]
+    sub("\\s+$", "", paste(block, collapse = "\n"))
+  })
+  names(out) <- sub("^@\\w+\\{([^,]+),.*$", "\\1", lines[starts])
+  out
+}
+
+# one {field} value from a raw BibTeX entry (tolerates single-level nesting)
+bib_field <- function(raw, field) {
+  m <- regmatches(
+    raw,
+    regexec(paste0(field, "\\s*=\\s*\\{((?:[^{}]|\\{[^{}]*\\})*)\\}"), raw, perl = TRUE)
+  )[[1L]]
+  if (length(m) < 2L) NA_character_ else trimws(gsub("[{}]", "", m[[2L]]))
+}
+
+bib_first_author <- function(raw) {
+  a <- bib_field(raw, "author")
+  if (is.na(a)) {
+    return(NA_character_)
+  }
+  trimws(sub(",.*$", "", strsplit(a, " and ", fixed = TRUE)[[1L]][1L]))
+}
+
+# references for the requested clocks, one row per unique publication, enriched
+# from the shipped clocks.bib. format = "bibtex" prints the full BibTeX entries
+# (a stub when a key is missing from the .bib).
 #' @export
 bibliography <- function(x = "all", format = c("data.frame", "bibtex")) {
   format <- match.arg(format)
@@ -87,33 +134,54 @@ bibliography <- function(x = "all", format = c("data.frame", "bibtex")) {
     pmid = as.character(mc_index[["pmid"]][idx]),
     stringsAsFactors = FALSE
   )
-  refs <- refs[nzchar(refs[["reference"]]), , drop = FALSE]
-  refs <- unique(refs)
+  refs <- unique(refs[nzchar(refs[["reference"]]), , drop = FALSE])
   refs <- refs[order(refs[["reference"]]), , drop = FALSE]
-  refs[["citation"]] <- bib_citation(refs[["reference"]])
-  refs[["url"]] <- ifelse(
-    nzchar(refs[["pmid"]]) & refs[["pmid"]] != "NA",
-    paste0("https://pubmed.ncbi.nlm.nih.gov/", refs[["pmid"]]),
-    NA_character_
-  )
-  refs <- refs[, c("reference", "citation", "pmid", "url")]
-  rownames(refs) <- NULL
+  bib <- mc_read_bib()
 
-  if (identical(format, "data.frame")) {
-    return(refs)
+  if (identical(format, "bibtex")) {
+    entries <- vapply(
+      seq_len(nrow(refs)),
+      function(i) {
+        k <- refs[["reference"]][i]
+        if (!is.null(bib) && !is.null(bib[[k]])) {
+          bib[[k]]
+        } else {
+          sprintf(
+            "@article{%s,\n  pmid = {%s},\n  url = {%s}\n}",
+            k, refs[["pmid"]][i], pubmed_url(refs[["pmid"]][i])
+          )
+        }
+      },
+      character(1L)
+    )
+    cat(paste(entries, collapse = "\n\n"), "\n")
+    return(invisible(refs[["reference"]]))
   }
 
-  # minimal but valid BibTeX stubs (key + pmid + url)
-  entries <- vapply(
-    seq_len(nrow(refs)),
-    function(i) {
-      sprintf(
-        "@article{%s,\n  pmid = {%s},\n  url = {%s}\n}",
-        refs[["reference"]][i], refs[["pmid"]][i], refs[["url"]][i]
-      )
-    },
-    character(1L)
+  from_bib <- function(fn) {
+    vapply(
+      refs[["reference"]],
+      function(k) if (is.null(bib) || is.null(bib[[k]])) NA_character_ else fn(bib[[k]]),
+      character(1L),
+      USE.NAMES = FALSE
+    )
+  }
+  author1 <- from_bib(bib_first_author)
+  year <- sub("^.*_(\\d{4})_.*$", "\\1", refs[["reference"]])
+  data.frame(
+    reference = refs[["reference"]],
+    citation = ifelse(
+      is.na(author1),
+      bib_citation(refs[["reference"]]),
+      sprintf("%s et al. %s", author1, year)
+    ),
+    title = from_bib(function(r) bib_field(r, "title")),
+    journal = from_bib(function(r) bib_field(r, "journal")),
+    year = year,
+    doi = from_bib(function(r) bib_field(r, "doi")),
+    pmid = refs[["pmid"]],
+    url = pubmed_url(refs[["pmid"]]),
+    stringsAsFactors = FALSE,
+    row.names = NULL
   )
-  cat(paste(entries, collapse = "\n\n"), "\n")
-  invisible(refs)
 }

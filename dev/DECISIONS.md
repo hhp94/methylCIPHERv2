@@ -148,6 +148,23 @@ expectation.
   deferred metadata sync as the score-distribution and age-range references; the functions are shaped
   to absorb that data when it lands.
 
+**10. `bibliography()` now ships full BibTeX (`inst/extdata/clocks.bib`).**
+
+The maintainer supplied `clocks.bib` (the upstream bibliography, ~42 entries). It ships in
+`inst/extdata` alongside `clock_reference.csv`; `bibliography()` reads it (via `system.file`, keyed by
+the catalog's `bib_key`) and emits either full verbatim BibTeX (`format = "bibtex"`) or a data.frame
+enriched with citation / title / journal / year / doi. Light in-house parser (`mc_read_bib` +
+`bib_field`, tolerating single-level `{}` nesting) -- no `bibtex`/`RefManageR` dependency. A catalog
+`bib_key` with no matching entry falls back to the old key+PMID stub, so it degrades gracefully.
+
+- **Provenance caveat:** long-term this file should flow through `sync.R` from the meta repo's
+  `bibliography/clocks.bib` (like the rest of the contract); it is hand-placed here because the meta
+  repo was not available. The R sources stay ASCII; the .bib is UTF-8 (author accents), which is
+  standard for a shipped BibTeX data file.
+- **One catalog/.bib mismatch surfaced:** SystemsAge's catalog `bib_key` is `Sehgal_2024_37503069`
+  (PMID 37503069) but the .bib has the newer `Sehgal_2025_40954326` -- different paper version, so
+  that one clock uses the stub until a re-sync aligns the catalog `bib_key` with the .bib.
+
 **8. Coverage verdict is graded by fraction, and plots are sized down.**
 
 - **Coverage: partial != fail.** The verdict marked coverage FAIL if *any* clock dropped below 0.5, so
