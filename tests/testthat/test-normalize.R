@@ -1,9 +1,6 @@
 # normalize=: per-clock normalization decision, resolved before any DNAm read
 
-# BMIQ needs a genuinely multi-modal panel: on U(0,1) noise the three fitted
-# components overlap and the boundary between them has no density crossing, so
-# samples fail. Jitter the gold standard instead, so the input is
-# methylation-shaped.
+# BMIQ needs multi-modal input -- jitter the gold standard, not U(0,1)
 methylation_betas <- function(gold, n = 4L) {
   panel <- names(gold)
   m <- matrix(
@@ -14,9 +11,7 @@ methylation_betas <- function(gold, n = 4L) {
   pmin(pmax(m + stats::rnorm(length(m), sd = 0.05), 0.001), 0.999)
 }
 
-# Horvath1 and Knight declare BMIQ but default to declining it, so the default
-# score is the plain linear one. Parity skips Horvath1 (the horvath block), so
-# this re-derivation is its only numeric gate.
+# default path declines BMIQ -- re-derive the linear golden here
 test_that("Horvath1 defaults to no normalization and scores raw", {
   panel <- clock_scoring_cpgs("Horvath1")
   DNAm <- random_betas(panel, n = 5L)
@@ -78,8 +73,7 @@ test_that("an unnamed policy reaches only the clocks that can honor it", {
   expect_equal(unname(got), c(TRUE, TRUE, FALSE))
 })
 
-# BMIQ golden: proves calc_clocks applies the calibration over the declared
-# panel at the fixed settings, then scores the calibrated betas
+# BMIQ golden through calc_clocks
 test_that("Horvath1 BMIQ-calibrates the gold panel before the linear score", {
   skip_if_not_installed("betanorm")
   gold <- clock_norm_target("Horvath1")
@@ -144,11 +138,7 @@ test_that("a normalizing clock gains a norm panel and its coverage column", {
   expect_true("Horvath1" %in% colnames(res$coverage$sample_miss$norm))
 })
 
-# Coverage is computed before any score, so a sample whose mixture will not fit
-# gets an NA score with its panel still reported whole -- indistinguishable on a
-# saved record from any other NA. A constant sample has no three-component
-# mixture to fit, so the failure is provoked rather than mocked. The warning
-# comes off the same branch as the record, so asserting the record covers both.
+# unfit BMIQ sample: NA score + notes entry (coverage still full)
 test_that("a sample BMIQ cannot fit is on the record, not a bare NA", {
   skip_if_not_installed("betanorm")
   gold <- clock_norm_target("Horvath1")
@@ -164,14 +154,12 @@ test_that("a sample BMIQ cannot fit is on the record, not a bare NA", {
   expect_true(is.na(got[[2]]))
   expect_false(anyNA(got[-2]))
 
-  # coverage says the panel was whole, which is exactly why provenance has to
-  # carry this: nothing in the counts distinguishes that NA from absent input
+  # coverage stays full -- notes is what distinguishes the NA
   cov <- res$coverage$per_clock$Horvath1
   expect_equal(cov$score_used, cov$score_needed)
 })
 
-# the empty case is the normal one, and it has to be an empty list rather than
-# an absent field -- a reader must not have to test for NULL
+# empty notes is list(), not an absent field
 test_that("a clean run records no scoring failures", {
   DNAm <- random_betas(clock_scoring_cpgs("Hannum"), n = 3L)
   res <- calc_clocks(DNAm, "Hannum")
@@ -212,8 +200,7 @@ test_that("BMIQ drops absent background CpGs rather than filling them", {
   got <- as.numeric(res$scores[, "Horvath1"])
   expect_equal(got, bmiq_score(thin))
 
-  # the rejected alternative: filling those 2000 from the target would bias the
-  # sample's own mixture fit toward the gold standard
+  # absent probes are dropped, not filled from the target
   filled <- full
   filled[, dropped] <- rep(as.numeric(gold[dropped]), each = nrow(full))
   expect_false(isTRUE(all.equal(got, bmiq_score(filled[, names(gold)]))))

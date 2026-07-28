@@ -1,4 +1,4 @@
-# external clock-data assets (content-addressed qs2 packs, fetched on demand)
+# external clock-data assets (content-addressed qs2 packs)
 MC_DEFAULT_RELEASE_REPO <- "hhp94/methylCIPHERv2"
 
 # content-addressed tail of a pack filename: <stem>-<sha256>.qs2
@@ -47,7 +47,7 @@ mc_asset_url <- function(row) {
   )
 }
 
-# default per-user assets dir (an R_user_dir cache: reclaimable, never "data")
+# default per-user assets dir (R_user_dir cache, never data)
 mc_default_assets_dir <- function() {
   as.character(fs::path_expand(
     tools::R_user_dir("methylCIPHERv2", which = "cache")
@@ -92,9 +92,7 @@ get_mc_assets_dir <- function() {
   mc_resolve_assets_dir()
 }
 
-# set the session-wide assets dir; NULL clears it so the env var / default
-# apply again. Returns the previous option value invisibly, so a caller can
-# restore it with on.exit() or withr::defer().
+# set the session assets dir (NULL clears). returns previous value invisibly
 #' @export
 set_mc_assets_dir <- function(path = NULL) {
   old <- getOption("mc.assets_dir")
@@ -138,8 +136,7 @@ mc_pack_paths <- function(dir, rows) {
   as.character(fs::path(dir, files))
 }
 
-# aligned "label  size" lines, for cli_verbatim only -- cli reflows whitespace,
-# so these must never be interpolated into a bullet
+# aligned label/size lines (cli_verbatim only)
 mc_manifest_lines <- function(labels, sizes) {
   if (!length(labels)) {
     return(character(0))
@@ -154,7 +151,7 @@ mc_manifest_lines <- function(labels, sizes) {
   out
 }
 
-# one bullet per pack -- no alignment, so it survives cli's reflow
+# one bullet per pack (no alignment)
 mc_manifest_bullets <- function(labels, sizes) {
   sizes <- as.numeric(sizes)
   items <- sprintf("%s (%s)", labels, trimws(format(fs::fs_bytes(sizes))))
@@ -175,7 +172,7 @@ mc_ask_yes_no <- function(header, labels, sizes, dir, question) {
   isTRUE(utils::askYesNo(question))
 }
 
-# stage, validate, atomic rename -- returns path + payload
+# stage, validate, atomic rename
 mc_fetch <- function(row, dir) {
   fs::dir_create(dir)
   url <- mc_asset_url(row)
@@ -285,18 +282,14 @@ mc_staged_files <- function(groups = "all") {
   files[fs::file_exists(files)]
 }
 
-# filename stem a group's packs are content-addressed under, read off the
-# declared file name -- never guessed from the group id. NA when the declared
-# name is not <stem>-<hash>.qs2.
+# content-address stem from the declared filename, or NA
 mc_asset_stem <- function(row) {
   file <- as.character(row[["file"]])
   stem <- sub(MC_ASSET_SUFFIX, "", file)
   if (identical(stem, file)) NA_character_ else stem
 }
 
-# superseded packs: a group's declared stem carrying some other content hash,
-# left behind when a sync moved payload_hash. This is reclaim, not resolution
-# -- it never returns a payload, and only the hash is a wildcard.
+# superseded packs left by a moved payload_hash (reclaim only)
 mc_stale_files <- function(groups = "all") {
   groups <- mc_resolve_groups(groups)
   dir <- mc_resolve_assets_dir()
@@ -330,8 +323,7 @@ mc_stale_files <- function(groups = "all") {
   stats::setNames(out, labels)
 }
 
-# display label for a superseded pack -- decoration lives here, never in the
-# names of the data, so callers key by group id
+# display label for a superseded pack
 mc_stale_labels <- function(stale) {
   if (!length(stale)) {
     return(character(0))
@@ -369,7 +361,7 @@ list_mc_assets <- function(groups = "all") {
     stringsAsFactors = FALSE,
     row.names = NULL
   )
-  # assigned after the fact so data.frame() cannot strip the fs_bytes class
+  # assign after data.frame() so fs_bytes class survives
   out[["size"]] <- fs::fs_bytes(from_row("size_bytes", "double"))
   out[["superseded_size"]] <- fs::fs_bytes(vapply(
     groups,
@@ -388,7 +380,7 @@ list_mc_assets <- function(groups = "all") {
   )]
 }
 
-# NULL (open), assets-dir path, or loaded pack registry
+# from: NULL (open), assets-dir path, or loaded pack registry
 mc_canonicalize_from <- function(from) {
   if (is.null(from)) {
     return(NULL)
@@ -497,8 +489,7 @@ load_mc_assets <- function(groups, from = NULL, ask = TRUE) {
   stats::setNames(packs, groups)
 }
 
-# "2 downloaded packs and 3 superseded packs" -- whichever parts are non-zero.
-# Each part is formatted on its own so its {?s} binds to its own count.
+# count phrase for the clear prompt (each part binds its own plural)
 mc_delete_summary <- function(n_downloaded, n_stale) {
   parts <- character(0)
   if (n_downloaded) {

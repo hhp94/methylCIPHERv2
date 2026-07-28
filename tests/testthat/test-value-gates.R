@@ -1,7 +1,4 @@
-# The value gates over the one col_stats() sweep: +/-Inf stops, values outside
-# [0, 1] warn. Asserted through calc_clocks() rather than the kernel wherever
-# possible, because what matters is that a user handing over bad data hears
-# about it.
+# value gates: Inf stops, out-of-[0,1] warns (via calc_clocks where possible)
 
 gate_betas <- function(n = 8L) {
   spec <- mc_spec("Hannum")
@@ -9,8 +6,7 @@ gate_betas <- function(n = 8L) {
   list(DNAm = random_betas(panel, n = n), panel = panel)
 }
 
-# collect every warning instead of just the first -- the two range flags are
-# independent and a matrix can trip both
+# collect every warning (the two range flags are independent)
 warnings_of <- function(expr) {
   seen <- character(0)
   withCallingHandlers(
@@ -26,15 +22,12 @@ warnings_of <- function(expr) {
 test_that("an infinite value stops scoring, whatever else is in the matrix", {
   b <- gate_betas()
 
-  # no NA anywhere: `anyNA()` does not see an Inf, so a scan gated on it
-  # would skip this entirely
+  # no NA anywhere (anyNA does not see Inf)
   inf_only <- b$DNAm
   inf_only[1, b$panel[1]] <- Inf
   expect_error(calc_clocks(inf_only, "Hannum"))
 
-  # ... and the same Inf must still stop when an unrelated NA is present.
-  # These two disagreed once: the NA-free matrix scored -Inf while the other
-  # silently filled the Inf as if it were missing.
+  # inf must still stop when an unrelated NA is present
   plus_na <- inf_only
   plus_na[2, b$panel[2]] <- NA
   expect_error(calc_clocks(plus_na, "Hannum"))
@@ -49,9 +42,7 @@ test_that("the abort names where the infinite value is", {
   DNAm <- b$DNAm
   DNAm[3, b$panel[5]] <- Inf
 
-  # wording is normally not asserted (CLAUDE.md, "Test altitude"), but
-  # reporting the position IS the feature here -- a bare "there is an Inf"
-  # over an 866k-column matrix is not actionable
+  # position in the message is the feature (asserted on purpose)
   err <- tryCatch(calc_clocks(DNAm, "Hannum"), error = function(e) e)
   expect_s3_class(err, "error")
   msg <- conditionMessage(err)
@@ -113,10 +104,7 @@ test_that("an all-missing column classifies rather than erroring", {
   DNAm <- b$DNAm
   DNAm[, b$panel[2]] <- NA
 
-  # no observations means no cohort mean exists, which is an ordinary case,
-  # not a failure: the column leaves usable_cols and the clock's vendored ref
-  # or the drop policy takes over. The 0/0 that would come of averaging it is
-  # avoided by classification, so nothing here should warn or stop.
+  # all-NA column is ordinary -- classified, not averaged
   expect_no_warning(res <- calc_clocks(DNAm, "Hannum"))
   expect_true(all(is.finite(res$scores[, "Hannum"])))
 
@@ -130,9 +118,7 @@ test_that("an all-missing column classifies rather than erroring", {
 test_that("a column that overflows its own sum stops, and names no sample", {
   b <- gate_betas()
   DNAm <- b$DNAm
-  # finite entries, non-finite sum. The kernel flags a bad column by its sum,
-  # so it reports a column always and a row only when an actual Inf sits in
-  # one. Overflow has no single bad row and the abort must not invent one.
+  # overflow: column reported, row is NA (no invented position)
   DNAm[, b$panel[4]] <- 1e308
 
   scan <- col_stats(DNAm[, b$panel[1:8], drop = FALSE])
@@ -151,13 +137,11 @@ test_that("a sample with nothing on the scoring panel stops, off-panel or not", 
   extra <- paste0("cg_offpanel_", seq_len(20L))
   DNAm <- cbind(b$DNAm, random_betas(extra, n = nrow(b$DNAm)))
 
-  # every panel CpG is only partially NA cohort-wide, so the cohort-mean fill
-  # would happily impute this sample end to end from other people's data
+  # all panel CpGs partial-NA cohort-wide would fill this sample from others
   DNAm[1, b$panel] <- NA
   expect_error(calc_clocks(DNAm, "Hannum"))
 
-  # the observed off-panel columns are what the old full-width test saw --
-  # they say nothing about whether the clock can be scored
+  # off-panel observations do not make a sample scoreable
   expect_true(all(is.finite(DNAm[1, extra])))
 })
 

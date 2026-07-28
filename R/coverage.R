@@ -1,4 +1,4 @@
-# coverage/QC, built once upstream of scoring and keyed by clock id
+# coverage/QC, once upstream of scoring, keyed by clock id
 
 # per-sample partial-fill count over one panel's present CpGs
 panel_sample_miss <- function(present, block) {
@@ -39,7 +39,7 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
   seqi <- seq_along(clock_sequence)
   pidx <- cpg_list[["panel_index"]]
 
-  # count each distinct panel's per-sample miss once, then fan out via the index
+  # count each distinct panel once, then fan out via the index
   score_part_miss <- lapply(
     pidx[["score"]][["parts"]],
     function(p) panel_sample_miss(p[["present"]], block)
@@ -59,7 +59,7 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
   score_miss <- per_clock
   norm_miss <- per_clock
 
-  # 1. raw per-panel miss for every non-alias clock
+  # raw per-panel miss for every non-alias clock
   for (i in seqi[!is_alias]) {
     id <- clock_sequence[[i]]
     score_miss[[id]] <- score_part_miss[[pidx[["score"]][["idx"]][[i]]]]
@@ -69,7 +69,7 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
   pheno <- block[["pheno"]]
   female <- if (is.null(pheno)) NULL else as.numeric(pheno[["Female"]])
 
-  # 2. aliases: stitch score-panel miss from the raw member counts
+  # aliases: stitch score-panel miss from member counts
   for (i in seqi[is_alias]) {
     id <- clock_sequence[[i]]
     score_miss[[id]] <- stitch_routed_sample_miss(
@@ -80,7 +80,7 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
     )
   }
 
-  # 3. blank member rows that this sex did not score
+  # blank member rows this sex did not score
   rows <- sex_rows(female, length(sample_id))
   for (id in intersect(clock_sequence, names(routed[["sex"]]))) {
     sm <- score_miss[[id]]
@@ -88,7 +88,7 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
     score_miss[[id]] <- sm
   }
 
-  # 4. records last (aliases keep NULL -- panels differ by member)
+  # records last (aliases keep NULL -- panels differ by member)
   for (i in seqi[!is_alias]) {
     id <- clock_sequence[[i]]
     per_clock[[id]] <- coverage_record(

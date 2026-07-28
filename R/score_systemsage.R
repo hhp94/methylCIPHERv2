@@ -1,4 +1,4 @@
-# SystemsAge: organ sub-clocks plus Age_prediction / SystemsAge composites
+# systemsAge: organ sub-clocks plus Age_prediction / SystemsAge composites
 
 # batched scorer for the SystemsAge group
 score_systemsage_group <- function(ids, block) {
@@ -48,7 +48,7 @@ score_systemsage_group <- function(ids, block) {
       L <- age_matmul + systemsage_age_intercept(id)
       ap_scaled <- poly_eval(L, systemsage_poly(id, "ap_scaled"))
 
-      # the stack step says which column the scaled age front lands in
+      # stack step says which column the scaled age front lands in
       map <- systemsage_stack_map(id)
       order <- unname(map)
       ap_col <- unname(map[["ap_scaled"]])
@@ -103,9 +103,7 @@ systemsage_poly <- function(id, out) {
   as.numeric(unlist(systemsage_step(id, out)[["coef"]]))
 }
 
-# SystemsAge names one organ three ways -- recipe operand `raw_Blood`,
-# component `sys_raw_Blood`, pack column `Blood`. The stack step declares the
-# last of the three, so the link is read, never recovered from the spelling.
+# organ labels come from the stack step (not from stripping raw_)
 systemsage_stack_map <- function(id) {
   stack_label_map(systemsage_step(id, "sysscores"), id)
 }
@@ -172,9 +170,7 @@ systemsage_pca <- function(id, packs, order) {
   model <- tensor_by_component("systems_model")
   rot_df <- tensor_by_component("systems_pca_rotation")
 
-  # the rotation's key column is declared (`row_key`), so read it. Falling back
-  # to the first column keys the rows off whatever happens to come first, which
-  # would silently survive a rename instead of stopping on it.
+  # rotation row key is declared -- no first-column fallback
   sys_col <- component_row_key(component_named(comps, "systems_pca_rotation", id))
   if (!sys_col %in% names(rot_df)) {
     cli::cli_abort(

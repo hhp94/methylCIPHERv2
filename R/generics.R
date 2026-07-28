@@ -1,7 +1,6 @@
 # result-record methods for class "mc_result"
 
-# print mc_result: every component is labelled with the name it is reached
-# by, so the record reads as the list it is
+# print mc_result with labelled components
 #' @export
 print.mc_result <- function(x, n = 6, p = 6, ...) {
   scores <- x[["scores"]]
@@ -40,13 +39,13 @@ print.mc_result <- function(x, n = 6, p = 6, ...) {
   invisible(x)
 }
 
-# naked scores; coverage and provenance stay on the record
+# naked scores (coverage and provenance stay on the record)
 #' @export
 as.matrix.mc_result <- function(x, ...) {
   x[["scores"]]
 }
 
-# rbind is refused -- re-run calc_clocks() on the combined DNAm instead
+# rbind refused -- re-run calc_clocks() on the combined DNAm
 #' @export
 rbind.mc_result <- function(..., deparse.level = 1) {
   cli::cli_abort(

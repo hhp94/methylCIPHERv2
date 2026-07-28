@@ -1,4 +1,4 @@
-# GrimAgeV1/V2: Cox stack of surrogates + Age/Female, then rescale to years
+# grimAgeV1/V2: Cox stack of surrogates + Age/Female, then rescale to years
 score_GrimAge <- function(id, cpgs, block, results) {
   sample_id <- block[["sample_id"]]
   n <- length(sample_id)
@@ -15,8 +15,7 @@ score_GrimAge <- function(id, cpgs, block, results) {
     ncol = length(stack_names),
     dimnames = list(sample_id, stack_names)
   )
-  # each operand's source is the namespace the stack step declared it in, not
-  # anything readable off its name
+  # operand source is the declared namespace, not the name
   roles <- grimage_stack_roles(id, stack_names)
   for (nm in stack_names) {
     if (identical(roles[[nm]], "covariates")) {
@@ -35,8 +34,7 @@ score_GrimAge <- function(id, cpgs, block, results) {
       coef <- bundle_tensor(group_id, comp[["file"]])
       intercept <- if (is.null(comp[["intercept"]])) 0 else comp[["intercept"]]
       present <- intersect(names(coef), block[["usable"]])
-      # the surrogate follows the clock's declared absent-CpG policy, same as
-      # the counts coverage_record() reports for it
+      # surrogate follows the clock's declared absent-CpG policy
       fill <- absent_fill(id, coef, setdiff(names(coef), present), label = nm)
       lp <- linear_predictor(
         coef = coef,
@@ -60,7 +58,7 @@ score_GrimAge <- function(id, cpgs, block, results) {
   )
 }
 
-# Cox scale -> years
+# cox scale -> years
 grimage_rescale <- function(cox_score, params) {
   (cox_score - params[["m_cox"]]) /
     params[["sd_cox"]] *
@@ -68,7 +66,7 @@ grimage_rescale <- function(cox_score, params) {
     params[["m_age"]]
 }
 
-# GrimAge Cox coef vector
+# grimage cox coef vector
 grimage_cox_coef <- function(id) {
   component_tensor(id, "component")
 }
@@ -94,7 +92,7 @@ grimage_rescale_params <- function(id) {
   vapply(p[need], as.numeric, numeric(1))
 }
 
-# Cox stack operands in coefficient order, each tagged with its namespace
+# cox stack operands in coefficient order, tagged by namespace
 grimage_stack_roles <- function(id, order) {
   roles <- stack_roles(stack_step(id))
   undeclared <- setdiff(order, names(roles))

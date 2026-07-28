@@ -1,4 +1,4 @@
-# GrimAge: missing Age/Female yields NA scores and an up-front warning.
+# grimAge: missing Age/Female yields NA scores and an up-front warning.
 
 grim_pheno <- function(ids, na_row = integer(0), na_cols = character(0)) {
   ph <- data.frame(

@@ -1,4 +1,4 @@
-# EpiTOC2 branch. group request also scores HypoClock -- cover both panels.
+# epiTOC2 branch. group request also scores HypoClock -- cover both panels.
 
 group_panel <- function() {
   unique(unlist(lapply(c("EpiTOC2", "HypoClock"), clock_scoring_cpgs)))

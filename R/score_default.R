@@ -1,6 +1,6 @@
 # shared linear scorers
 
-# Horvath age back-transform, at the published adult age of 20
+# horvath age back-transform (adult age 20)
 ADULT_AGE <- 20
 
 anti_trafo <- function(x) {
@@ -29,7 +29,7 @@ linear_predictor <- function(
   id,
   observed = NULL
 ) {
-  # `observed` lets a pre-transform branch supply already-normalized betas
+  # observed lets a pre-transform branch supply already-normalized betas
   obs <- if (is.null(observed)) {
     observed_panel(score_present, block)
   } else {

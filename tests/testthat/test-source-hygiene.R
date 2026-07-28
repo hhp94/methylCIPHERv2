@@ -1,8 +1,4 @@
-# Source guard, not a behavior test: `$` partial-matches on lists, so a missing
-# exact field silently resolves to a longer one (entry$covariates ->
-# covariates_required, live on 38 catalog entries) and the caller gets a wrong
-# value rather than an error. Reading the parse tokens is exact -- a `$` inside
-# a comment, a string or a regex is a different token, so it cannot false-positive.
+# source guard: no `$` on catalog/pack/tensor lists (parse-token exact)
 
 # every `$` operator token in a file, as "file:line"
 dollar_sites <- function(path) {
@@ -38,6 +34,6 @@ test_that("the `$` guard actually fires", {
     ),
     bait
   )
-  # the comment and the regex must not count; the one real access must
+  # the comment and the regex must not count -- the one real access must
   expect_equal(length(dollar_sites(bait)), 1L)
 })

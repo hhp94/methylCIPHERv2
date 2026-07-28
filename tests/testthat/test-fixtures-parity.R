@@ -31,8 +31,7 @@ cohort_betas <- function(con, cpgs) {
   )
 }
 
-# the cohort's whole array (473k-866k probes, ~350-550 MB). Only for clocks whose
-# recipe takes moments over the input matrix -- see needs_full_panel().
+# whole array for clocks whose recipe moments over the full input
 cohort_betas_full <- function(con) {
   read_betas(con, "SELECT * FROM beta")
 }
@@ -66,24 +65,13 @@ expected_scores <- function(id, cohort) {
   utils::read.csv(gzfile(meta_clone_path(rel)), stringsAsFactors = FALSE)
 }
 
-# Every fixture is graded on both axes and must clear both. The two are not
-# redundant: the absolute bound is the only one with meaning near zero, and the
-# relative bound is the only one with meaning at large magnitude.
-#
-# Only the absolute bound is scale-sensitive, so only it varies by block. The
-# relative bound is scale-free and is 1e-10 everywhere, with no exceptions --
-# relaxing a block is a statement about units, never about correctness.
+# both max_abs and max_rel must clear. only abs tol varies by block (units).
 PARITY_REL_TOL <- 1e-10
 
-# External-pack biomarkers reach ~3.3e6 (PCB2M), where 1e-10 absolute sits below
-# the float floor before any arithmetic. Measured worst absolute miss over all 56
-# pack rows is 2.05e-8, at 6.3e-15 relative -- noise, not error. 1e-6 clears that
-# by ~50x and is still ~3e-13 relative at PCB2M's scale.
+# packs: abs tol 1e-6 (scale ~3e6). see DECISIONS 2026-07-25
 PARITY_ABS_TOL <- c(core = 1e-10, fitage = 1e-10, packs = 1e-6, horvath = 1e-10)
 
-# a clock whose goldens came from the Horvath online calculator. Read off the
-# declared oracle, so re-generating a fixture upstream retires the block on its
-# own -- the way the DNAmFitAge skip should have and did not.
+# horvath-online oracle clocks (declared, not listed)
 is_horvath_online <- function(id) {
   any(vapply(
     clock_fixtures(id) %||% list(),
@@ -92,12 +80,7 @@ is_horvath_online <- function(id) {
   ))
 }
 
-# A `sample_scale` op z-scores each sample over EVERY probe in the input matrix,
-# so the scoring panel is not a sufficient input: subsetting first moves each
-# sample's mean/sd and the score with it (~1.8e1 off, 82% relative, measured).
-# The oracle ran on the whole array, so the fixture must too. The predicate is
-# the package's own -- calc_clocks() reads the same declared op to decide which
-# matrix to hand that clock's branch, so the two cannot drift.
+# sample_scale needs the full array (same predicate as calc_clocks)
 needs_full_panel <- clock_needs_full_panel
 
 # which block a clock is graded in. Derived from the catalog, never a clock list.
@@ -113,8 +96,7 @@ parity_block <- function(id) {
   }
 }
 
-# max, not median: a median passes while half the samples are arbitrarily wrong,
-# which is the same blindness that got correlation retired as a gate.
+# max, not median (median hides bad samples)
 rel_diff <- function(got, want) {
   max(abs(got - want) / pmax(abs(want), .Machine$double.eps))
 }
@@ -207,28 +189,16 @@ skip_if_no_cohort <- function(cohort) {
   )
 }
 
-# known gaps: skip so the suite stays green. Empty today -- Zhang2019 left on
-# 2026-07-25 once the tier started feeding it the whole array (needs_full_panel).
+# known gaps (clock- or clock@cohort-keyed). empty today.
 KNOWN_PARITY_GAPS <- character(0)
 
-# The Horvath online calculator filled every completely-absent probe server-side
-# with a per-probe constant it does not publish, and we hold only the raw betas.
-# Measured: the residual tracks the absent-probe count and nothing else -- every
-# (clock, cohort) pair with zero absent probes already agrees to ~1e-8 relative
-# (Hannum/DNAmCystatinC @ 450K, DNAmTL/DNAmTIMP1/Horvath2 @ EPICv1), which no
-# wrong coefficient or wrong matmul survives. So the gap is in the oracle's
-# input, not our arithmetic, and no tolerance can express that honestly.
-# Horvath1 additionally needs BMIQ, which we deliberately vendor no gold
-# standard for. See DECISIONS 2026-07-25.
+# horvath block skipped: oracle filled absent probes server-side (DECISIONS 2026-07-25)
 HORVATH_ONLINE_GAP <- paste0(
   "horvath_online oracle -- server-side fill of absent probes is unpublished. ",
   "Pairs with no absent probes already match to ~1e-8"
 )
 
-# whole-group gaps, keyed by group id. Empty today -- DNAmFitAge is no longer
-# skipped, it runs as its own block below. Kept as a separate map because group
-# ids and clock ids share a namespace (DNAmFitAge is both), so one flat map
-# would be ambiguous about which a key meant.
+# group-keyed gaps (separate map: group ids share namespace with clock ids)
 KNOWN_PARITY_GAP_GROUPS <- character(0)
 
 parity_gap <- function(id, cohort) {
@@ -303,11 +273,7 @@ run_parity_target <- function(clock_id, cohort) {
   expect_parity(res$scores[, request], clock_id, cohort)
 }
 
-# The blocks below are GENERATED from clock_fixtures(), so a fixture upstream
-# drops produces no test at all -- not a skip, not a failure, just two fewer
-# passes in a green run. This census is the guard on that generator: it turns a
-# missing declaration into a failure. It needs no duckdb and no staged cohort,
-# only the committed catalog, so it is gated on the tier flag alone.
+# census: every catalog clock declares a fixture per cohort (guards the generator)
 test_that("every clock declares a fixture for every registry cohort", {
   skip_if_not(parity_on, "parity tier off (set MC_PARITY=1)")
 
@@ -320,8 +286,7 @@ test_that("every clock declares a fixture for every registry cohort", {
     ))
   })
 
-  # sex-routed aliases carry no fixture of their own -- their members do.
-  # Derived from the routing registry, so a new family needs no edit here.
+  # sex-routed aliases declare no fixture (members do)
   aliases <- unique(unlist(sex_routed_members()$alias))
   expect_setequal(names(Filter(function(x) !length(x), declared)), aliases)
 
@@ -349,9 +314,7 @@ for (target in parity_targets("core")) {
   })
 }
 
-# block 2 -- the DNAmFitAge family, at the core tolerances. Green as of
-# 2026-07-25: upstream regenerated these from author code, so the old group skip
-# was hiding 28 passing tests.
+# block 2 -- DNAmFitAge family at core tolerances
 for (target in parity_targets("fitage")) {
   local({
     clock_id <- target$id
@@ -362,8 +325,7 @@ for (target in parity_targets("fitage")) {
   })
 }
 
-# block 3 -- external packs (PCClocks, SystemsAge, PCBrainAge). Relaxed absolute
-# bound only; the relative bound is the same 1e-10 the other blocks get.
+# block 3 -- external packs (relaxed abs tol only)
 for (target in parity_targets("packs")) {
   local({
     clock_id <- target$id
@@ -374,11 +336,7 @@ for (target in parity_targets("packs")) {
   })
 }
 
-# block 4 -- Horvath online calculator oracles. Skipped wholesale, at the core
-# tolerances: the goldens were produced on betas the server filled and (for
-# DNAmAge) BMIQ'd, and neither is published, so the gap is not ours to close.
-# Kept as its own block so the skip is one visible statement rather than 30
-# scattered ones -- and so it retires itself if the oracle ever changes.
+# block 4 -- horvath online oracles (skipped wholesale)
 for (target in parity_targets("horvath")) {
   local({
     clock_id <- target$id

@@ -1,6 +1,6 @@
 # upfront coverage gate: unscorable clock stops before any scoring
 
-# A panel sharing no CpG with `ids`.
+# a panel sharing no CpG with `ids`.
 foreign_panel <- function(ids) {
   setdiff(clock_scoring_cpgs("PedBE"), unlist(lapply(ids, clock_scoring_cpgs)))
 }
@@ -22,8 +22,7 @@ test_that("under-covered clocks stop instead of scoring", {
 })
 
 test_that("zero observed CpGs stops even at min_clocks_coverage = 0", {
-  # these three declare `omit`, so an absent CpG takes its term with it and a
-  # fully absent panel leaves no score to compute at any threshold
+  # omit policy: fully absent panel is unscoreable at any threshold
   DNAm <- random_betas(foreign_panel(c("Hannum", "Horvath1", "EpiTOC")), n = 4L)
   for (id in c("Hannum", "Horvath1", "EpiTOC")) {
     expect_error(calc_clocks(DNAm, id, min_clocks_coverage = 0))
@@ -31,9 +30,7 @@ test_that("zero observed CpGs stops even at min_clocks_coverage = 0", {
 })
 
 test_that("min_clocks_coverage = 0 really is off for a vendor-filled clock", {
-  # DNAmCRP declares `vendor_mean`: a fully absent panel is scoreable by
-  # design, so 0 must mean no gate rather than a hidden floor. The parity tier
-  # scores at exactly this threshold.
+  # vendor_mean: threshold 0 means no gate (parity runs there)
   expect_equal(clock_impute("DNAmCRP")$policy, "vendor_mean")
   DNAm <- random_betas(foreign_panel("DNAmCRP"), n = 4L)
 

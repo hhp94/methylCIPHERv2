@@ -38,7 +38,7 @@ fake_pcclocks_pack <- function(cpgs, seed = 3L) {
   )
 }
 
-# SystemsAge full pack layout for the family orchestrator
+# systemsAge full pack layout for the family orchestrator
 fake_systemsage_pack <- function(cpgs, seed = 1L) {
   order <- systemsage_stack_order("SystemsAge") # 12 labels, stack order
   organs <- setdiff(order, "Age_prediction") # 11 organ labels
@@ -182,7 +182,7 @@ test_that("requesting a subset of PCClocks returns only those columns (no expans
   )
 })
 
-# SystemsAge
+# systemsAge
 
 test_that("calc_clocks('SystemsAge') scores the whole group (13 cols) end-to-end (closed set)", {
   DNAm <- random_betas(sa_cpgs, n = 3L)
@@ -203,9 +203,7 @@ test_that("calc_clocks() vendor-fills absent SystemsAge CpGs from the pack $impu
   expect_equal(cov$score_imputed_full, 4L)
 })
 
-# stack column labels: the tensors a later step names are keyed by these, so
-# the labels are read off the declaration, never recovered from the operand
-# spelling. Three families exercise both halves of the rule.
+# stack labels are declared (default and columns override)
 
 test_that("a stack that declares no columns labels each column by its operand", {
   for (id in c("GrimAgeV1", "GrimAgeV2", "DNAmPhysAge")) {

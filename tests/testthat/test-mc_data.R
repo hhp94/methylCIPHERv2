@@ -1,7 +1,6 @@
 # external clock-data asset tests (file://, live network opt-in)
 
-# digest is a Suggests-only dep: it content-addresses the fake pack filenames
-# and nothing here works without it
+# digest is a Suggests-only dep (content-addresses fake pack filenames)
 skip_if_not_installed("digest")
 
 # fake external pack on disk, returns its provenance row
@@ -19,7 +18,7 @@ fake_asset <- function(dir, group = "FakeGroup", payload = NULL) {
 
   phash <- digest::digest(payload, algo = "sha256")
   file <- sprintf("%s-%s.qs2", tolower(group), phash)
-  rtag <- sub("\\.qs2$", "", file) # tag = filename stem; bare hex tags rejected by GitHub.
+  rtag <- sub("\\.qs2$", "", file) # tag = filename stem (bare hex tags rejected by github)
   src <- file.path(dir, file)
   qs2::qs_save(payload, src)
   list(
@@ -90,8 +89,7 @@ test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", 
   set_mc_assets_dir(old)
   expect_equal(get_mc_assets_dir(), mc_default_assets_dir())
 
-  # a dir that does not exist yet is created, so a bad path fails here and
-  # not halfway through a download
+  # create the dir if missing (bad path fails here, not mid-download)
   nested <- file.path(withr::local_tempdir(), "a", "b")
   set_mc_assets_dir(nested)
   expect_true(dir.exists(nested))
@@ -306,8 +304,7 @@ test_that("the delete prompt counts downloaded and superseded packs apart", {
     file.path(assets, sprintf("fakegroup-%s.qs2", strrep("a", 64)))
   )
 
-  # the non-interactive refusal is the only place the summary is observable
-  # without a prompt; both counts have to reach the user before they consent
+  # non-interactive refusal is where the clear summary is observable
   expect_error(clear_mc_assets(), "1 downloaded pack and 1 superseded pack")
 })
 

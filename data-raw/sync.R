@@ -184,8 +184,7 @@ prune_group_meta <- function(gmeta) {
 CITATION_FIELDS <- c("clock_id", "pmid", "role", "bib_key")
 CITATION_ROLES <- c("primary", "cite_also")
 
-# the clock -> paper join, 1:N. a meta's scalar `pmid` is the primary paper only,
-# never the citation set.
+# clock -> paper join (1:N). meta pmid is the primary only
 read_clock_citations <- function(repo_path) {
   path <- file.path(repo_path, "bibliography", "clock_citations.csv")
   df <- utils::read.csv(
@@ -220,8 +219,7 @@ read_clock_citations <- function(repo_path) {
   df[, CITATION_FIELDS, drop = FALSE]
 }
 
-# citation rows for the released clocks, primary first. both roles are
-# citation obligations -- `role` distinguishes them, it does not drop either.
+# citation rows for released clocks, primary first (both roles kept)
 build_citations_table <- function(citations, clock_ids) {
   df <- citations[citations[["clock_id"]] %in% clock_ids, , drop = FALSE]
   missing_cites <- setdiff(clock_ids, unique(df[["clock_id"]]))
@@ -909,12 +907,7 @@ group_sex_routes <- function(gside) {
   stems
 }
 
-# earliest cross-sample step over an alias's members, NA if neither reduces.
-# A row is scored by exactly one member, so the alias is chunk-safe only where
-# both members are, and streaming must stop at the earliest step either of them
-# reduces over the cohort. Positions are not comparable across two recipes, so
-# the min is the conservative reading: the first index past which the alias
-# cannot be assumed per-sample.
+# earliest cross_sample_at over an alias's members (min, or NA)
 alias_cross_sample_at <- function(members) {
   at <- vapply(
     members,
@@ -989,13 +982,10 @@ attach_sex_routed_aliases <- function(catalog) {
         covariates_required = "Female",
         imputation_policy = donor[["imputation_policy"]],
         pmid = donor[["pmid"]],
-        # an alias is package-minted, so it has no clock_citations.csv rows of
-        # its own; citations resolve through the donor.
+        # alias cites through its donor
         donor_clock_id = donor[["clock_id"]],
         license = donor[["license"]],
-        # derived from the members like every other alias field -- assuming NA
-        # here would tell a chunked engine an alias is per-sample when a member
-        # is not, which is a wrong score rather than a missing one
+        # cross_sample_at derived from members (never assume NA)
         cross_sample_at = alias_cross_sample_at(members),
         external_group = FALSE
       )
@@ -1039,8 +1029,7 @@ build_group_bundles <- function(repo_path, catalog, group_ids) {
     for (rel in names(specs)) {
       spec <- specs[[rel]]
       abs <- resolve_repo_rel(repo_path, rel)
-      # A declared path that is not there is an upstream/sync gap, and shipping
-      # it silently would mean intercept-only scores.
+      # missing declared path is a hard stop
       if (!file.exists(abs)) {
         stop(
           "Declared tensor missing from snapshot: ",
@@ -1079,7 +1068,6 @@ build_group_bundles <- function(repo_path, catalog, group_ids) {
   bundles
 }
 
-# scoring CpG resolution
 # materialize each clock's scoring CpGs as probe_sets {name, role, cpgs}
 
 # row labels of one loaded tensor (column 1 is the key)
@@ -1117,8 +1105,7 @@ materialize_probe_set <- function(ps, tensors, cid = NA_character_) {
   if (anyDuplicated(cpgs)) {
     stop(where, " contains duplicate CpG id(s): ", rel, call. = FALSE)
   }
-  # `file` rides along so accessors can fetch the tensor's values, not just its
-  # row keys (Dunedin's QN target means).
+  # keep file so accessors can fetch values, not just row keys
   list(
     name = ps[["name"]],
     role = ps[["role"]],
@@ -1358,7 +1345,7 @@ pack_canonical_cpgs <- function(tensors, catalog, gid) {
     )
   }
 
-  # A declared bare probe list over exactly this order is redundant with `cpgs`.
+  # a declared bare probe list over exactly this order is redundant with `cpgs`.
   drop_lists <- names(tensors)[vapply(
     tensors,
     function(x) {
@@ -1483,9 +1470,7 @@ encode_pcclocks <- function(bundle, catalog) {
   bundle
 }
 
-# stack operand -> declared column label. The label is the matrix index the
-# later center/scale/rotation tensors are keyed by; default is the operand's
-# own name, and an optional parallel `columns` list overrides it elementwise.
+# stack operand -> column label (default name, or declared columns)
 systemsage_stack_labels <- function(entry) {
   stack <- Filter(
     function(s) identical(s[["op"]], "stack"),
@@ -1556,10 +1541,7 @@ encode_systemsage <- function(bundle, catalog) {
   composite <- catalog[["clocks"]][[gid]]
   sys_comp <- systemsage_system_components(composite)
 
-  # every declared stack column label is a member clock of the group. This is
-  # the check that reaches Age_prediction, which owns no coefficient tensor and
-  # so never enters member_coef_files() -- the label produced by the old strip
-  # was the one label nothing compared.
+  # every stack label must be a member clock id (catches Age_prediction)
   declared <- setdiff(unname(systemsage_stack_labels(composite)), gid)
   members <- setdiff(group_member_ids(catalog, gid), gid)
   if (!setequal(declared, members)) {
@@ -1716,8 +1698,7 @@ build_index <- function(catalog) {
     integer(1L)
   ))
 
-  # citation count, resolved through the donor for a sex-routed alias. the keys
-  # themselves live once, in mc_citations.
+  # citation count (alias resolves through donor)
   n_citations <- unname(vapply(
     clocks,
     function(e) {
@@ -1739,7 +1720,7 @@ build_index <- function(catalog) {
     cross_sample_at = cross_at,
     batch_dependent = !is.na(cross_at),
     external_group = lgl("external_group"),
-    # `pmid` is the primary paper only; a scalar cannot hold the citation set
+    # `pmid` is the primary paper only -- a scalar cannot hold the citation set
     pmid = scal("pmid"),
     n_citations = n_citations,
     stringsAsFactors = FALSE,
@@ -1888,7 +1869,7 @@ payload_hash_of <- function(payload) {
   )
 }
 
-# GitHub release target
+# gitHub release target
 
 # `owner/repo` from a plain slug, https URL, or scp-style remote
 parse_github_owner_repo <- function(url) {

@@ -1,4 +1,4 @@
-# MiAge optimizer branch (parity owns the numeric golden).
+# miAge optimizer branch (parity owns the numeric golden).
 
 p <- miage_params("MiAge")
 

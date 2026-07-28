@@ -1,4 +1,4 @@
-# EpiTOC2 (tnsc): mean of 2*(beta-beta0)/(delta*(1-beta0)) over present CpGs
+# epiTOC2 (tnsc): mean of 2*(beta-beta0)/(delta*(1-beta0)) over present CpGs
 score_EpiTOC2 <- function(id, cpgs, block, results) {
   params <- epitoc2_params(id)
   present <- cpgs[["score_present"]]
@@ -23,7 +23,7 @@ score_EpiTOC2 <- function(id, cpgs, block, results) {
   )
 }
 
-# EpiTOC2 per-CpG ground state: named delta (de-novo rate) and beta0 vectors
+# epiTOC2 per-CpG ground state: named delta (de-novo rate) and beta0 vectors
 epitoc2_params <- function(id) {
   tab <- require_fields(
     component_tensor(id, "cpg"),

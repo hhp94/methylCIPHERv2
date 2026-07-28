@@ -110,8 +110,7 @@ component_named <- function(comps, name, id) {
   )
 }
 
-# the column a data-frame tensor's rows are keyed by, as the component declares
-# it. An absent declaration stops -- there is no first-column fallback.
+# row-key column a component declares (no first-column fallback)
 component_row_key <- function(comp) {
   key <- as.character(comp[["row_key"]])
   if (length(key) != 1L || !nzchar(key)) {
@@ -152,9 +151,7 @@ NORM_ROLES <- c("quantile_normalization_background", "bmiq_gold_standard")
 # schemes expressible as a declared panel + a vendored target
 NORM_SCHEMES <- c("quantile", "bmiq")
 
-# of those, the ones score_normalized() actually implements. `quantile` is
-# missing on purpose: today its only clock is DunedinPACE, which the Dunedin
-# group tag claims first, so nothing reaches score_normalized() with it.
+# schemes score_normalized() implements (quantile routes via Dunedin)
 NORM_SCHEMES_ROUTED <- "bmiq"
 
 # schemes that are part of the clock's definition and cannot be declined
@@ -212,22 +209,18 @@ clock_routing <- function(id) {
   clock_entry(id)[["routing"]]
 }
 
-# 1-based position of the clock's first cohort-reducing recipe step, NA when
-# every step is per-sample. Declared by sync from a closed op vocabulary.
+# 1-based index of first cohort-reducing recipe step, or NA
 clock_cross_sample_at <- function(id) {
   v <- optional_field(id, "cross_sample_at", NA_integer_)
   if (!length(v)) NA_integer_ else as.integer(v)[[1L]]
 }
 
-# does this clock's score depend on the other samples in the matrix? A TRUE
-# clock is not chunk-safe: scoring a row subset does not reproduce the rows a
-# whole-cohort run gives, because the reduction is still inside the branch.
+# true when the score depends on other samples (not chunk-safe)
 clock_is_cross_sample <- function(id) {
   !is.na(clock_cross_sample_at(id))
 }
 
-# split a compute sequence on the sample axis. The one place the kind-1 /
-# kind-2 partition is derived, so nothing downstream carries a clock list.
+# split a compute sequence into per-sample vs cohort-reducing
 split_cross_sample <- function(clock_ids) {
   hit <- vapply(clock_ids, clock_is_cross_sample, logical(1L))
   list(per_sample = clock_ids[!hit], cross_sample = clock_ids[hit])
@@ -251,7 +244,7 @@ sex_routed_members <- function() {
   list(sex = sex, alias = alias)
 }
 
-# declared array-normalization scheme, lowercased; "none" when absent
+# declared array-normalization scheme, lowercased ("none" when absent)
 clock_norm_scheme <- function(id) {
   scheme <- tolower(as.character(optional_field(id, "normalization", "none")))
   if (!length(scheme)) {
@@ -334,10 +327,7 @@ clock_reduction <- function(id) {
   if ("linear_mean" %in% ops) "mean" else "sum"
 }
 
-# named cpg->coef for one bundled single-vector clock. External clocks never
-# reach here: score_type() sends every one of them to a pack_* tag, and the
-# batched pack scorers multiply the whole coefficient matrix rather than one
-# column at a time.
+# named cpg->coef for one bundled single-vector clock
 clock_coefs <- function(id) {
   entry <- clock_entry(id)
   wf <- entry[["weights_format"]]
@@ -387,10 +377,7 @@ covariate_coefs_from <- function(cov) {
   stats::setNames(vapply(cov, as.numeric, numeric(1)), nms)
 }
 
-# unique recipe step producing `out`, or NULL when the clock has no such step.
-# Ambiguity is not absence: callers read the returned step's coefficients, so
-# folding >1 into NULL would score the clock with the term dropped entirely
-# rather than say the catalog is ambiguous.
+# unique recipe step producing `out`, or NULL (stops if ambiguous)
 recipe_step_out <- function(id, out) {
   step <- Filter(
     function(s) identical(s[["out"]], out),
@@ -422,11 +409,7 @@ clock_covariates_coefs <- function(id) {
   covariate_coefs_from(cov)
 }
 
-# Does this clock's recipe take per-sample moments over the whole input matrix?
-# A `sample_scale` op z-scores each sample over every probe it was handed, so
-# the score moves with the width of the caller's matrix, not just with the
-# scoring panel. Declared, never a clock list -- the parity tier reads the same
-# op to decide which matrix to feed a fixture.
+# true when the recipe z-scores over the full input matrix (sample_scale)
 clock_needs_full_panel <- function(id) {
   any(vapply(
     clock_entry(id)[["recipe"]],
@@ -440,8 +423,7 @@ clock_covariates_required <- function(id) {
   as.character(optional_field(id, "covariates_required", character(0)))
 }
 
-# clock ids this clock consumes as inputs (the recipe's `inputs`, or a
-# sex-routed alias's two members)
+# clock ids this clock consumes as inputs
 clock_depends_on <- function(id) {
   as.character(optional_field(id, "clock_inputs", character(0)))
 }
@@ -491,7 +473,7 @@ clock_group_id <- function(id) {
   required_field(id, "group_id")
 }
 
-# GrimAge components for score_GrimAge()
+# grimAge components for score_GrimAge()
 clock_components <- function(id) {
   optional_field(id, "components", list())
 }
@@ -499,11 +481,7 @@ clock_components <- function(id) {
 # a stack step's three operand namespaces, in column order
 STACK_NAMESPACES <- c("inputs", "internal", "covariates")
 
-# operand -> the namespace that declares it. The namespace is what says where a
-# stack column comes from: another clock's score, a component this clock
-# computes itself, or a pheno column. Only the declaration says which -- the
-# operand's name does not, and reading it off the name means a covariate that
-# is not Age or Female silently falls through to the wrong source.
+# operand -> declaring namespace (inputs / internal / covariates)
 stack_roles <- function(step) {
   ns <- stats::setNames(
     lapply(STACK_NAMESPACES, function(k) {
@@ -522,11 +500,7 @@ stack_operands <- function(step) {
   names(stack_roles(step))
 }
 
-# operand -> column label, in column order. A label is a matrix index: the
-# tensors a later step names (center, scale, rotation, coef) are keyed by it,
-# by name. The default label is the operand's own name; an optional `columns`
-# list, parallel to the operand concatenation, overrides it elementwise -- so
-# a step that declares `columns` is saying its labels are not its operands.
+# operand -> column label (default: operand name, or declared `columns`)
 stack_label_map <- function(step, id) {
   operands <- stack_operands(step)
   declared <- step[["columns"]]

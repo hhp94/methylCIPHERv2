@@ -1,10 +1,9 @@
-# Zhang2019: full-matrix sample z-score, then linear sum over present EN CpGs
+# zhang2019: full-matrix sample z-score, then linear sum over present EN CpGs
 score_Zhang2019 <- function(id, cpgs, block, results) {
   coef <- clock_coefs(id)
   present <- cpgs[["score_present"]]
 
-  # the declared sample_scale op is over every probe in the input matrix, not
-  # the panel union -- so this is the one branch that reads the full width
+  # sample_scale is over the full input matrix, not the panel union
   full <- block[["DNAm_full"]]
   m <- matrixStats::rowMeans2(full, na.rm = TRUE)
   s <- matrixStats::rowSds(full, na.rm = TRUE)

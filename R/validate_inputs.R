@@ -9,7 +9,7 @@ check_DNAm <- function(DNAm) {
     min.cols = 1
   )
   checkmate::assert_character(colnames(DNAm), unique = TRUE, null.ok = FALSE)
-  # sample ids are mandatory -- the package never invents them
+  # sample ids are mandatory
   if (is.null(rownames(DNAm))) {
     cli::cli_abort(
       c(
@@ -39,8 +39,7 @@ check_DNAm <- function(DNAm) {
   invisible(NULL)
 }
 
-# Tell the caller when a clock in the sequence scores against the whole matrix
-# rather than its own panel, so a narrow input is a deliberate choice.
+# note when a clock scores against the whole matrix, not its panel
 note_full_panel_clocks <- function(clock_ids) {
   full <- clock_ids[vapply(clock_ids, clock_needs_full_panel, logical(1))]
   if (!length(full)) {
@@ -137,8 +136,7 @@ warn_missing_covariates <- function(
   invisible(NULL)
 }
 
-# align pheno to sample_id by id-join, then narrow to the id column plus the
-# covariates this run actually needs
+# align pheno by id-join, keep id column + required covariates
 resolve_pheno <- function(DNAm, pheno, pheno_id, keep) {
   if (is.null(pheno)) {
     return(NULL)
@@ -156,7 +154,7 @@ resolve_pheno <- function(DNAm, pheno, pheno_id, keep) {
       call = NULL
     )
   }
-  # id column + required covariates only, row names dropped
+  # id column + required covariates only
   out <- pheno[match(sample_id, pheno[[pheno_id]]), keep, drop = FALSE]
   rownames(out) <- NULL
   out

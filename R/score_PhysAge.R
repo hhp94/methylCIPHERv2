@@ -1,11 +1,6 @@
-# DNAmPhysAge: surrogate means, reverse-code, cohort z-score, row sum.
-# Split at the cohort reduction (recipe step 11): physage_raws() is per-sample
-# and runs in the scoring loop, finalize_PhysAge() reduces over samples and
-# runs once, after every block is in hand.
+# DNAmPhysAge: physage_raws (per-sample) then finalize_PhysAge (cohort reduce)
 
-# the chunk-safe half -- an n x n_surrogate matrix of reverse-coded raws.
-# Each row depends only on itself, so a block's rows equal the same rows of a
-# whole-cohort run.
+# per-sample half: n x n_surrogate reverse-coded raws
 physage_raws <- function(id, cpgs, block, results) {
   sample_id <- block[["sample_id"]]
   n <- length(sample_id)
@@ -29,14 +24,13 @@ physage_raws <- function(id, cpgs, block, results) {
       block = block,
       id = s[["name"]]
     )
-    # the surrogate is a mean, so a dropped CpG leaves the denominator too
+    # mean over present CpGs only
     n_terms <- length(present) + length(fill[["filled"]])
     raw <- (as.numeric(lp[["cpg_contrib"]]) + fill[["offset"]]) / n_terms
     if (s[["negate"]]) -raw else raw
   })
 
-  # built by hand rather than vapply: a 1-row block must still be a matrix,
-  # and the rownames are what assembly reorders on
+  # hand-built matrix so a 1-row block keeps dim and rownames
   matrix(
     unlist(cols, use.names = FALSE),
     nrow = n,
@@ -47,9 +41,7 @@ physage_raws <- function(id, cpgs, block, results) {
   )
 }
 
-# Both degeneracies that make scale() return NaN, in one place. rowSums()
-# propagates a single NaN column across every sample, so either one silently
-# turns the whole cohort into NaN rather than failing where it happened.
+# stop on scale() degeneracies (flat column or n < 2)
 check_zscoreable <- function(id, raws) {
   n <- nrow(raws)
   if (n < 2L) {
@@ -68,7 +60,7 @@ check_zscoreable <- function(id, raws) {
     return(invisible(TRUE))
   }
 
-  # declared panel size per surrogate -- the count that explains a flat one
+  # declared panel size per surrogate
   surrogates <- physage_surrogates(id)
   needed <- stats::setNames(
     vapply(surrogates, function(s) length(s[["coef"]]), integer(1L)),
@@ -93,9 +85,7 @@ check_zscoreable <- function(id, raws) {
   )
 }
 
-# the cohort reduction. DNAmPhysAge reduces once (scale -> row_sum ->
-# transform); DNAmPhysAge_years reduces twice (a second scale before the
-# polynomial), so this follows the branch rather than a step index.
+# cohort reduction (years branch reduces twice before the poly)
 finalize_PhysAge <- function(id, raws) {
   check_zscoreable(id, raws)
 

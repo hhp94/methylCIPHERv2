@@ -15,7 +15,7 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
   idx <- mc_index
   callable <- !idx[["clock_id"]] %in% names(routed[["alias"]])
 
-  # how many callable clocks a group token expands to
+  # callable clocks a group token expands to
   group_size <- table(idx[["group_id"]][callable])
 
   out <- data.frame(
@@ -37,7 +37,7 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
   )
   out[["group_size"]][is.na(out[["group_size"]])] <- 0L
 
-  # tags follow request_as so routed members inherit their alias's tags
+  # tags follow request_as (routed members inherit the alias)
   tag_ids <- lapply(names(MC_TAGS), resolve_clocks)
   names(tag_ids) <- names(MC_TAGS)
   out[["tags"]] <- vapply(

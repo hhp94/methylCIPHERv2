@@ -10,8 +10,7 @@ check_mc_result <- function(x, arg = "x") {
   invisible(x)
 }
 
-# a returned clock's per-sample miss vector from the (finished) matrix, or NULL
-# when it has no such panel column
+# per-sample miss vector from the finished matrix, or NULL
 score_miss_vec <- function(x, id) {
   m <- x[["coverage"]][["sample_miss"]][["score"]]
   if (id %in% colnames(m)) m[, id] else NULL
@@ -21,7 +20,7 @@ norm_miss_vec <- function(x, id) {
   if (!is.null(m) && id %in% colnames(m)) m[, id] else NULL
 }
 
-# one row per clock computed (returned + routing targets). aliases have NA panels.
+# one row per clock computed (aliases have NA panels)
 #' @export
 clocks_coverage <- function(x) {
   check_mc_result(x)
@@ -62,7 +61,7 @@ clocks_coverage <- function(x) {
     stringsAsFactors = FALSE,
     row.names = NULL
   )
-  # absent-probe list stays a list-column so the full account survives
+  # absent-probe list stays a list-column
   out[["missing_cpgs"]] <- unname(lapply(
     per_clock,
     function(r) if (is.null(r)) character(0) else r[["missing_cpgs"]]
@@ -97,7 +96,7 @@ clock_sample_rows <- function(x, id, sample_id) {
     panel_ratio(rec[["score_present"]], sm, rec[["score_needed"]]),
     sample_id
   )
-  # norm panel (the gate) only when the clock normalizes
+  # norm panel only when the clock normalizes
   if (rec[["normalizes"]]) {
     rows[["norm"]] <- panel_rows(
       id,

@@ -2,12 +2,7 @@
 
 WARN_COVERAGE_MARGIN <- 1.1
 
-# A compute-sequence id as the user can name it. The gates walk the whole
-# sequence, which includes the sex-routed members -- and telling someone to
-# drop `DNAmFEV1_wAge_Female` from `clocks` names a clock `resolve_clocks()`
-# hard-errors on. The alias is the requestable token, so it leads; the member's
-# sex stays because the two members' panels differ in size, and a count only
-# means something against the panel it was counted over.
+# requestable token for a compute-sequence id (alias, not routed member)
 gate_label <- function(id, routed = sex_routed_members()) {
   if (!id %in% names(routed[["alias"]])) {
     return(id)
@@ -45,11 +40,7 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
       return(list(level = "", line = NA_character_))
     }
     ratio <- length(x[["score_present"]]) / length(x[["score_needed"]])
-    # An empty panel is scoreable exactly when the declared policy fills
-    # absent CpGs from the vendored ref. Under any other policy every term is
-    # dropped and the score is undefined, so it stops at any threshold --
-    # including 0, which must otherwise mean "no gate" (the parity tier runs
-    # there).
+    # empty panel is scoreable only under vendor_mean fill
     undefined <- ratio == 0 &&
       !identical(clock_impute(x[["clock_id"]])[["policy"]], "vendor_mean")
     level <- if (undefined || ratio < threshold) {
@@ -114,7 +105,7 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
   )
   thin <- thin[!is.na(thin)]
   if (length(thin)) {
-    # the two schemes treat an absent background CpG differently
+    # QN fills absent background CpGs from the target, BMIQ does not
     thin_schemes <- unique(vapply(names(thin), clock_norm_scheme, character(1)))
     fate <- if (all(thin_schemes == "bmiq")) {
       "Absent background CpGs are dropped from the calibration fit."
@@ -145,7 +136,7 @@ row_coverage <- function(cov, score_miss, norm_miss) {
     return(NULL)
   }
   qn <- cov[["normalizes"]]
-  # coverage_record() writes both as a scalar count, so 0 is the only empty
+  # needed is a scalar count, so 0 is the only empty
   needed <- if (qn) cov[["norm_needed"]] else cov[["score_needed"]]
   present <- if (qn) cov[["norm_present"]] else cov[["score_present"]]
   miss <- if (qn) norm_miss else score_miss

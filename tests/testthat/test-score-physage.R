@@ -1,4 +1,4 @@
-# PhysAge: vendor-mean fill + cohort_zscore composites (synthetic).
+# physAge: vendor-mean fill + cohort_zscore composites (synthetic).
 
 physage_union <- function() {
   members <- mc_groups[["PhysAge"]]$members
@@ -45,10 +45,7 @@ test_that("PhysAge composites run and need >= 2 samples", {
 })
 
 test_that("a surrogate that goes constant stops instead of NaN-ing the cohort", {
-  # DNAmPulsePr is 60 CpGs of a 1711-CpG panel, so losing all of it still
-  # clears the default min_clocks_coverage. Every sample then vendor-fills to
-  # the same value, scale() returns a NaN column, and rowSums() spreads it to
-  # every sample of every other surrogate.
+  # blank a small surrogate: scale() NaN must stop, not spread via rowSums
   surr <- physage_surrogates("DNAmPhysAge")
   flat <- names(surr[[which(vapply(
     surr,

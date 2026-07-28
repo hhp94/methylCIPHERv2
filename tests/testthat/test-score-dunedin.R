@@ -1,4 +1,4 @@
-# Dunedin: degraded-coverage and PACE QN paths not covered by parity
+# dunedin: degraded-coverage and PACE QN paths not covered by parity
 
 # vendor fill for fully-absent model CpGs
 test_that("DunedinPoAm38 vendor-fills fully-absent CpGs (score_imputed_full)", {

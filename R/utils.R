@@ -5,7 +5,7 @@ bullets <- function(x) {
   stats::setNames(x, rep("*", length(x)))
 }
 
-# betanorm is a soft dep; every normalizing branch needs it
+# betanorm is a soft dep (every normalizing branch needs it)
 require_betanorm <- function(id) {
   if (!requireNamespace("betanorm", quietly = TRUE)) {
     cli::cli_abort(
@@ -19,12 +19,7 @@ require_betanorm <- function(id) {
   invisible(NULL)
 }
 
-# Scoring-time failures, per clock. Coverage is computed before any score, so
-# it cannot see a sample the scorer itself could not fit -- that sample gets an
-# NA score with full coverage reported, indistinguishable on a saved record
-# from any other NA. A branch still returns only its score: it writes the
-# sample ids here instead, and score_cohort() harvests the block's collector
-# once. Nothing routes on this and no score reads it.
+# scoring-time failures per clock (coverage cannot see these)
 new_notes <- function() {
   new.env(parent = emptyenv())
 }
@@ -39,7 +34,7 @@ note_scoring_failure <- function(block, id, sample_id) {
   invisible(NULL)
 }
 
-# collector -> plain named list, clock order stable; empty when nothing failed
+# collector -> plain named list (empty when nothing failed)
 collect_notes <- function(notes) {
   ids <- sort(names(notes))
   if (!length(ids)) {
@@ -71,13 +66,7 @@ observed_panel <- function(present, block) {
   )
 }
 
-# Which rows each sex-routed member scored, as two masks over the n samples in
-# hand. The score and every per-sample quantity derived from it read this same
-# split, which is what makes the alias's stitched `sample_miss` true row for row.
-#
-# Unknown sex is "neither", and so is no sex column at all: the alias leaves
-# those rows NA rather than routing them to a member, so a member must not be
-# credited with having covered them either.
+# male/female masks for sex-routed members (unknown sex is neither)
 sex_rows <- function(female, n) {
   none <- rep(FALSE, n)
   if (!length(female)) {
@@ -120,16 +109,7 @@ vendor_offset <- function(coef, absent, ref, id) {
   sum(coef[absent] * ref[absent])
 }
 
-# What a clock's fully-absent CpGs contribute, under the policy the catalog
-# declares: `vendor_mean` folds each one in at its vendored value and counts it
-# as a term, anything else drops it so it contributes nothing and counts for
-# nothing. Every scoring site reads the policy through here, because
-# coverage_record() reports score_used / score_imputed_full / score_dropped off
-# the same declaration -- a sync that flips a policy has to move the score and
-# the counts together, not one without the other.
-#
-# `ref` is resolved only on the fill path: a clock that drops has no vendored
-# ref, and clock_impute_ref() stops rather than inventing one.
+# absent-CpG contribution under the declared policy (vendor_mean or drop)
 absent_fill <- function(id, coef, absent, ref = NULL, label = id) {
   no_fill <- list(offset = 0, filled = character(0))
   if (!length(absent)) {
@@ -170,9 +150,7 @@ coverage_record <- function(cpgs, score_miss, norm_miss = NULL) {
   )
 }
 
-# y = sum_k coef[k+1] * x^k, lowest degree first. Accumulated rather than built
-# as a power matrix: the matrix form collapses to a vector at length(x) == 1 and
-# takes the score with it.
+# polynomial eval, lowest degree first (horner-style, 1-row safe)
 poly_eval <- function(x, coef) {
   out <- rep(0, length(x))
   for (k in seq_along(coef)) {

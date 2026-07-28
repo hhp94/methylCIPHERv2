@@ -88,7 +88,7 @@ test_that("per-sample QC routes with the score; panel counts do not", {
   female <- c(1, 1, 1, 0, 0, 0)
   pheno <- fitage_pheno(rownames(DNAm), female, rep(50, 6))
 
-  # A CpG only the female model uses, blanked for one female and one male.
+  # a CpG only the female model uses, blanked for one female and one male.
   fem_only <- setdiff(names(fem), names(mal))[1]
   DNAm[c(1, 4), fem_only] <- NA_real_
 

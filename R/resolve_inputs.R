@@ -1,4 +1,4 @@
-# clock-id resolution: user tokens -> compute sequence -> per-clock CpG panels
+# user tokens -> compute sequence -> per-clock CpG panels
 
 # typo-suggestion pools: matched names, recommended token values
 suggestion_pools <- function() {
@@ -45,8 +45,7 @@ suggestion_bullets <- function(toks, pools = suggestion_pools(), n = 5L) {
   }))
 }
 
-# user tokens -> catalog clock_ids
-# precedence: "all" > tag > group_id > clock_id
+# user tokens -> catalog clock_ids (all > tag > group_id > clock_id)
 resolve_clocks <- function(clocks) {
   checkmate::assert_character(
     clocks,
@@ -59,7 +58,7 @@ resolve_clocks <- function(clocks) {
   members <- split(mc_index[["clock_id"]], mc_index[["group_id"]])
   clock_ids <- mc_index[["clock_id"]]
 
-  # sex-routed members are internal -- request the alias instead
+  # sex-routed members are internal -- request the alias
   routed <- sex_routed_members()
   asked_routed <- intersect(clocks, names(routed[["alias"]]))
   if (length(asked_routed)) {
@@ -191,12 +190,11 @@ dedup_panels <- function(panels) {
   list(uniq = uniq, idx = idx)
 }
 
-# per-clock normalization decision, keyed by clock id. Data-independent, so it
-# is resolved once before any DNAm is touched.
+# per-clock normalization decision (data-independent)
 resolve_normalize <- function(normalize, clock_sequence) {
   schemes <- vapply(clock_sequence, clock_norm_scheme, character(1))
   names(schemes) <- clock_sequence
-  # constitutive normalization is on by default; everything else is opt-in
+  # constitutive normalization is on by default, everything else is opt-in
   out <- stats::setNames(schemes %in% NORM_CONSTITUTIVE, clock_sequence)
 
   if (!is.null(normalize) && length(normalize)) {
@@ -215,8 +213,7 @@ resolve_normalize <- function(normalize, clock_sequence) {
           call = NULL
         )
       }
-      # a bare policy is a wish, not a claim about any one clock: it reaches
-      # the clocks that can honor it and passes over the ones that cannot
+      # bare policy applies where the clock can honor it
       out[clock_sequence[
         schemes %in% setdiff(NORM_SCHEMES, NORM_CONSTITUTIVE)
       ]] <- normalize
@@ -233,8 +230,7 @@ resolve_normalize <- function(normalize, clock_sequence) {
           call = NULL
         )
       }
-      # a request the catalog cannot express is an error; declining a scheme
-      # the clock never declared is merely redundant
+      # unknown scheme is an error, declining an undeclared one is redundant
       unusable <- nm[normalize & !(schemes[nm] %in% NORM_SCHEMES)]
       if (length(unusable)) {
         declared <- unique(unname(schemes[unusable]))
@@ -297,11 +293,7 @@ resolve_cpgs <- function(usable_cols, panels) {
   usable <- unique(usable_cols)
   clock_sequence <- panels[["clock_id"]]
 
-  # Split each distinct panel once, against one hash of `usable` rather than
-  # one per panel: match() rebuilds its table every call, and there are ~90
-  # distinct panels over a 21k vector (more with packs staged). The factor
-  # keeps empty levels -- most norm panels are character(0), and dropping them
-  # would shift every later panel's index.
+  # split each distinct panel once (factor keeps empty norm panels)
   split_panels <- function(d) {
     panels <- d[["uniq"]]
     grp <- factor(
@@ -332,13 +324,13 @@ resolve_cpgs <- function(usable_cols, panels) {
       norm_needed = nm[["needed"]],
       norm_present = nm[["present"]],
       norm_absent = nm[["absent"]],
-      # the one declared panel fact: does this clock count over a norm panel?
+      # does this clock count over a norm panel?
       normalizes = length(nm[["needed"]]) > 0L
     )
   })
   names(per_clock) <- clock_sequence
 
-  # distinct-panel parts + per-clock index (shared panels counted once)
+  # distinct-panel parts + per-clock index
   panel_index <- list(
     score = list(parts = score_parts, idx = panels[["score"]][["idx"]]),
     norm = list(parts = norm_parts, idx = panels[["norm"]][["idx"]])

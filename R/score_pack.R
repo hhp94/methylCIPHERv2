@@ -56,8 +56,7 @@ pack_cov_contrib <- function(ids, pheno, n) {
   as.matrix(pheno[, need, drop = FALSE]) %*% Cmat
 }
 
-# dispatch a pack group to its batched scorer. Routing totality is score_type()'s
-# job, so an unclaimed tag stops there, not here.
+# dispatch a pack group to its batched scorer
 score_pack_group <- function(ids, block) {
   switch(
     score_type(ids[[1]]),
@@ -72,7 +71,7 @@ score_pack_group <- function(ids, block) {
 
 # coefficient_matrix packs (PCClocks, PCBrainAge)
 score_linear_pack <- function(ids, block) {
-  # every clock here is declared vendor_mean + sum; that is upstream's contract
+  # every clock here is declared vendor_mean + sum
   pack <- clock_pack(ids[[1]], block[["packs"]])
   M <- pack[["coefficient_matrix"]]
   rownames(M) <- pack[["cpgs"]]

@@ -1,5 +1,4 @@
-# citations for scored clocks. mc_citations is the clock -> paper join (1:N);
-# inst/bibliography/clocks.bib is the only citation text.
+# citations for scored clocks (mc_citations join + clocks.bib text)
 
 #' @export
 cite_clocks <- function(x, ...) {
@@ -11,8 +10,7 @@ cite_clocks.character <- function(x, ...) {
   new_mc_citation(resolve_clocks(x))
 }
 
-# the score columns only. a composite that owes a component's paper declares it
-# upstream as a cite_also row; we never walk clock_inputs to invent one.
+# score columns only -- cite_also is declared upstream, never walked
 #' @export
 cite_clocks.mc_result <- function(x, ...) {
   new_mc_citation(colnames(x[["scores"]]))
@@ -36,7 +34,7 @@ print.mc_citation <- function(x, ...) {
   n_papers <- length(unique(links[["bib_key"]]))
   cli::cli_text("{n_clocks} clock{?s}, {n_papers} paper{?s}.")
   cat("\n")
-  # bibtex is pre-aligned; cli reflows anything that is not verbatim
+  # bibtex is pre-aligned (cli reflows non-verbatim)
   cli::cli_verbatim(x[["bibtex"]])
   cat("\n")
   cli::cli_alert_info(
@@ -61,7 +59,7 @@ toBibtex.mc_citation <- function(object, ...) {
   structure(object[["bibtex"]], class = "Bibtex")
 }
 
-# record over list: links (one row per clock -> paper) + the bibtex text
+# record: links (clock -> paper) + bibtex text
 new_mc_citation <- function(ids) {
   links <- citation_links(ids)
   entries <- bib_entries()
@@ -93,7 +91,7 @@ new_mc_citation <- function(ids) {
 # citation rows per clock, in request order, primary first
 citation_links <- function(ids) {
   rows <- lapply(ids, function(id) {
-    # a sex-routed alias is package-minted: it cites through its donor
+    # sex-routed alias cites through its donor
     key <- as.character(clock_entry(id)[["donor_clock_id"]] %||% id)
     hit <- mc_citations[mc_citations[["clock_id"]] == key, , drop = FALSE]
     if (!nrow(hit)) {
@@ -114,8 +112,7 @@ citation_links <- function(ids) {
   out
 }
 
-# bib_key -> the entry's lines, sliced out of the vendored file. entries start
-# at a line-leading "@" and run to the next one.
+# bib_key -> entry lines from the vendored .bib
 bib_entries <- function() {
   path <- system.file(
     "bibliography",

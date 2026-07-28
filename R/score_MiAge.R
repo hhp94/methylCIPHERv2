@@ -1,4 +1,4 @@
-# MiAge: multi-start L-BFGS-B mitotic age over n in [10, 10000]
+# miAge: multi-start L-BFGS-B mitotic age over n in [10, 10000]
 
 MIAGE_LOWER <- 10
 MIAGE_UPPER <- 10000
@@ -9,13 +9,7 @@ MIAGE_STARTS <- c(
   500
 )
 
-# best multi-start fit for one sample.
-#
-# `log(b)` does not depend on n, and L-BFGS-B asks for the objective and the
-# gradient at the same n -- so hoist the log out of the search and bind
-# `b^(n - 1)` and the residual once per n, letting the second call read them.
-# The arithmetic is left exactly as written (`d` is not folded into `log(b)`),
-# so both values are bit-identical to recomputing them.
+# best multi-start fit for one sample (hoist log(b), bind bn/residual per n)
 miage_fit <- function(betaj, b, c, d) {
   logb <- log(b)
   at <- NA_real_
@@ -75,7 +69,7 @@ score_MiAge <- function(id, cpgs, block, results) {
   )
 }
 
-# MiAge site-specific params: named b, c, d vectors in panel order
+# miAge site-specific params: named b, c, d vectors in panel order
 miage_params <- function(id) {
   tab <- component_tensor(id, "cpg")
   lapply(

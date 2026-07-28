@@ -12,7 +12,39 @@ second-guessed; do not restate rules already stated in the migration / detail pl
 
 ---
 
-## 2026-07-27 (latest) -- a stack's column labels are declared upstream, so both copies of the `^raw_` strip are gone
+## 2026-07-28 (latest) -- comment hygiene: short `#` notes only; kernel *why* lives here
+
+Package sources (`R/`, `src/`, `tests/`, `data-raw/*.R`) keep **short lowercase `#`
+comments** that say *what* only when the code does not. Rationale essays, measured
+tradeoffs, and "do not reverse this" notes do **not** live in-source -- they belong
+here or in the plans. C++ keeps only `// [[Rcpp::export]]` (an Rcpp attribute, not
+prose); every other `//` block is gone.
+
+**C++ kernels (moved out of `src/`).** `col_stats()` is one column-major sweep over
+the panel slice. Three cheap-inner-loop choices, measured on 100 x 39,025 at -O2:
+raw column pointer (not `obj(i, j)`), `std::isnan` (not out-of-line `ISNAN` /
+`R_finite`), and **one** predicate in the hot loop -- Inf is allowed into `sum`,
+which poisons to non-finite, and one `isfinite(sum)` per column catches it (nr * nc
+tests become nc). The cold rescan of that column separates Inf (report 1-based row)
+from overflow (row NA; `check_col_values()` words it differently). Classification
+the R side depends on still holds: NA/NaN skipped, Inf poisons, else summed.
+`fill_imp_col()` is a branchless select (`isnan ? mean : v`) so the loop can
+vectorize; it fills **missing** only (`std::isnan`, not `!isfinite`), so an Inf
+that somehow arrived would stay visible in the score rather than be swapped for a
+cohort mean. Measured 5.5 -> 1.2 ms vs the sugar-indexed original on that slice.
+
+**BMIQ / notes channel.** Fully absent probes are dropped under BMIQ (not filled
+from the gold target), because target-drawn values pull each sample's mixture fit
+toward the gold and shrink the correction. A sample whose mixture will not fit is
+NA in the score while coverage (computed before scoring) still reads full -- so the
+failure is recorded in `notes`, not invented into coverage.
+
+No behaviour change. Verify with `devtools::test()`; parity and `R CMD check` were
+not run.
+
+---
+
+## 2026-07-27 -- a stack's column labels are declared upstream, so both copies of the `^raw_` strip are gone
 
 Closes housekeeping item 11, which was parked as "needs an upstream declaration, not a downstream
 patch". Upstream landed it (`methylCIPHER-meta` `ca6833c`, `STACK_COLUMNS_FIELD` in `scripts/ops.py`,

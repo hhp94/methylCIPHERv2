@@ -17,7 +17,7 @@ score_sex_routed <- function(id, cpgs, block, results) {
   score_matrix(score_vec, sample_id, id)
 }
 
-# routed members are internal: scored and kept for coverage, never a column
+# routed members: scored for coverage, never a score column
 drop_routed_members <- function(ids) {
   setdiff(ids, names(sex_routed_members()[["sex"]]))
 }
