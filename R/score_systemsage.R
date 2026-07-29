@@ -1,10 +1,10 @@
 # systemsAge: organ sub-clocks plus Age_prediction / SystemsAge composites
 
 # batched scorer for the SystemsAge group
-score_systemsage_group <- function(ids, block) {
+score_systemsage_group <- function(ids, cpgs, block) {
   packs <- block[["packs"]]
   pack <- clock_pack(ids[[1]], packs)
-  design <- pack_design(ids[[1]], pack, block)
+  design <- pack_design(ids[[1]], cpgs, block)
   sample_id <- block[["sample_id"]]
   n <- length(sample_id)
 

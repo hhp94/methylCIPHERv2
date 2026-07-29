@@ -50,15 +50,24 @@ split_score <- function(spec, DNAm, blocks) {
   )
 }
 
-# mixed request: per-sample clocks + one catalog-declared cohort reduction
-MIXED <- c("Hannum", "Horvath1", "PhenoAge", "Lin", "Weidner", "DNAmPhysAge")
+# mixed request: per-sample clocks, one cohort reduction, one sample_scale clock
+MIXED <- c(
+  "Hannum",
+  "Horvath1",
+  "PhenoAge",
+  "Lin",
+  "Weidner",
+  "DNAmPhysAge",
+  "Zhang2019EN"
+)
 
 test_that("scoring a row subset equals scoring the whole cohort", {
   cohort <- chunk_cohort(MIXED)
   run <- split_score(cohort$spec, cohort$DNAm, list(1:10, 11:20, 21:30))
 
-  # assert the request actually includes a cohort-reducing clock
+  # both chunk-sensitive shapes: a cross-sample reduce, and banked row moments
   expect_true(length(cohort$spec$cross_sample) > 0)
+  expect_true(cohort$spec$needs_moments)
 
   # every clock: block-scored cohort finalizes to the single-pass answer
   for (id in cohort$spec$sequence) {
@@ -121,22 +130,20 @@ test_that("cohort facts classify a column the first block cannot see", {
   expect_false(cohort$panel[3] %in% names(facts$partial_fill))
 })
 
-test_that("coverage assembles from blocks by concatenate and sum", {
+test_that("coverage assembles from blocks by concatenate, never by sum", {
   cohort <- chunk_cohort(MIXED)
   run <- split_score(cohort$spec, cohort$DNAm, list(1:10, 11:20, 21:30))
 
   for (id in cohort$spec$sequence) {
     whole <- run$whole$coverage$per_clock[[id]]
 
-    # partial fills sum across blocks
-    expect_equal(
-      sum(vapply(
-        run$parts,
-        function(p) p$coverage$per_clock[[id]]$score_imputed_partial,
-        numeric(1)
-      )),
-      whole$score_imputed_partial
-    )
+    # partial fills are a CpG count off cohort-level facts: same in every block
+    for (p in run$parts) {
+      expect_equal(
+        p$coverage$per_clock[[id]]$score_imputed_partial,
+        whole$score_imputed_partial
+      )
+    }
 
     # per-sample miss concatenates over disjoint rows
     miss_whole <- run$whole$coverage$sample_miss$score[[id]]

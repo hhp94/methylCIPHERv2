@@ -20,7 +20,7 @@ list_tags <- function() {
   }
   cli::cli_bullets(c(
     "i" = "{.code \"all\"} scores every callable clock.
-           {.fn list_clocks} lists them one by one."
+           {.fn list_clocks} shows them one by one."
   ))
   invisible(MC_TAGS)
 }

@@ -2,9 +2,8 @@
 #include <cmath>
 using namespace Rcpp;
 
-// Fills every non-finite entry -- NA, NaN and +/-Inf alike -- with the column
-// mean. The predicate matches col_stats(), which computed that mean over the
-// same set: what one calls missing, the other fills.
+// fill every non-finite entry (NA, NaN, +/-Inf) with the column mean.
+// same predicate as col_stats(), which computed that mean over the same set
 // [[Rcpp::export]]
 void fill_imp_col(NumericMatrix obj, NumericVector mean_vec)
 {

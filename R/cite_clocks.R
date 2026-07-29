@@ -20,8 +20,9 @@ cite_clocks.mc_result <- function(x, ...) {
 cite_clocks.default <- function(x, ...) {
   cli::cli_abort(
     c(
-      "Can't cite {.obj_type_friendly {x}}.",
-      "i" = "Pass clock or group ids, or an {.cls mc_result}."
+      "Don't know how to build citations from {.obj_type_friendly {x}}.",
+      "i" = "Pass clock or group ids, or an {.cls mc_result} from
+             {.fn calc_clocks}."
     ),
     call = NULL
   )

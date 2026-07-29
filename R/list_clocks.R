@@ -58,7 +58,8 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
       pool <- suggestion_pools()[["groups"]]
       cli::cli_abort(
         c(
-          "Unknown group{cli::qty(length(unknown))}{?s}: {.val {unknown}}.",
+          "Don't recognize group{cli::qty(length(unknown))}{?s}:
+           {.val {unknown}}.",
           bullets(vapply(
             unknown,
             function(tok) {
@@ -68,7 +69,7 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
             },
             character(1L)
           )),
-          "i" = "Run {.fn list_clocks} with no arguments to see every group."
+          "i" = "Call {.fn list_clocks} with no arguments to see every group."
         ),
         call = NULL
       )

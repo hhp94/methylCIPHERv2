@@ -33,18 +33,22 @@ construct_mc_result <- function(
   scores <- do.call(cbind, results[output_ids])
   dimnames(scores) <- list(sample_id, output_ids)
 
-  # sample_miss: score for every column, norm for normalizers only
+  # per_clock, sample_miss and samples_coverage() span one set: clocks that
+  # read CpGs. pure composites count nothing of their own, so they are in none
   per_clock <- coverage[["per_clock"]]
+  record_ids <- names(per_clock)[
+    !vapply(per_clock, is.null, logical(1L))
+  ]
   # normalizers from the record's normalizes flag
-  norm_ids <- output_ids[vapply(
-    output_ids,
+  norm_ids <- record_ids[vapply(
+    record_ids,
     function(id) isTRUE(per_clock[[id]][["normalizes"]]),
     logical(1L)
   )]
   sample_miss <- list(
     score = miss_matrix(
       coverage[["sample_miss"]][["score"]],
-      output_ids,
+      record_ids,
       sample_id
     ),
     norm = miss_matrix(coverage[["sample_miss"]][["norm"]], norm_ids, sample_id)
@@ -122,9 +126,9 @@ as.matrix.mc_result <- function(x, ...) {
 rbind.mc_result <- function(..., deparse.level = 1) {
   cli::cli_abort(
     c(
-      "{.cls mc_result} records cannot be {.fn rbind}-ed.",
-      "i" = "Re-run {.fn calc_clocks} on the combined DNAm -- batch-dependent
-             clocks must see all samples at once."
+      "Can't combine {.cls mc_result} records with {.fn rbind}.",
+      "i" = "Please re-run {.fn calc_clocks} on the combined DNAm matrix so
+             batch-dependent clocks see all samples at once."
     ),
     call = NULL
   )

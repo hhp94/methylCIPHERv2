@@ -49,6 +49,55 @@ test_that("an Inf and an NA in the same cell score identically", {
   expect_equal(inf_res$coverage$sample_miss, na_res$coverage$sample_miss)
 })
 
+test_that("an off-panel Inf is missing to the moments, like any other Inf", {
+  # Zhang2019EN z-scores over the whole matrix, so an off-panel column moves
+  # the score without the column half of the sweep indexing it
+  DNAm <- cbind(
+    sim_DNAm("Zhang2019EN", n = 4L)$DNAm,
+    random_betas("cg_offpanel_1", n = 4L)
+  )
+  as_inf <- as_na <- DNAm
+  as_inf[2, "cg_offpanel_1"] <- Inf
+  as_na[2, "cg_offpanel_1"] <- NA
+
+  inf_res <- calc_clocks(as_inf, "Zhang2019EN")
+  na_res <- calc_clocks(as_na, "Zhang2019EN")
+
+  # skipped, not poison: the moments come off the same kernel as the panel stats
+  expect_equal(inf_res$scores, na_res$scores)
+  expect_true(all(is.finite(inf_res$scores[, "Zhang2019EN"])))
+  # and dropping one of 515 columns moves only that sample
+  clean <- calc_clocks(DNAm, "Zhang2019EN")
+  expect_equal(inf_res$scores[-2, ], clean$scores[-2, ])
+})
+
+test_that("the moments span columns the column stats and gates never see", {
+  panel <- panels_union(mc_spec("Zhang2019EN")$panels)
+  DNAm <- random_betas(panel, n = 4L)
+  off <- paste0("cg_offpanel_", seq_len(50L))
+  wide <- cbind(DNAm, random_betas(off, n = 4L))
+  wide[, off] <- 0.9
+
+  # off-panel columns are in the moments, so every sample's score moves ...
+  expect_true(all(
+    abs(
+      calc_clocks(wide, "Zhang2019EN")$scores -
+        calc_clocks(DNAm, "Zhang2019EN")$scores
+    ) >
+      1e-6
+  ))
+
+  # ... but not in the column stats, so no value gate ever looks at them
+  wide[1, off[[1]]] <- -0.5
+  expect_no_warning(calc_clocks(wide, "Zhang2019EN"))
+})
+
+test_that("an unscored sample is NA, which is not a non-finite score", {
+  expect_no_warning(check_score_values(list(Hannum = matrix(c(1, NA_real_)))))
+  expect_warning(check_score_values(list(Hannum = matrix(c(1, NaN)))))
+  expect_warning(check_score_values(list(Hannum = matrix(c(1, Inf)))))
+})
+
 test_that("a wholly infinite column classifies absent, like an all-NA one", {
   b <- gate_betas()
   DNAm <- b$DNAm
@@ -110,9 +159,10 @@ test_that("ordinary betas pass both gates in silence", {
   with_na <- b$DNAm
   with_na[1:3, b$panel[1]] <- NA
   expect_no_warning(filled <- calc_clocks(with_na, "Hannum"))
+  # one CpG, filled in three samples: the record counts CpGs
   expect_equal(
     filled$coverage$per_clock[["Hannum"]]$score_imputed_partial,
-    3L
+    1L
   )
 })
 
@@ -128,8 +178,8 @@ test_that("per-sample fill counts land on the samples that were filled", {
 
   expect_equal(unname(miss), c(2L, 0L, 0L, 1L, 0L, 0L))
   expect_equal(names(miss), rownames(DNAm))
-  # the per-clock record aggregates the same counts
-  expect_equal(res$coverage$per_clock[["Hannum"]]$score_imputed_partial, 3L)
+  # the record counts the other axis: 2 distinct CpGs, not the 3 filled cells
+  expect_equal(res$coverage$per_clock[["Hannum"]]$score_imputed_partial, 2L)
 })
 
 test_that("an all-missing column classifies rather than erroring", {
@@ -313,4 +363,73 @@ test_that("an empty cols scans nothing and observes nothing", {
   expect_equal(dim(scan$stats), c(2L, 0L))
   expect_equal(scan$row_obs, integer(4))
   expect_null(scan$overflow_col)
+})
+
+# row_moments: complement pass has its own accumulator, so row_obs means the
+# same thing under the flag as without it
+
+test_that("row_obs stays the subset's count when moments widen the sweep", {
+  b <- gate_betas(n = 6L)
+  DNAm <- b$DNAm
+  sel <- b$panel[1:4]
+  off <- setdiff(colnames(DNAm), sel)
+  DNAm[2, sel] <- NA
+  DNAm[3:4, off[1]] <- NA
+
+  mom <- col_stats(DNAm, match(sel, colnames(DNAm)), row_moments = TRUE)
+  flat <- col_stats(DNAm, match(sel, colnames(DNAm)))
+
+  # the flag no longer changes what row_obs counts
+  expect_equal(mom$row_obs, flat$row_obs)
+  expect_equal(mom$row_obs, c(4L, 0L, 4L, 4L, 4L, 4L))
+  # ... and the off-panel observations land in their own counter
+  expect_equal(
+    mom$row_obs_complement,
+    as.integer(rowSums(is.finite(DNAm[, off, drop = FALSE])))
+  )
+  # the two together are the full width, which is what the moments span
+  expect_equal(
+    mom$row_obs + mom$row_obs_complement,
+    as.integer(rowSums(is.finite(DNAm)))
+  )
+  # the column half is still the subset's alone
+  expect_equal(mom$stats, flat$stats)
+})
+
+test_that("the complement counter follows the other moment outputs", {
+  b <- gate_betas(n = 5L)
+  sel <- match(b$panel[1:3], colnames(b$DNAm))
+
+  # absent without moments, like row_mean and row_m2
+  expect_null(col_stats(b$DNAm, sel)$row_obs_complement)
+  # present but zero when subset is the whole matrix -- no complement to sweep,
+  # so zero is the count, not a missing value
+  expect_equal(
+    col_stats(b$DNAm, NULL, row_moments = TRUE)$row_obs_complement,
+    integer(5)
+  )
+  # and the overflow bail nulls it out with the rest
+  DNAm <- b$DNAm
+  DNAm[, b$panel[2]] <- 1e308
+  scan <- col_stats(DNAm, sel, row_moments = TRUE)
+  expect_equal(scan$overflow_col, 2L)
+  expect_null(scan$row_obs_complement)
+})
+
+test_that("per-sample moments are taken over every column, NAs excluded", {
+  b <- gate_betas(n = 7L)
+  DNAm <- b$DNAm
+  sel <- b$panel[1:5]
+  DNAm[1, sel[1]] <- NA
+  DNAm[2, setdiff(colnames(DNAm), sel)[1]] <- Inf
+
+  mna <- suppressWarnings(
+    scan_missing_cpgs(DNAm, sel, sel, row_moments = TRUE)
+  )
+  # golden from the same matrix: full width, finite entries only
+  finite_only <- function(f) {
+    apply(DNAm, 1, function(v) f(v[is.finite(v)]))
+  }
+  expect_equal(mna$sample_moments$mean, unname(finite_only(mean)))
+  expect_equal(mna$sample_moments$sd, unname(finite_only(stats::sd)))
 })

@@ -8,14 +8,14 @@ physage_raws <- function(id, cpgs, block, results) {
 
   cols <- lapply(surrogates, function(s) {
     coef <- s[["coef"]]
-    present <- intersect(names(coef), cpgs[["score_present"]])
+    label <- paste0(id, " surrogate ", s[["name"]])
     # mean over present CpGs only
     raw <- component_linpred(
       id,
       coef,
-      present,
+      component_present(coef, cpgs, label),
       block,
-      label = paste0(id, " surrogate ", s[["name"]]),
+      label = label,
       reduction = "mean"
     )
     if (s[["negate"]]) -raw else raw
@@ -32,8 +32,8 @@ physage_raws <- function(id, cpgs, block, results) {
   )
 }
 
-# stop on scale() degeneracies (flat column or n < 2)
-check_zscoreable <- function(id, raws) {
+# cohort z-score, stopping on scale()'s degeneracies (n < 2 or a flat column)
+zscore_raws <- function(id, raws) {
   n <- nrow(raws)
   if (n < 2L) {
     stop(
@@ -49,10 +49,13 @@ check_zscoreable <- function(id, raws) {
     )
   }
 
-  sds <- matrixStats::colSds(raws)
+  z <- scale(raws)
+  # the divisor scale() actually used, not a second opinion on it. a column of
+  # NaN (no CpG observed) scales by 0, so it lands in the same branch
+  sds <- attr(z, "scaled:scale")
   flat <- colnames(raws)[!is.finite(sds) | sds == 0]
   if (!length(flat)) {
-    return(invisible(TRUE))
+    return(z)
   }
 
   # declared panel size per surrogate
@@ -86,9 +89,7 @@ check_zscoreable <- function(id, raws) {
 
 # cohort reduction (years branch reduces twice before the poly)
 finalize_PhysAge <- function(id, raws) {
-  check_zscoreable(id, raws)
-
-  phys <- rowSums(scale(raws))
+  phys <- rowSums(zscore_raws(id, raws))
 
   poly <- physage_poly_coef(id)
   score_vec <- if (is.null(poly)) {

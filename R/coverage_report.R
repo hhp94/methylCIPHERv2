@@ -10,11 +10,25 @@ check_mc_result <- function(x, arg = "x") {
   invisible(x)
 }
 
-# per-sample miss vector from the finished panel matrix, or NULL
+# per-sample miss from the finished panel matrix. column is always there by
+# construction, so absence is a bug (panel_ratio would silently return numeric(0))
 miss_vec <- function(x, id, panel = c("score", "norm")) {
   panel <- match.arg(panel)
   m <- x[["coverage"]][["sample_miss"]][[panel]]
-  if (!is.null(m) && id %in% colnames(m)) m[, id] else NULL
+  if (is.null(m) || !(id %in% colnames(m))) {
+    stop(
+      sprintf(
+        paste0(
+          "%s has no %s-panel miss column. ",
+          "This is a package bug -- please report it."
+        ),
+        id,
+        panel
+      ),
+      call. = FALSE
+    )
+  }
+  m[, id]
 }
 
 # one row per clock computed (aliases have NA panels)
@@ -83,72 +97,45 @@ panel_rows <- function(id, panel, ratio, sample_id) {
 # score-panel rows, plus a norm-panel row when the clock normalizes
 clock_sample_rows <- function(x, id, sample_id) {
   rec <- x[["coverage"]][["per_clock"]][[id]]
-  sm <- miss_vec(x, id, "score")
-  nm <- miss_vec(x, id, "norm")
 
   rows <- list()
   rows[["score"]] <- panel_rows(
     id,
     "score",
-    panel_ratio(rec[["score_present"]], sm, rec[["score_needed"]]),
+    panel_ratio(
+      rec[["score_present"]],
+      miss_vec(x, id, "score"),
+      rec[["score_needed"]]
+    ),
     sample_id
   )
-  # norm panel only when the clock normalizes
+  # norm panel only when the clock normalizes (same condition as having a
+  # norm column), so the read sits inside the guard
   if (rec[["normalizes"]]) {
     rows[["norm"]] <- panel_rows(
       id,
       "norm",
-      panel_ratio(rec[["norm_present"]], nm, rec[["norm_needed"]]),
+      panel_ratio(
+        rec[["norm_present"]],
+        miss_vec(x, id, "norm"),
+        rec[["norm_needed"]]
+      ),
       sample_id
     )
   }
   do.call(rbind, rows)
 }
 
-# alias sample rows: denominators from the member that scored each row
-alias_sample_rows <- function(x, alias, sample_id) {
-  route <- clock_routing(alias)
-  pheno_id <- x[["provenance"]][["pheno_id"]]
-  female <- rep(NA_integer_, length(sample_id))
-  pheno <- x[["pheno"]]
-  if (!is.null(pheno) && "Female" %in% names(pheno)) {
-    idx <- match(sample_id, pheno[[pheno_id]])
-    female <- as.integer(pheno[["Female"]])[idx]
-  }
-  miss <- miss_vec(x, alias, "score")
-
-  n_observed <- rep(NA_integer_, length(sample_id))
-  n_needed <- rep(NA_integer_, length(sample_id))
-  coverage <- rep(NA_real_, length(sample_id))
-
-  rows <- sex_rows(female, length(sample_id))
-  for (sx in names(rows)) {
-    member <- as.character(route[[sx]])
-    rec <- x[["coverage"]][["per_clock"]][[member]]
-    if (is.null(rec)) {
-      next
-    }
-    applies <- rows[[sx]]
-    if (!any(applies)) {
-      next
-    }
-    member_miss <- rep(NA_integer_, length(sample_id))
-    member_miss[applies] <- miss[applies]
-    rc <- row_coverage(rec, member_miss, NULL)
-    coverage[applies] <- rc[["cov"]][applies]
-    n_needed[applies] <- rc[["needed"]]
-    n_observed[applies] <- as.integer(rc[["n_observed"]][applies])
-  }
-
+# zero-row frame in samples_coverage() shape -- nothing to report is not an error
+empty_sample_rows <- function() {
   data.frame(
-    id = sample_id,
-    clock_id = alias,
-    panel = "score",
-    n_observed = n_observed,
-    n_needed = n_needed,
-    coverage = coverage,
-    stringsAsFactors = FALSE,
-    row.names = NULL
+    id = character(0),
+    clock_id = character(0),
+    panel = character(0),
+    n_observed = integer(0),
+    n_needed = integer(0),
+    coverage = numeric(0),
+    stringsAsFactors = FALSE
   )
 }
 
@@ -157,17 +144,19 @@ alias_sample_rows <- function(x, alias, sample_id) {
 samples_coverage <- function(x) {
   check_mc_result(x)
   sample_id <- x[["provenance"]][["sample_id"]]
-  returned <- x[["provenance"]][["clocks"]]
   per_clock <- x[["coverage"]][["per_clock"]]
 
-  parts <- lapply(returned, function(id) {
-    if (is.null(per_clock[[id]])) {
-      alias_sample_rows(x, id, sample_id)
-    } else {
-      clock_sample_rows(x, id, sample_id)
-    }
-  })
-  out <- do.call(rbind, parts)
+  # no record means no CpGs of its own. honest per-sample rows are its
+  # descendants' -- routing targets appear here, pure composites do not
+  ids <- names(per_clock)[!vapply(per_clock, is.null, logical(1L))]
+  parts <- lapply(ids, clock_sample_rows, x = x, sample_id = sample_id)
+
+  # seed with the empty frame so a run of pure composites keeps the shape
+  out <- do.call(rbind, c(list(empty_sample_rows()), parts))
+
+  # NA coverage is a routed member masked on a row its sex did not score.
+  # drop those rows -- sample was never scored against that panel
+  out <- out[!is.na(out[["coverage"]]), , drop = FALSE]
   rownames(out) <- NULL
   out
 }

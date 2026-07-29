@@ -53,7 +53,7 @@ test_that("clocks_coverage reports score_used = present + imputed_full per row",
   expect_equal(row$missing_cpgs[[1]], drop)
 })
 
-test_that("samples_coverage is long with a per-sex denominator for an alias", {
+test_that("samples_coverage emits no rows for a clock that reads no CpGs", {
   fem <- clock_coefs("DNAmGrip_wAge_Female")
   mal <- clock_coefs("DNAmGrip_wAge_Male")
   DNAm <- random_betas(union(names(fem), names(mal)), n = 6L)
@@ -67,35 +67,59 @@ test_that("samples_coverage is long with a per-sex denominator for an alias", {
     names(sc),
     c("id", "clock_id", "panel", "n_observed", "n_needed", "coverage")
   )
-  alias <- sc[sc$clock_id == "DNAmGrip_wAge", ]
-  expect_equal(nrow(alias), 6L)
-  # n_needed is the scoring model of the sex that scored each sample
+  # the alias is a returned column but reads no CpGs, so it reports nothing
+  expect_false("DNAmGrip_wAge" %in% sc$clock_id)
+
+  # rows are the members' (the clocks that read betas). masked sex rows drop,
+  # so each sample appears once under the model that scored it
+  expect_setequal(
+    unique(sc$clock_id),
+    c("DNAmGrip_wAge_Female", "DNAmGrip_wAge_Male")
+  )
+  expect_equal(nrow(sc), 6L)
+  expect_setequal(sc$id, rownames(DNAm))
+  expect_false(anyNA(sc$coverage))
   expect_equal(
-    alias$n_needed,
+    sc$clock_id[match(rownames(DNAm), sc$id)],
+    ifelse(female == 1, "DNAmGrip_wAge_Female", "DNAmGrip_wAge_Male")
+  )
+  expect_equal(
+    sc$n_needed[match(rownames(DNAm), sc$id)],
     ifelse(female == 1, length(fem), length(mal))
   )
-  # full coverage: every declared CpG present
-  expect_true(all(alias$coverage == 1))
-  expect_equal(alias$n_observed, alias$n_needed)
+})
+
+test_that("a sample no model scored gets no samples_coverage row", {
+  fem <- clock_coefs("DNAmGrip_wAge_Female")
+  mal <- clock_coefs("DNAmGrip_wAge_Male")
+  DNAm <- random_betas(union(names(fem), names(mal)), n = 4L)
+  # the last sample's sex is unknown, so neither member claims it
+  pheno <- report_pheno(rownames(DNAm), c(1, 1, 0, NA))
+
+  # the unknown sex is worth a warning, and it is not what this test asserts
+  res <- NULL
+  expect_warning(res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno))
+  sc <- samples_coverage(res)
+
+  unscored <- rownames(DNAm)[4]
+  expect_true(is.na(res$scores[unscored, "DNAmGrip_wAge"]))
+  expect_false(unscored %in% sc$id)
+  expect_setequal(sc$id, rownames(DNAm)[1:3])
 })
 
 test_that("samples_coverage coverage is literally row_coverage() for a partial fill", {
-  fem <- clock_coefs("DNAmGrip_wAge_Female")
-  mal <- clock_coefs("DNAmGrip_wAge_Male")
-  DNAm <- random_betas(union(names(fem), names(mal)), n = 6L)
-  female <- c(1, 1, 1, 0, 0, 0)
-  pheno <- report_pheno(rownames(DNAm), female)
-  fem_only <- setdiff(names(fem), names(mal))[1]
-  DNAm[1, fem_only] <- NA_real_ # one female leans on a cohort mean
+  panel <- clock_scoring_cpgs("Hannum")
+  DNAm <- random_betas(panel, n = 6L)
+  DNAm[1, panel[[1]]] <- NA_real_ # one sample leans on a cohort mean
 
-  res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno)
-  sc <- samples_coverage(res)
-  alias <- sc[sc$clock_id == "DNAmGrip_wAge", ]
+  sc <- samples_coverage(calc_clocks(DNAm, "Hannum", min_samples_coverage = 0))
+  hannum <- sc[sc$clock_id == "Hannum", ]
 
-  # sample 1 is one CpG short of its female panel, the rest are full
-  expect_equal(alias$n_observed[1], length(fem) - 1L)
-  expect_equal(alias$coverage[1], (length(fem) - 1L) / length(fem))
-  expect_true(all(alias$coverage[-1] == 1))
+  expect_equal(nrow(hannum), 6L)
+  # sample 1 is one CpG short of the panel, the rest are full
+  expect_equal(hannum$n_observed[1], length(panel) - 1L)
+  expect_equal(hannum$coverage[1], (length(panel) - 1L) / length(panel))
+  expect_true(all(hannum$coverage[-1] == 1))
 })
 
 test_that("samples_coverage gives a normalizing clock a score and a norm row", {

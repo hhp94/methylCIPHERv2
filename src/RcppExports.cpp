@@ -11,14 +11,15 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // col_stats
-List col_stats(NumericMatrix obj, Nullable<IntegerVector> cols);
-RcppExport SEXP _methylCIPHERv2_col_stats(SEXP objSEXP, SEXP colsSEXP) {
+List col_stats(NumericMatrix obj, Nullable<IntegerVector> cols, bool row_moments);
+RcppExport SEXP _methylCIPHERv2_col_stats(SEXP objSEXP, SEXP colsSEXP, SEXP row_momentsSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type obj(objSEXP);
     Rcpp::traits::input_parameter< Nullable<IntegerVector> >::type cols(colsSEXP);
-    rcpp_result_gen = Rcpp::wrap(col_stats(obj, cols));
+    Rcpp::traits::input_parameter< bool >::type row_moments(row_momentsSEXP);
+    rcpp_result_gen = Rcpp::wrap(col_stats(obj, cols, row_moments));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -35,7 +36,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_methylCIPHERv2_col_stats", (DL_FUNC) &_methylCIPHERv2_col_stats, 2},
+    {"_methylCIPHERv2_col_stats", (DL_FUNC) &_methylCIPHERv2_col_stats, 3},
     {"_methylCIPHERv2_fill_imp_col", (DL_FUNC) &_methylCIPHERv2_fill_imp_col, 2},
     {NULL, NULL, 0}
 };

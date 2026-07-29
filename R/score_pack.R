@@ -1,11 +1,10 @@
 # batched scorers for external packs (PCClocks, PCBrainAge, SystemsAge)
 
-# pack CpG panel: subset, present/absent, vendor ref
-pack_design <- function(id, pack, block) {
-  panel <- pack[["cpgs"]]
-  hit <- match(panel, block[["usable"]], 0L) > 0L
-  present <- panel[hit]
-  absent <- panel[!hit]
+# pack CpG panel: subset, present/absent, vendor ref. take the split resolved
+# upstream -- pack cpgs are the clock's declared panel
+pack_design <- function(id, cpgs, block) {
+  present <- cpgs[["score_present"]]
+  absent <- cpgs[["score_absent"]]
   obs <- observed_panel(present, block)
   list(
     present = present,
@@ -48,13 +47,13 @@ pack_cov_contrib <- function(ids, pheno, n) {
   as.matrix(pheno[, need, drop = FALSE]) %*% Cmat
 }
 
-# dispatch a pack group to its batched scorer
-score_pack_group <- function(ids, block) {
+# dispatch a pack group to its batched scorer (cpgs: the group's shared panel)
+score_pack_group <- function(ids, cpgs, block) {
   ty <- score_type(ids[[1]])
   switch(
     ty,
-    pack_systemsage = score_systemsage_group(ids, block),
-    pack_linear = score_linear_pack(ids, block),
+    pack_systemsage = score_systemsage_group(ids, cpgs, block),
+    pack_linear = score_linear_pack(ids, cpgs, block),
     stop(
       sprintf("No batched scorer for score_type %s.", ty),
       call. = FALSE
@@ -63,12 +62,12 @@ score_pack_group <- function(ids, block) {
 }
 
 # coefficient_matrix packs (PCClocks, PCBrainAge)
-score_linear_pack <- function(ids, block) {
+score_linear_pack <- function(ids, cpgs, block) {
   # every clock here is declared vendor_mean + sum
   pack <- clock_pack(ids[[1]], block[["packs"]])
   M <- pack[["coefficient_matrix"]]
   rownames(M) <- pack[["cpgs"]]
-  design <- pack_design(ids[[1]], pack, block)
+  design <- pack_design(ids[[1]], cpgs, block)
   sample_id <- block[["sample_id"]]
 
   linpred <- sweep(

@@ -15,8 +15,8 @@ mc_asset <- function(group_id) {
   if (is.null(row)) {
     cli::cli_abort(
       c(
-        "{.val {group_id}} is not an external clock group.",
-        "i" = "Known groups: {.val {mc_external_groups()}}."
+        "{.val {group_id}} is not a known external clock group.",
+        "i" = "Available groups: {.val {mc_external_groups()}}."
       ),
       call = NULL
     )
@@ -65,9 +65,9 @@ mc_resolve_assets_dir <- function(ext_data = NULL) {
     if (!is_path_string(ext_data)) {
       cli::cli_abort(
         c(
-          "{.arg ext_data} must be {.code NULL} or a single assets-dir path
+          "{.arg ext_data} should be {.code NULL} or a single assets-dir path
            (got {class(ext_data)[[1L]]} of length {length(ext_data)}).",
-          "i" = "A loaded pack names no directory -- pass packs only to
+          "i" = "A loaded pack doesn't name a directory -- pass packs only to
                  {.fn load_mc_assets}."
         ),
         call = NULL
@@ -102,7 +102,7 @@ set_mc_assets_dir <- function(path = NULL) {
   }
   if (!is_path_string(path)) {
     cli::cli_abort(
-      "{.arg path} must be {.code NULL} or a single non-empty string
+      "{.arg path} should be {.code NULL} or a single non-empty string
        (got {class(path)[[1L]]} of length {length(path)}).",
       call = NULL
     )
@@ -112,14 +112,18 @@ set_mc_assets_dir <- function(path = NULL) {
     fs::dir_create(dir),
     error = function(e) {
       cli::cli_abort(
-        "Can't create assets dir {.path {dir}}: {conditionMessage(e)}.",
+        "Couldn't create assets dir {.path {dir}}: {conditionMessage(e)}.",
         call = NULL
       )
     }
   )
   if (!isTRUE(unname(fs::file_access(dir, "write")))) {
     cli::cli_abort(
-      "Assets dir {.path {dir}} is not writable.",
+      c(
+        "Assets dir {.path {dir}} isn't writable.",
+        "i" = "Check permissions, or pick another path with
+               {.fn set_mc_assets_dir}."
+      ),
       call = NULL
     )
   }
@@ -193,7 +197,7 @@ mc_fetch <- function(row, dir) {
     error = function(e) {
       cli::cli_abort(
         c(
-          "Download failed for {.val {row[['group_id']]}}:
+          "Couldn't download {.val {row[['group_id']]}}:
            {conditionMessage(e)}.",
           "i" = "URL: {.url {url}}"
         ),
@@ -204,7 +208,7 @@ mc_fetch <- function(row, dir) {
   if (!identical(as.integer(status), 0L)) {
     cli::cli_abort(
       c(
-        "Download failed for {.val {row[['group_id']]}}
+        "Couldn't download {.val {row[['group_id']]}}
          (status {status}).",
         "i" = "URL: {.url {url}}"
       ),
@@ -227,12 +231,13 @@ mc_consent <- function(rows, dir, ask) {
   if (!interactive()) {
     cli::cli_abort(
       c(
-        "Can't download {length(rows)} clock-data pack{?s} without
-         confirmation in a non-interactive session.",
+        "Need confirmation to download {length(rows)} clock-data pack{?s}
+         in a non-interactive session.",
         "i" = "Assets dir: {.path {dir}}",
         mc_manifest_bullets(ids, sizes),
-        "i" = "Pass {.code ask = FALSE} to consent, or pre-stage the files
-               and point {.arg ext_data} at them."
+        "i" = "Pass {.code ask = FALSE} to allow the download without
+               prompting, or pre-stage the files and point {.arg ext_data}
+               at them."
       ),
       call = NULL
     )
@@ -248,7 +253,7 @@ mc_consent <- function(rows, dir, ask) {
   )
   if (!ok) {
     cli::cli_abort(
-      "Download declined for {.val {ids}}.",
+      "Download cancelled -- no packs were fetched for {.val {ids}}.",
       call = NULL
     )
   }
@@ -404,8 +409,8 @@ mc_canonicalize_ext_data <- function(ext_data) {
     ))
   }
   cli::cli_abort(
-    "{.arg ext_data} must be {.code NULL}, an assets-dir path, a loaded pack,
-     or a list of loaded packs.",
+    "{.arg ext_data} should be {.code NULL}, an assets-dir path, a loaded
+     pack, or a list of loaded packs.",
     call = NULL
   )
 }
@@ -432,9 +437,10 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
       if (is.null(pack)) {
         cli::cli_abort(
           c(
-            "Need pack {.val {g}}, but it is not in {.arg ext_data}.",
-            "i" = "Closed set -- no download. Include it in {.arg ext_data}
-                   or pass an assets dir / {.code NULL}."
+            "Couldn't find pack {.val {g}} in {.arg ext_data}.",
+            "i" = "When {.arg ext_data} is a closed set of packs, nothing is
+                   downloaded. Include {.val {g}} in {.arg ext_data}, or pass
+                   an assets dir / {.code NULL} instead."
           ),
           call = NULL
         )
@@ -444,7 +450,7 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
     extra <- setdiff(names(canon), groups)
     if (length(extra)) {
       cli::cli_warn(
-        "Ignoring unused pack{?s} in {.arg ext_data}: {.val {extra}}.",
+        "Skipping unused pack{?s} in {.arg ext_data}: {.val {extra}}.",
         call = NULL
       )
     }
@@ -463,10 +469,11 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
       gone <- groups[missing]
       cli::cli_abort(
         c(
-          "Pack{cli::qty(gone)}{?s} {.val {gone}} not found in
+          "Couldn't find pack{cli::qty(gone)}{?s} {.val {gone}} in
            {.path {dir}}.",
-          "i" = "Closed set -- no download. Stage the file{cli::qty(gone)}{?s}
-                 there, or pass {.code ext_data = NULL} to allow download."
+          "i" = "With a closed assets dir, nothing is downloaded. Stage the
+                 file{cli::qty(gone)}{?s} there, or pass
+                 {.code ext_data = NULL} to allow download."
         ),
         call = NULL
       )
@@ -511,11 +518,10 @@ mc_consent_delete <- function(files, dir, ask, n_stale = 0L) {
   if (!interactive()) {
     cli::cli_abort(
       c(
-        "Can't delete {what} without confirmation in a non-interactive
-         session.",
+        "Need confirmation to delete {what} in a non-interactive session.",
         "i" = "Assets dir: {.path {dir}}",
         mc_manifest_bullets(labels, sizes),
-        "i" = "Pass {.code ask = FALSE} to consent."
+        "i" = "Pass {.code ask = FALSE} to allow deletion without prompting."
       ),
       call = NULL
     )
@@ -538,11 +544,13 @@ clear_mc_assets <- function(groups = "all", ask = TRUE) {
   stale <- mc_stale_files(groups)
   files <- c(downloaded, stats::setNames(stale, mc_stale_labels(stale)))
   if (!length(files)) {
-    cli::cli_inform("No clock assets to clear in {.path {dir}}.")
+    cli::cli_inform("Nothing to clear -- no clock assets in {.path {dir}}.")
     return(invisible(character(0)))
   }
   if (!mc_consent_delete(files, dir, ask, n_stale = length(stale))) {
-    cli::cli_inform("Deletion declined -- nothing removed from {.path {dir}}.")
+    cli::cli_inform(
+      "Ok -- nothing was removed from {.path {dir}}."
+    )
     return(invisible(character(0)))
   }
   freed <- sum(as.numeric(fs::file_size(files)))

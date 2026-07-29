@@ -17,7 +17,6 @@ Imports:
     checkmate,
     cli,
     fs,
-    matrixStats,
     qs2,
     Rcpp,
     stats,

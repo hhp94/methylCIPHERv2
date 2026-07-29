@@ -62,8 +62,8 @@ resolve_clocks <- function(clocks) {
   if (length(asked_routed)) {
     cli::cli_abort(
       c(
-        "Can't request {length(asked_routed)} sex-specific model{?s}
-         directly:",
+        "{length(asked_routed)} sex-specific model{?s} can't be requested by
+         name:",
         bullets(vapply(
           asked_routed,
           function(tok) {
@@ -73,7 +73,8 @@ resolve_clocks <- function(clocks) {
           },
           character(1L)
         )),
-        "i" = "Sex is chosen per sample from {.arg pheno}."
+        "i" = "Request the family alias; sex is chosen per sample from
+               {.arg pheno}."
       ),
       call = NULL
     )
@@ -103,7 +104,7 @@ resolve_clocks <- function(clocks) {
           c(
             "Keyword {.val {tok}} points at {cli::qty(dead)} missing
              input{?s}: {.val {dead}}.",
-            "i" = "This is a package bug -- please report it."
+            "i" = "That's a package bug -- please report it so we can fix it."
           ),
           call = NULL
         )
@@ -120,7 +121,8 @@ resolve_clocks <- function(clocks) {
     bad <- unique(bad)
     cli::cli_abort(
       c(
-        "{length(bad)} unknown input{?s} in {.arg clocks}: {.val {bad}}.",
+        "Don't recognize {length(bad)} name{?s} in {.arg clocks}:
+         {.val {bad}}.",
         "i" = "Closest matches:",
         suggestion_bullets(bad),
         "i" = "See {.fn list_clocks} or {.fn list_tags}

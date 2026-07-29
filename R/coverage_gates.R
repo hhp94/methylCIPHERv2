@@ -10,15 +10,6 @@ gate_label <- function(id, routed = sex_routed_members()) {
   sprintf("%s (%s model)", routed[["alias"]][[id]], routed[["sex"]][[id]])
 }
 
-# cap long failure lists
-coverage_bullets <- function(lines) {
-  shown <- utils::head(lines, 10L)
-  if (length(lines) > length(shown)) {
-    shown <- c(shown, sprintf("... and %d more", length(lines) - length(shown)))
-  }
-  bullets(shown)
-}
-
 check_coverage <- function(cpg_list, threshold = 0.75) {
   checkmate::assert_number(threshold, lower = 0, upper = 1)
   warn_below <- min(1, threshold * WARN_COVERAGE_MARGIN)
@@ -73,9 +64,10 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
       c(
         "{length(fail)} clock{?s} {?doesn't/don't} have enough CpGs to score
          ({.arg min_clocks_coverage} = {format(threshold)}):",
-        coverage_bullets(fail),
-        "i" = "Drop {cli::qty(fail)}{?it/them} from {.arg clocks}, or lower
-               {.arg min_clocks_coverage}."
+        capped_bullets(fail),
+        "i" = "Try dropping {cli::qty(fail)}{?it/them} from {.arg clocks}, or
+               lower {.arg min_clocks_coverage} if you meant to allow thinner
+               panels."
       ),
       call = NULL
     )
@@ -85,10 +77,11 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
   if (length(marginal)) {
     cli::cli_warn(
       c(
-        "{length(marginal)} clock{?s} just clear{?s/} {.arg min_clocks_coverage}
-         = {format(threshold)}:",
-        coverage_bullets(marginal),
-        "i" = "Scores still run, but more of the panel is imputed."
+        "{length(marginal)} clock{?s} only just clear{?s/}
+         {.arg min_clocks_coverage} = {format(threshold)}:",
+        capped_bullets(marginal),
+        "i" = "Scoring continues, but more of the panel will be filled by
+               imputation."
       ),
       call = NULL
     )
@@ -129,9 +122,9 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
       c(
         "{length(thin)} clock{?s} {?has/have} a thin normalization background
          (under {.arg min_clocks_coverage} = {format(threshold)}):",
-        coverage_bullets(thin),
+        capped_bullets(thin),
         "i" = fate,
-        "i" = "{.fn clocks_coverage} reports the panel counts per clock."
+        "i" = "See {.fn clocks_coverage} for the panel counts per clock."
       ),
       call = NULL
     )
@@ -192,8 +185,9 @@ check_row_coverage <- function(coverage, threshold = 0.75) {
       c(
         "{length(lines)} clock{?s} scored some samples under
          {.arg min_samples_coverage} = {format(threshold)}:",
-        coverage_bullets(lines),
-        "i" = "Those sample scores lean on imputed CpGs."
+        capped_bullets(lines),
+        "i" = "Those sample scores rely more on imputed CpGs, so interpret
+               them with a bit of care."
       ),
       call = NULL
     )

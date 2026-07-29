@@ -68,8 +68,10 @@ test_that("DunedinPACE reports score and norm panel miss separately", {
 
   cov <- res$coverage$per_clock$DunedinPACE
   expect_true(cov$normalizes)
-  expect_equal(cov$score_imputed_partial, 1L) # sample 2 only
-  expect_equal(cov$norm_imputed_partial, 2L) # samples 1 and 2
+  # score panel holds one of the two holed CpGs, norm panel both (score is a
+  # subset of norm)
+  expect_equal(cov$score_imputed_partial, 1L)
+  expect_equal(cov$norm_imputed_partial, 2L)
 })
 
 # coverage floors live in test-coverage-gate.R for all clocks

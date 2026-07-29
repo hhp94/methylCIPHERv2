@@ -31,8 +31,12 @@ score_type <- function(p) {
   gid <- clock_group_id(p)
 
   if (clock_is_external(p)) {
+    # groups whose arithmetic is not a plain weighted sum keep their own branch
     if (identical(gid, "SystemsAge")) {
       return("pack_systemsage")
+    }
+    if (identical(gid, "Zhang2019")) {
+      return("Zhang2019")
     }
     if (wf == "cpg_coefficient" && ct %in% c("linear", "linear_transformed")) {
       return("pack_linear")
@@ -82,6 +86,21 @@ score_type <- function(p) {
   unroutable(p)
 }
 
+# does this branch read betas, or only other clocks' scores? pure composite
+# owns no coverage record -- every CpG feeding it is already on a descendant
+clock_reads_cpgs <- function(p) {
+  switch(
+    score_type(p),
+    sex_routed = FALSE,
+    DNAmFitAge = FALSE,
+    # V1 takes every surrogate as a score. V2 recomputes its own from betas
+    GrimAge = any(
+      unlist(grimage_stack_roles(p, names(grimage_cox_coef(p)))) == "internal"
+    ),
+    TRUE
+  )
+}
+
 # pack groups use score_pack_group()
 PACK_SCORE_TYPES <- c("pack_linear", "pack_systemsage")
 
@@ -89,10 +108,11 @@ is_pack_scored <- function(p) {
   score_type(p) %in% PACK_SCORE_TYPES
 }
 
-# external pack groups needed for a compute sequence
+# external pack groups needed for a compute sequence. keyed on where the weights
+# live, not how the clock is scored -- an external clock may take a named branch
 pack_groups_needed <- function(clock_sequence) {
   unique(unlist(lapply(clock_sequence, function(p) {
-    if (is_pack_scored(p)) clock_group_id(p) else NULL
+    if (clock_is_external(p)) clock_group_id(p) else NULL
   })))
 }
 
@@ -136,7 +156,13 @@ mc_spec <- function(
     packs = packs,
     panels = clock_panels(clock_sequence, packs, normalize),
     # clocks whose reduction is still inside the branch (catalog-declared)
-    cross_sample = split_cross_sample(clock_sequence)[["cross_sample"]]
+    cross_sample = split_cross_sample(clock_sequence)[["cross_sample"]],
+    # any sample_scale clock -> mc_cohort banks per-sample moments (catalog-declared)
+    needs_moments = any(vapply(
+      clock_sequence,
+      clock_needs_full_panel,
+      logical(1)
+    ))
   )
 }
 
@@ -146,9 +172,9 @@ mc_cohort <- function(DNAm, spec, pheno = NULL, min_clocks_coverage = 0.75) {
     cli::cli_abort(
       c(
         "These clocks need {cli::qty(spec[['covariates']])} pheno column{?s}
-         {.field {spec[['covariates']]}}, but {.arg pheno} is missing.",
-        "i" = "Pass a pheno table with {cli::qty(spec[['covariates']])}
-               {?that/those} column{?s}."
+         {.field {spec[['covariates']]}}, but no {.arg pheno} was provided.",
+        "i" = "Please pass a pheno table that includes
+               {cli::qty(spec[['covariates']])}{?that/those} column{?s}."
       ),
       call = NULL
     )
@@ -169,7 +195,8 @@ mc_cohort <- function(DNAm, spec, pheno = NULL, min_clocks_coverage = 0.75) {
   mna <- scan_missing_cpgs(
     DNAm,
     panels_union(spec[["panels"]]),
-    panels_union(spec[["panels"]], "score")
+    panels_union(spec[["panels"]], "score"),
+    row_moments = isTRUE(spec[["needs_moments"]])
   )
   cpg_list <- resolve_cpgs(mna[["usable_cols"]], spec[["panels"]])
   check_coverage(cpg_list, min_clocks_coverage)
@@ -180,7 +207,9 @@ mc_cohort <- function(DNAm, spec, pheno = NULL, min_clocks_coverage = 0.75) {
     usable_cols = mna[["usable_cols"]],
     cpg_list = cpg_list,
     # partial_fill names are the column classification (do not re-derive)
-    partial_fill = mna[["col_mean"]]
+    partial_fill = mna[["col_mean"]],
+    # NULL unless a sample_scale clock asked the sweep to widen and count them
+    sample_moments = mna[["sample_moments"]]
   )
 }
 
@@ -190,6 +219,16 @@ block_pheno <- function(DNAm, facts) {
     return(NULL)
   }
   facts[["pheno"]][match(rownames(DNAm), facts[["sample_id"]]), , drop = FALSE]
+}
+
+# moments follow facts$sample_id, narrowed to the rows in hand (like block_pheno)
+block_moments <- function(DNAm, facts) {
+  mom <- facts[["sample_moments"]]
+  if (is.null(mom)) {
+    return(NULL)
+  }
+  rows <- match(rownames(DNAm), facts[["sample_id"]])
+  list(mean = mom[["mean"]][rows], sd = mom[["sd"]][rows])
 }
 
 # scoring-time failures per clock (coverage cannot see these)
@@ -219,8 +258,10 @@ collect_notes <- function(notes) {
 # per-block view: DNAm + its usable column index, partial cache, pheno, notes
 mc_block <- function(DNAm, spec, facts) {
   usable <- facts[["usable_cols"]]
-  # name -> column position, resolved once instead of per panel gather
+  # CpG name -> column position, resolved once instead of per panel gather
+  # one named vector, not a name/position pair to keep aligned
   usable_idx <- match(usable, colnames(DNAm))
+  names(usable_idx) <- usable
   if (anyNA(usable_idx)) {
     stop(
       sprintf(
@@ -236,10 +277,10 @@ mc_block <- function(DNAm, spec, facts) {
 
   block <- list(
     DNAm = DNAm,
-    DNAm_full = DNAm,
     pheno = block_pheno(DNAm, facts),
+    # banked upstream: the block never needs the matrix at its full width
+    sample_moments = block_moments(DNAm, facts),
     packs = spec[["packs"]],
-    usable = usable,
     usable_idx = usable_idx,
     sample_id = rownames(DNAm),
     # write-only collector for scoring-time failures
@@ -275,7 +316,9 @@ score_cohort <- function(DNAm, spec, facts) {
     pack_ids <- clock_sequence[is_pack]
     pgroups <- vapply(pack_ids, clock_group_id, character(1))
     for (g in unique(pgroups)) {
-      grp <- score_pack_group(pack_ids[pgroups == g], block)
+      gids <- pack_ids[pgroups == g]
+      # the group shares one declared panel -- resolve it once, from the pool
+      grp <- score_pack_group(gids, cpg_list[["per_clock"]][[gids[[1]]]], block)
       results[names(grp)] <- grp
     }
   }

@@ -43,6 +43,20 @@ for (id in c("GrimAgeV1", "GrimAgeV2")) {
   })
 }
 
+# surrogate path resolves CpGs from the declared panel (as PhysAge does), so a
+# component can never score a CpG coverage did not count
+test_that("a component coefficient outside the declared panel is a hard stop", {
+  cpgs <- list(
+    clock_id = "fake",
+    score_needed = c("cg1", "cg2", "cg3"),
+    score_present = c("cg1", "cg3")
+  )
+  coef <- c(cg1 = 0.5, cg3 = -0.5)
+
+  expect_equal(unname(component_present(coef, cpgs, "fake")), c("cg1", "cg3"))
+  expect_error(component_present(c(coef, cg9 = 1), cpgs, "fake"))
+})
+
 test_that("GrimAge surrogates go NA only where they consume the missing covariate", {
   id <- "GrimAgeV1"
   deps <- clock_depends_on(id)

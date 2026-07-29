@@ -87,7 +87,8 @@ needs_full_panel <- clock_needs_full_panel
 parity_block <- function(id) {
   if (is_horvath_online(id)) {
     "horvath"
-  } else if (clock_is_external(id)) {
+  } else if (is_pack_scored(id)) {
+    # the relaxed tolerance follows the pack scoring path, not externality
     "packs"
   } else if (identical(clock_group_id(id), "DNAmFitAge")) {
     "fitage"

@@ -11,7 +11,7 @@ cached_cols <- function(present, partial_cache) {
 
 # column positions in the block matrix for CpGs the block declares usable
 block_cols <- function(cols, block) {
-  idx <- block[["usable_idx"]][match(cols, block[["usable"]])]
+  idx <- block[["usable_idx"]][cols]
   # a name outside `usable` would index an NA column, not error -- say so loudly
   if (anyNA(idx)) {
     bad <- cols[is.na(idx)]
@@ -27,21 +27,35 @@ block_cols <- function(cols, block) {
       call. = FALSE
     )
   }
-  idx
+  unname(idx)
 }
 
-# observed betas for `present`: cohort-mean-filled columns first, then raw
+# observed betas for `present`: one subset, then the cohort-mean columns on top.
+# cbind() copies its operand into a fresh matrix even when it has only one, so
+# splitting cached/raw and binding cost a second full-panel copy
 observed_panel <- function(present, block) {
   cache <- block[["partial_cache"]]
   cached <- cached_cols(present, cache)
-  raw <- setdiff(present, cached)
-  list(
-    cols = c(cached, raw),
-    values = cbind(
-      cache[, cached, drop = FALSE],
-      block[["DNAm"]][, block_cols(raw, block), drop = FALSE]
+  values <- block[["DNAm"]][, block_cols(present, block), drop = FALSE]
+  if (length(cached)) {
+    values[, cached] <- cache[, cached, drop = FALSE]
+  }
+  list(cols = present, values = values)
+}
+
+# resolve present from the clock's declared panel, never the block's usable set.
+# a coef CpG outside the panel would be scored but never counted by coverage
+component_present <- function(coef, cpgs, label) {
+  extra <- setdiff(names(coef), cpgs[["score_needed"]])
+  if (length(extra)) {
+    catalog_bug(
+      "%s: %d coefficient CpG(s) outside the declared scoring panel: %s.",
+      label,
+      length(extra),
+      paste(utils::head(extra, 5L), collapse = ", ")
     )
-  )
+  }
+  intersect(names(coef), cpgs[["score_present"]])
 }
 
 # vendor-mean fill for fully absent CpGs
@@ -178,8 +192,8 @@ linear_score <- function(cpgs, block, observed = NULL) {
   reduction <- clock_reduction(id)
   coef <- clock_coefs(id)
   intercept <- clock_intercept(id)
-  # the declared absent set, not setdiff(names(coef), present) -- see
-  # component_linpred(), which is for callers holding only a coef vector
+  # declared absent set, not setdiff(names(coef), present) -- see
+  # component_linpred() for callers holding only a coef vector
   fill <- absent_fill(id, coef, cpgs[["score_absent"]])
 
   lp <- linear_predictor(

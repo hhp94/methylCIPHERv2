@@ -25,12 +25,11 @@ score_GrimAge <- function(id, cpgs, block, results) {
       comp <- component_named(comps, nm, id)
       coef <- bundle_tensor(group_id, comp[["file"]])
       intercept <- if (is.null(comp[["intercept"]])) 0 else comp[["intercept"]]
-      present <- intersect(names(coef), block[["usable"]])
       # surrogate follows the clock's declared absent-CpG policy
       X[, nm] <- component_linpred(
         id,
         coef,
-        present,
+        component_present(coef, cpgs, paste0(id, " component ", nm)),
         block,
         label = nm,
         intercept = intercept,

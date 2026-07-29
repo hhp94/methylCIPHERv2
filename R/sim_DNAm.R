@@ -93,8 +93,9 @@ clock_cpgs <- function(clock_ids, packs, normalize) {
   if (length(unresolved)) {
     cli::cli_abort(
       c(
-        "No scoring CpGs for {.val {unresolved}}.",
-        "i" = "External packs may need to be loaded first."
+        "Couldn't resolve any scoring CpGs for {.val {unresolved}}.",
+        "i" = "If these are external clocks, try loading their packs first
+               with {.fn load_mc_assets}."
       ),
       call = NULL
     )

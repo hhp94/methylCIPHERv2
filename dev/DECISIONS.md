@@ -14,6 +14,760 @@ second-guessed; do not restate rules already stated in `CLAUDE.md` or `dev/id-st
 
 ---
 
+## 2026-07-29 -- Welford's division becomes a cached reciprocal; a storage-order rewrite and a two-pass rewrite both measured worse
+
+`col_stats(row_moments = TRUE)` divided once per finite cell (`rmean[i] += delta / n`). `n` is a
+row's running observed count, bounded by `ncol(obj)`, so the kernel now builds an `inv[]` table of
+`1/n` up to `nc_obj` once and the hot loop multiplies. That is `nc_obj` divisions instead of up to
+`nr * nc_obj`, and the table is walked in a narrow window (every row's count tracks the column
+index), so it stays cache-resident. Measured on 500 x 500,000 with 2% NA: the full-matrix moments
+sweep 0.543 -> 0.469 s, and the same win reproduced at 0.86 / 0.84 / 0.86 across three runs;
+`panel 320k + moments` 0.91 / 0.92 / 0.94. The no-moments paths are untouched by construction.
+`delta * inv[n]` is not bit-identical to `delta / n`; it agrees to 1e-9, which is what the harness
+checked. The always-on tiers pass unchanged (829 / 0 / 0).
+
+**Two rivals were built and rejected, both on measurement.** A single interleaved scan in physical
+column order -- one traversal instead of subset-then-complement, plus a branch-free `f |= (v < 0.0)`
+flag mask -- lost 11 of 12 measurements (up to 1.33x). Two reasons: the flag mask adds unconditional
+ALU work to replace branches that never mispredict on beta data, and its physical-order premise buys
+nothing because a column here is a contiguous 4 KB read, so hardware prefetch already works within
+the column and inter-column order barely registers. Its `out_pos` map also makes a 2000-CpG panel
+walk all 500,000 columns. Separately, the textbook two-pass (row sums in pass 1, then a full rescan
+for squared deviations against frozen means) landed at 1.02-1.05 -- indistinguishable from the
+incumbent against a 1-4% floor, and behind the reciprocal table everywhere. Its arithmetic is
+cheaper and strictly more accurate than Welford, but it moves ~5 GB where the fused pass moves
+~2.5 GB, and this path is not arithmetic-bound enough to pay for that. **That balance is a function
+of the working set**, so if chunking ever lands blocks that stay L3-resident the two-pass could
+flip; it is a wash at this size, not a wrong idea.
+
+**Benchmarking a kernel through `load_all()` measures nothing.** `pkgbuild::compile_dll()` defaults
+to `debug = TRUE`, appending `-UNDEBUG -Wall -pedantic -g -O0` after the site `-O3`, so the dll in
+any dev session is an **-O0 build** -- 3-4x slower than the identical source at `-O2` (1.16 s vs
+0.33 s on the full sweep). `dev/bench-col-stats.R` therefore rewrites each candidate's
+`// [[Rcpp::export]]` to a unique name and `sourceCpp()`s them all in one session, `src/col_stats.cpp`
+included, so every kernel shares one set of flags. It also compiles the incumbent **twice** under
+different names: identical code, so whatever that pair measures in a case is that case's artifact
+floor. Without it a 6% "win" is unreadable -- the first-touch page faults on a freshly built 2 GB
+matrix alone moved one kernel from 0.32 to 0.84 s, and single-iteration runs put the incumbent's own
+spread above the effect being chased.
+
+**The kernel now refuses duplicate `cols` when `row_moments = TRUE`.** The uniqueness assumption was
+a comment; under `row_moments` a repeat feeds a column into the row moments twice while the
+complement marker excludes it once, which is silently wrong rather than slow. Scoped to
+`row_moments` on purpose: with moments off a duplicate is merely a repeated output column, and
+nothing in the package passes one (`match()` on an `intersect()` result). Untested by request.
+
+## 2026-07-29 -- `observed_panel()` subsets once and overwrites; its `cols` is `present`, not cached-first
+
+**Reverses "cohort-mean-filled columns first, then raw".** `observed_panel()` split `present` into
+`cached` / `raw`, subset each, and `cbind()`ed them. `cbind()` copies its operand into a fresh
+allocation **even with only one operand** -- verified by address: `cbind(NULL, M)` and `cbind(M)`
+both return an object at a different address than `M`, with identical contents. With no partial NAs
+`partial_cache` is `NULL`, so `cache[, cached, drop = FALSE]` is `NULL` and the bind existed purely
+to duplicate 1.43 GB (500 x 357,852) that its own argument had just materialized.
+
+It now subsets once for all of `present` and writes the cached columns on top:
+`values[, cached] <- cache[, cached, drop = FALSE]`. `partial_cache` holds only `names(fill)`, so
+that write is a small fraction of the panel, and the subset result has refcount 1 so it mutates in
+place. Measured at `n = 500`, interleaved A/B: Zhang2019BLUP 1.540 -> 1.130 s (-27%), PCBrainAge
+1.500 -> 1.050 s (-30%), scores bit-identical (max abs diff 0). `cbind` had been the top self-time
+entry at 37.9% / 48.8% -- 3-4x the `%*%` it fed. Note the profiler attributed the *subset* to
+`cbind` as well, because `cbind` forces its argument promises inside its own frame.
+
+**`cols` is now `present`, and callers never needed the cached-first order.** Every consumer pairs
+`cols` with the columns of `values` **by name** -- `coef[obs[["cols"]]]` (`score_default.R`),
+`panel[, obs[["cols"]]] <- obs[["values"]]` (`score_Dunedin.R`), `target[obs[["cols"]]]`
+(`score_normalized.R`), `M[design[["used"]], cols, drop = FALSE]` (`score_pack.R`) -- so ordering
+was already free. Returning `present` drops the `setdiff()` and makes the alignment between `cols`
+and `values` positional by construction rather than reconstructed from two pieces.
+
+**The remaining copy is the subset gather, and it stays.** `[` does not recognize an identity or
+contiguous column index and memcpy it, so the subset still costs ~0.3 s at this size. It could be
+skipped entirely when the matrix already *is* the panel in order, handing `block[["DNAm"]]` over
+untouched and letting the caller reindex the coef vector (verified equivalent, max abs diff 0). Not
+done: that condition only holds for a panel-exact, panel-ordered matrix -- true of `sim_DNAm()`,
+false of a real array where `present` is in panel-declaration order and the matrix is wider -- and
+`score_normalized.R` hands `obs[["values"]]` to `betanorm`, where R's copy-on-modify does not
+protect against a third-party in-place mutation at C level. A live reference to the block's matrix
+is not worth that for the test path.
+
+---
+
+## 2026-07-29 -- `scan_missing_cpgs()` compares its two panel arguments, not their intersects
+
+The dead-row gate needs `present_score`, which cost a second `intersect()` over `colnames(DNAm)`
+(0.06-0.08 s on a 320k+ panel) and was then compared to `present_needed` to decide whether
+`row_obs` could be reused. The inputs answer that directly: identical inputs intersect the same
+`colnames(DNAm)` identically, so `identical(score_cpgs, needed_cpgs)` -- true for every request with
+no normalizing clock -- reuses `present_needed` and skips the rescan. Exact, not a heuristic; the
+output comparison stays for the case where the two panels differ but their present sets coincide.
+
+**Not an `anyNA()` short-circuit.** Considered and rejected again (see 2026-07-27): a caller-supplied
+`anyNA()` gate to reach a check-free vectorizable kernel costs a full extra pass (0.12 s over
+1.43 GB, already at bandwidth) to skip one that costs 0.14 s, so it is a net loss before any
+correctness argument -- and it buys exactly nothing for a `sample_scale` clock, whose per-sample
+moments are needed whether or not anything is missing. Given no NA/NaN, `!isfinite(sum)` is already
+a complete per-column detector of Inf and overflow, so any future fast path belongs **inside** the
+kernel with a per-column fallback, not behind a separate gate.
+
+---
+
+## 2026-07-29 -- `row_obs` is the subset's count under the flag too: the complement pass gets its own accumulator
+
+**Reverses "row_obs spans everything" from the fused-kernel entry below.** That entry had
+`sweep_rows_complement()` increment the same `robs[i]` as pass 1, which made `row_obs` a
+**full-width** count whenever `row_moments = TRUE`. The consequence was written into the dead-row
+gate as `!row_moments && identical(present_score, present_needed)`: an off-panel observation must
+not answer "does this sample observe anything on a scoring panel", so under the flag the gate gave
+up its free ride and `row_observed()` re-read the scoring panel.
+
+**Measured cost of that re-read.** On `sim_DNAm("Zhang2019", n = 500)` -- 500 x 319607, the panel
+covering every column, so the complement is **empty** -- `calc_clocks()` called `col_stats()` three
+times: the fused sweep (1.49s), the dead-row re-read (0.75s), and the 1-column coverage read
+(~0s). The re-read returned a value bit-`identical` to `scan[["row_obs"]]`. On a real 450k matrix
+the complement is ~130k columns wide and the re-read is not redundant -- but the guard is a proxy
+for "the complement pass contributed", not for that fact.
+
+**The kernel now separates the two counters.** Pass 2 increments its own `rcomp[i]` and returns it
+as `row_obs_complement`. Welford still needs the running total across both passes, so its `n` is
+`robs[i] + (++rcomp[i])`. Cost: one `IntegerVector(nr)` -- 500 ints against a 160M-cell traversal.
+
+So `row_obs` now means one thing regardless of the flag, `row_moments` drops out of the dead-row
+gate entirely, and the sd divisor becomes the plain sum `row_obs + row_obs_complement` at the one
+site that wants full width. The `identical(present_score, present_needed)` half stays: that is a
+genuinely different panel, not a flag artifact, and a request with a normalizing clock still
+re-reads.
+
+**The field's presence follows `row_moments`, not `split`.** First cut allocated and returned it
+only when pass 2 would actually fire (`split = row_moments && !all_cols`), which forced the R side
+to write `row_obs + (row_obs_complement %||% 0L)` -- a guard against a `NULL` the kernel had just
+gone out of its way to produce. Gating on `row_moments` instead puts it under the same rule as
+`row_mean` / `row_m2` (one presence rule for all three moment outputs, not two), and makes the sum
+unconditional. Zero is not a placeholder here: when the subset is the whole matrix there is no
+complement to sweep, so zero observations *is* the count. `split` is back to deciding one thing --
+whether pass 2 runs.
+
+**Why not the one-line R guard.** `length(needed_idx) == ncol(DNAm)` would have killed the re-read
+in exactly the empty-complement case and nowhere else. Rejected: it leaves `row_obs` meaning two
+different things depending on an argument, which is what forced the conservative guard in the first
+place. Fixing the ambiguity is cheaper than carrying a second predicate that reasons about it.
+
+**Verified.** `row_obs` under the flag is `identical` to `row_obs` without it and to
+`rowSums(is.finite(DNAm[, subset]))`; `row_obs_complement` equals the complement's count and the sum
+equals the old full-width value; `row_mean` / sd agree with `mean`/`sd` over finite entries at
+3.4e-16 / 2.2e-16 relative; `Zhang2019EN` agrees with an independent `t(scale(t(DNAm)))` recompute
+at 5.3e-14 relative (same kind as the 6.4e-14 recorded below); the trace now shows **2** calls, not
+3. `test-value-gates.R` gained the first kernel-level `row_moments = TRUE` coverage there has ever
+been -- three blocks pinning the flag-invariance of `row_obs`, the complement's three states
+(absent without moments, zero with moments but no complement, counted otherwise) including the
+overflow bail, and the moments against an in-test golden. Suite 829 / 0 fail / 0 error / 0 warning
+(818 + 11 new expectations). Parity not run; `R CMD check` not run.
+
+---
+
+## 2026-07-29 -- measured: BMIQ removes 98.5% of the `Horvath1` parity gap, and "absent probes and nothing else" is wrong for that one clock
+
+**Measurement only -- nothing was wired in.** `run_parity_target()` scores every clock with
+`normalize` at its default, which for `Horvath1` (declared scheme `bmiq`, 21368-CpG vendored gold
+standard) means **off**: `bmiq` is in `NORM_SCHEMES` but not `NORM_CONSTITUTIVE`, so it is opt-in.
+Scoring the staged fixtures with `normalize = c(Horvath1 = TRUE)` instead:
+
+| cohort | absent (score / norm) | raw max_abs | raw max_rel | BMIQ max_abs | BMIQ max_rel |
+|---|---|---|---|---|---|
+| `cohort_450K` | 0 / 0 | 7.715 | 2.70e-1 | **0.1138** | **1.93e-3** |
+| `cohort_EPICv1` | 19 / 1062 | 6.525 | 2.00e-1 | 3.959 | 1.71e-1 |
+
+**This refutes half of the 2026-07-25 entry, for exactly one clock.** That entry says the horvath
+residual "tracks the absent-probe count and nothing else: pairs with zero absent probes agree to
+~1e-8 relative." `Horvath1 @ cohort_450K` has **zero** absent probes on both panels and disagrees
+at 2.7e-1 relative unnormalized. The same entry already contained the explanation -- the oracle
+"BMIQ'd the 21k panel for `DNAmAge` only", and `DNAmAge` **is** `Horvath1`. So the absent-probe
+finding holds for the other 14 `horvath_online` clocks (all `scheme = none`) and `Horvath1` is the
+one whose gap is a *normalization* gap. The two sentences were in tension and nobody had run the
+one clock that separates them.
+
+**What is left after BMIQ is an implementation difference, not a bug.** On `cohort_450K`, n = 80:
+mean +0.0236 years, sd 0.0220, median |d| 0.0191, max 0.1138, 8 samples over 0.05, correlation with
+the expected age -0.118 (i.e. none). That is the signature of a beta-mixture EM landing on slightly
+different parameters, not of a wrong panel, a wrong coefficient or a wrong reduction. `betanorm`
+ran clean -- 0 failed samples, 7.9-8.6 s for 21368 x ~80.
+
+**On EPICv1 the absent-probe fill still dominates**, as the 2026-07-25 entry says: 1062 of the
+21368 background probes are missing, so the gold standard BMIQ calibrates against is not the one the
+oracle used, and normalizing only closes 6.525 -> 3.959.
+
+**Why this is not a parity target yet.** It does not reach `PARITY_ABS_TOL` (1e-10) or
+`PARITY_REL_TOL` (1e-10), so admitting it needs a third tolerance regime keyed on "the oracle
+normalized and we normalize differently". `CLAUDE.md` bans exactly that move for this block, and
+that ban is still right for the other 14 clocks -- their residual spans 4.2e-08 to 2.7e-01, where
+any covering bound is vacuous. It may be **wrong for `Horvath1 @ cohort_450K` specifically**: 0.114
+years against ages ~50 is 0.2%, a bound with real refusal power. That is a maintainer decision about
+what parity is allowed to mean, so it stays unmade here.
+
+**Incidental:** this is the only exercise `normalize = c(<id> = TRUE)` has ever had against real
+array data -- the always-on tier only reaches the normalize surface through `DunedinPACE`
+(constitutive) and simulated betas. It behaved exactly as documented.
+
+**Open lead, measured but not chased: `datMiniAnnotation4_fixed.csv` holds two different
+references and we vendored the right one.** Restricting the input to that file's 94394 probes
+changes **nothing** (450K 7.715 / 0.1138, EPICv1 6.525 / 3.959, identical to the panel-union run) --
+both `Horvath1` panels sit entirely inside it and the clock is not `sample_scale`, so the extra
+columns never participate. Its `ProbesMedian` column is **not** our BMIQ gold standard: they differ
+by a median of 0.032 over the shared 21368, with 2932 probes past 0.1. Ours is Horvath's
+`goldstandard2` (right for BMIQ); `ProbesMedian` is a per-probe median over 90512 probes, i.e. a
+candidate for the "unpublished per-probe constant" the 2026-07-25 entry says the oracle fills
+absent probes with. First probe of that: on EPICv1 only **7 of 1062** absent panel probes carry a
+`ProbesMedian` at all, and filling those 7 moves BMIQ parity 3.959 -> 2.205 abs (1.71e-1 -> 8.44e-2
+rel). Suggestive, not settled -- 7 probes should not be worth 1.75 years unless they are
+high-coefficient scoring probes, which was not checked. `_horvath_submit/{cohort}/server_matrix.csv`
+(the matrix actually submitted) is staged and is the direct way to settle it. Nothing was changed on
+the strength of this.
+
+---
+
+## 2026-07-29 -- the row moments ride `col_stats()`, `matrixStats` goes, and an off-panel `Inf` is missing
+
+**One kernel, one missingness rule.** `cohort_sample_moments()` took its per-sample mean/sd from
+`matrixStats::rowMeans2` + `rowSds` -- two traversals of the full matrix, by a second accumulator
+with its own idea of what "missing" means. `col_stats()` now carries a `row_moments` flag
+(Welford, order-independent, so the column-major traversal is fine, dispatched once outside the
+column loop via a `template <bool>` so the non-moments path pays nothing), and the moments come off
+the same sweep as the sums. Measured at 200 x 100k with 10% NA: **0.31 s -> 0.18 s**, and that is a
+`-O0` debug build of the kernel against optimized matrixStats. The Welford add-on costs 0.04 s over
+the plain sweep.
+
+**The behaviour change is `Inf`, and it is the whole point.** `rowSds(na.rm = TRUE)` drops NA/NaN
+but keeps `+/-Inf`, so an infinite cell poisoned the sample's moments and its `sample_scale` score
+became `NaN`. Everywhere else in this package a non-finite value **is** missing -- `col_stats()`
+skips it, `fill_imp_col()` fills it, `check_col_values()` warns that it did. The moments were the
+one reader that disagreed, and only because they were computed by another package. They no longer
+disagree: an off-panel `Inf` is now skipped exactly as an off-panel `NA` is, and the two produce
+identical scores (asserted in `test-value-gates.R`, replacing the test that asserted the poisoning).
+
+**This removes the last way an off-panel *value* can reach a non-finite score**, so the
+`clock_needs_full_panel()` hint in `check_score_values()` was re-pointed at what is actually left:
+a per-sample sd of 0 or `NaN` (a sample observing one value, or the same value everywhere). The
+hint is not dead -- its old sentence was.
+
+**One traversal, two column domains -- which is the kernel's problem, not R's.** The two halves want
+different column sets: `scan_missing_cpgs()` classifies `present_needed`, the panel union, while
+`sample_scale` z-scores over **every** column of the input. Two intermediate designs were wrong in
+opposite directions. A separate `col_stats(DNAm, row_moments = TRUE)` call beside the panel scan
+reads the panel columns twice. Widening the one call to `cols = NULL` and indexing the panel back
+out of the full `stats` reads each column once, but drags the value gates and `overflow_col` out to
+the whole matrix as a side effect, and costs the dead-row gate its free ride on `row_obs`. And
+simply flipping the flag on the existing narrow call -- the obvious move -- is the trap: it takes
+Zhang's moments over 514 of a user's 450k columns, the error the parity note measures at 82%
+relative (`CLAUDE.md`, "the panel the oracle used").
+
+The kernel resolves it instead: pass 1 sweeps the subset for column stats **fused with** the row
+moments, pass 2 sweeps only the complement and only into the row accumulators. Each column of the
+matrix is read exactly once, `stats` / `any_lt0` / `any_gt1` / `any_inf` / `overflow_col` stay the
+panel's alone, and `row_obs` / `row_mean` / `row_m2` span everything. So R keeps
+`col_stats(DNAm, needed_idx, row_moments = ...)` -- the same narrow index it always passed, one
+argument added. `cohort_sample_moments()` is deleted; the moments come back in the scan's own list
+and `mc_cohort()` hands them to `facts`.
+
+**Two things the caller now owes the kernel.** `needed_idx` must be **unique**, or a repeated index
+enters the moments on the subset pass and is then excluded from the complement pass -- it is unique
+by construction (`intersect()` dedupes, `match()` takes first hits), and that is stated at the call
+site because nothing in the shape enforces it. And `row_obs` is a **full-width** count under the
+flag, so the dead-row gate's `identical(present_score, present_needed)` shortcut is skipped whenever
+moments were asked for and `row_observed()` re-reads the scoring panel; that gate is about the
+scoring panel and an off-panel observation must not answer it.
+
+**The gates stay narrow, deliberately.** An off-panel value is read into the moments but never
+range-checked, so it moves a `sample_scale` score silently -- asserted both ways in
+`test-value-gates.R` (50 off-panel columns move every sample's score; an off-panel `-0.5` warns
+about nothing). Widening the gates was available and rejected: it would warn about columns the user
+never asked to score, on a matrix where off-panel is 99.9% of the width.
+
+**Verified:** moments agree with `matrixStats` to 1.0e-15 (mean) / 3.3e-16 (sd) on a 200 x 500
+matrix with 5% NA; `Zhang2019EN` agrees with an independent `t(scale(t(DNAm)))` recompute at
+6.4e-14 (the 4.3e-14 of the entry below, unchanged in kind); `needs_moments` still `FALSE` and
+`sample_moments` still `NULL` for a sequence with no `sample_scale` clock (the sweep does not widen
+either). Suite 818 / 0 fail / 0 error. Parity not run.
+
+**Neither half moves work into the block loop, and the suite now says so.** The two cohort z-scores
+are different shapes and only one is chunk-sensitive. PhysAge's `cohort_zscore` runs **across
+samples**, so it cannot be chunked and still defers -- `scale()` lives in `finalize_PhysAge()`,
+reachable only from `finalize_cross_sample()` after assembly, and folding the guard into
+`zscore_raws()` moved the call *within* that function, not earlier (traced: 0 calls across 4
+`score_cohort()` runs, 2 at finalize, one per arm). Zhang's `sample_scale` is **per sample across
+columns** -- row-wise, so each sample's moments are complete inside its own chunk by construction.
+`test-chunk-invariance.R`'s `MIXED` covered the first shape and not the second: `Zhang2019EN` is now
+in it, with `expect_true(spec$needs_moments)` asserting the request really carries a `sample_scale`
+clock, so the property is a standing gate rather than the manual check recorded in the entry below.
+Whole vs 3 contiguous blocks vs 3 shuffled non-contiguous blocks: max abs diff 0 on all four clocks.
+
+**The flag does not move the classification.** Same `usable_cols`, `partial_na_cols`, `all_na_cols`
+and `col_mean` from `row_moments = TRUE` and `FALSE` on a matrix carrying a partial-NA column, an
+all-NA column, a single-cell NA and 2000 off-panel columns. End to end with those 2000 off-panel
+columns, `Zhang2019EN` matches `t(scale(t(DNAm)))` at 4.3e-14; moments taken over the panel union
+instead would have moved it 0.44 years (1.9% on that matrix, and far worse on a real array, where
+off-panel dwarfs the 514).
+
+**`matrixStats` leaves Imports**, which was not the goal but is the consequence. The moments were
+one of its two callers; the other was `check_zscoreable()` (`R/score_PhysAge.R`), calling `colSds`
+on the `n x n_surrogate` raws to refuse a cohort z-score before `scale()` turned a flat column into
+`NaN`. **The check earns its place** -- `finalize_PhysAge()` does `rowSums(scale(raws))`, so one
+constant surrogate is `NaN` for *every* sample, and the message names the surrogate and its declared
+panel size. What it did not need was a second opinion on the divisor: `scale()` computes the column
+sds itself and attaches them as `scaled:scale`. So `zscore_raws()` scales first and reads the
+attribute, which is both one fewer pass and strictly better coupled -- it checks the number
+`scale()` actually divided by, not a number computed alongside it. **No kernel for this.** The raws
+are a handful of columns; the arithmetic was never the cost, and `scale()` is already doing it.
+
+**The one semantic difference is unreachable.** `colSds(na.rm = FALSE)` returns `NA` for a column
+holding any `NA`, so a *partly* missing raw was caught; `scale()` drops the missing entries and
+returns a finite sd for one. A raw cannot be partly missing: partial NAs are cohort-mean filled and
+absent CpGs are dropped uniformly, so a surrogate's present set is identical for every sample and it
+goes `NaN` for all of them or none. The all-`NaN` column still lands in the same branch, because
+`scale()` scales it by 0 (its `f()` drops every entry, leaving `sqrt(0/1)`), and `sds == 0` is
+already the flat-column test. Verified directly on both shapes.
+
+**Plan reconciliation while in the same bullet.** `id-streaming-plan.md` sec 5.4 / 5.6 still
+described `col_stats()` by its pre-2026-07-27 contract: an `inf_at` field, a fail-fast abort on the
+first `Inf`, and `+/-Inf` as "bad data no fill can repair". The code has said the opposite since
+that entry -- `overflow_col`, and `Inf` as ordinary missing. Code is truth, so the plan was
+corrected to match (it now also documents `row_moments` and the `NULL`-`cols` fast path).
+
+---
+
+## 2026-07-29 -- per-sample moments are a cohort fact, and `DNAm_full` is retired
+
+**The split made a latent cost visible.** `score_Zhang2019()` computed `rowMeans2` + `rowSds` over
+the block on every call, so with both arms in one sequence the block was scanned four times instead
+of two. Measured at 200 x 100k (153 MB): 0.25 s per arm.
+
+**The moments belong in `mc_cohort()`, not in `mc_block()` and not in the branch.** The first
+instinct was a per-block field alongside `partial_cache`, which removes the duplication and nothing
+else. Putting them in `facts` removes the duplication *and* retires the concession in
+`id-streaming-plan.md` sec 5.5: `mc_cohort()` already reads the matrix at full width to classify
+columns, so banking the moments there means the **scoring** pass no longer needs full width for a
+`sample_scale` clock and may narrow columns freely. `spec$needs_moments` is the gate
+(`any(clock_needs_full_panel(sequence))` -- catalog-declared, never a clock list), and
+`block_moments()` narrows the banked vectors to the rows in hand, which is precisely what
+`block_pheno()` already does for the other per-sample fact in `facts`.
+
+**Why not `rowSds(x, center = m)`.** Reusing the computed mean looks like the obvious fusion and is
+a **pessimization**: 0.29 s against 0.13 s at the same size, because supplying a center disables
+matrixStats' fused path. The win is caching across clocks, not fusing the two calls.
+
+**Why not a caller-supplied `moments =` argument.** Same effect, but the values would be
+unverifiable -- moments taken over a different probe set or a different normalization produce
+silently wrong scores, and nothing inside the package could detect it. Banking them internally gets
+the column-narrowing unlock with no new public surface and no way for the two to disagree.
+
+**Why not a lazy per-block cache.** A branch receives `block` by value and cannot write back, so
+memoizing needs a mutable environment (the `miage_fit()` pattern). Eager-and-gated is `NULL` when no
+clock needs it and costs one `vapply` over the sequence.
+
+**`block$DNAm_full` is retired**, reversing the 2026-07-28 entry that kept it. That entry gave one
+reason -- "Zhang2019's `sample_scale` op needs the caller's untouched matrix" -- and that reader is
+now gone, leaving zero. Keeping it would be worse than dead weight: in the narrowed-chunk case it
+was created for, `mc_block()` receives an already-narrow matrix and the field would alias it, so a
+name promising full width would be false exactly where someone would rely on it. `usable_idx` is
+still resolved inside `mc_block()` against whatever arrived, so cohort facts stay matrix-agnostic --
+that half of the 2026-07-28 entry is unchanged.
+
+**Verified:** both arms agree with an independent `t(scale(t(DNAm)))` recompute to 4.3e-14; a
+3-block split and a shuffled non-contiguous 3-block split both reproduce the whole-cohort scores at
+**max abs diff 0**; `needs_moments` is `FALSE` and `sample_moments` `NULL` for a sequence with no
+`sample_scale` clock. Suite unchanged at 807 / 0 fail.
+
+**No guard on a `NULL` `sample_moments` in the branch.** The flag and the branch's need derive from
+the same predicate, so a desync is structurally unreachable, and it would not fail silently --
+`numeric(0)` cannot become an `n x 1` matrix, so `score_matrix()` stops. Same reasoning that
+rejected the `row_observed()` `NULL` guard; `block_cols()` keeps its guard because integer
+subscripting *is* silent.
+
+---
+
+## 2026-07-29 -- Zhang2019 splits in two, and only the BLUP arm goes external
+
+Upstream (`methylCIPHER-meta` c5243a6) retired clock id `Zhang2019` and replaced it with two members
+of the unchanged group: `Zhang2019EN` (Elastic Net, 514 CpGs, intercept 65.79295) and
+`Zhang2019BLUP` (BLUP, 319607 CpGs, intercept 91.15396). Identical contract on both --
+`cpg_coefficient` / `linear`, recipe `sample_scale -> linear`, `imputation.ref: null` +
+`policy: omit`, `author_code` fixtures for both registry cohorts. The EN tensor is byte-identical to
+the pre-rename artifact; only the id moved. Neither declares `former_id` or `kind`, so there is no
+upstream alias and the package mints none.
+
+**Bundling both was correct and unaffordable.** A plain `sync()` with sync.R unchanged produced a
+working, right-scoring catalog -- both arms bundled, both routing through the existing
+`score_Zhang2019()` -- at a cost of **0.80 MB -> 4.41 MB** of `R/sysdata.rda`, a 5.5x increase in
+data loaded at every namespace load, for one clock, and it forecloses the 5 MB CRAN path.
+`PCBrainAge` (357852 CpGs) is the precedent: same class of object, already external. So this is a
+size decision, not a correctness fix -- which is why the risk it introduces (below) is the part
+that mattered.
+
+**Why per-clock and not per-group.** `EXTERNAL_GROUPS` is group-level, so the one-line move -- add
+`"Zhang2019"` to it -- drags the 514-CpG EN arm into the pack too. The per-clock cost is one-time
+and maintainer-side; the group-level costs are permanent:
+
+- EN leaves the always-on smoke tier (`bundled_smoke_clocks()` filters on `clock_is_external()`),
+  and it is the only `sample_scale` clock that could be there, so the branch would have **no**
+  default-configuration coverage at all.
+- The off-panel-NaN test in `test-value-gates.R` breaks rather than skips: it calls `calc_clocks()`
+  with no `ext_data`, and the consent gate refuses non-interactively. The assertion is
+  `sample_scale`-specific and cannot be re-homed.
+- EN's parity tolerance drops from `core` (1e-10) to `packs` (1e-6) -- a bound measured against
+  PCB2M at ~3.3e6 (see 2026-07-25), applied to a clock producing ages.
+
+So `external_group` became a per-clock field (it always *was* per-clock in the shipped catalog; only
+its computation was group-level), `split_group_ids()` puts a mixed group in **both** buckets, and
+`build_group_bundles(external =)` partitions the group's tensors by declaring member. EN's entire
+change is its name.
+
+**The bug that does not announce itself.** `score_type()`'s external branch dispatches on
+`(weights_format, computation_type)` and never looks at the recipe. BLUP shares PCBrainAge's routing
+pair, so it would have returned `"pack_linear"` and been scored by `score_linear_pack()` -- a plain
+weighted sum with no `sample_scale`, i.e. the exact bug the upstream group meta warns about in
+methylCIPHER's `calcZhang2019`. It fails *quietly*: `pack_design()` calls `clock_impute_ref()`,
+whose external branch reads `pack[["impute"]]`, and with `imputation.ref: null` that is `numeric(0)`,
+so `pack_linpred()` indexes it into NA/NaN scores rather than stopping. `SystemsAge` had already met
+this (its `center_scale` escapes through a group hook in the same branch); `Zhang2019` is the second,
+and gets the same hook. Verified directly -- `score_type("Zhang2019BLUP") == "Zhang2019"` -- because
+a score check cannot distinguish this from ordinary missingness.
+
+**The generalization is that two predicates had been silently interchangeable.**
+`clock_is_external()` says where the weights live; `is_pack_scored()` says how the score is
+computed. Every external clock so far was also batched, so nothing distinguished them. Three call
+sites were on the wrong one and are now split by what they actually ask:
+`pack_groups_needed()` -> externality (a pack is needed because the weights are in one),
+`parity_block()`'s `packs` tolerance -> scoring path (the 1e-6 relaxation is a statement about
+values at ~3e6; BLUP produces ages ~1e2, so the units argument does not transfer, and per `CLAUDE.md`
+there is no other reason to move a tolerance). `clock_coefs()` gained a `packs` argument and an
+external branch (`pack_tensor()`), keyed by the same repo-relative `coef_path` the bundled arm reads
+out of `mc_bundles` -- external clocks had always reached coefficients through a family orchestrator,
+so the gap had never been reachable.
+
+**The pack encoding is `raw_tensors`, not `canonical_matrices`.** One member, one tensor: there is no
+shared row order for `pack_canonical_cpgs()` to reconcile, and `group_impute_ref()` would stop with
+"found 0" because both arms declare `imputation.ref: null`. So `encode_zhang2019()` sets `cpgs` from
+the resolved scoring panel and leaves the coefficient vector in `bundle[["tensors"]]`;
+`stable_external_payload()` already carried both fields. No `EXTERNAL_ENCODING_VERSION` bump -- a new
+group with its own encoder leaves the other three payloads untouched, and they rebuilt to identical
+`payload_hash`es under their existing filenames (verified).
+
+**The 1212 `ch.` probes survive.** BLUP's tensor is 318395 `cg` + 1212 Illumina `ch.` (CHG/CHH
+context) rows, and all 1212 are in the resolved panel; `assert_declared_n_cpgs()` passes at 319607.
+The package has no `^cg` filter -- the only `startsWith(..., "cg")` uses are the transposed-input
+heuristics in `validate_inputs.R`, which test `any()` and never drop a probe.
+
+**One test was rewritten rather than updated.** `test-mc_data.R` asserted
+`mc_external_groups()` setequal `c("SystemsAge", "PCClocks", "PCBrainAge")` -- a hardcoded plumbing
+shape that breaks on every sync that adds a pack, which is what happened. It now asserts the
+registry equals the groups the *catalog* marks external. Those two sysdata objects are built
+separately, so the test still fails a half-applied split, and it no longer rots.
+
+**Not carried over:** the plan's optional pack-gated extension of the off-panel-NaN assertion to
+`Zhang2019BLUP`. The behaviour it pins is a `sample_scale` property both arms share and EN pins it
+always-on; a skip-gated duplicate buys nothing.
+
+**Fixture caveat, for whoever reads a parity report.** GSE40279 (`cohort_450K`) is one of Zhang
+2019's own 14 training cohorts, so BLUP reproduces those 80 ages very closely. A fixture is a
+faithfulness contract, not an accuracy claim -- do not present that agreement as held-out
+performance.
+
+**Left open:** whether `EXTERNAL_GROUPS` should collapse into `EXTERNAL_CLOCKS` entirely now that
+the split is clock-aware. The three existing packs are wholly-external groups, so both spellings
+agree today; keeping the group list is the smaller change and defers the question.
+
+---
+
+## 2026-07-29 -- pure composites report no coverage at all
+
+**A clock that reads no betas was reporting coverage over a panel it never touches.**
+`DNAmFitAge_{Sex}` declares 172 / 190 CpGs, but `score_DNAmFitAge()` only mixes four component
+*scores*; one of those components is `GrimAgeV1`, whose 1030 CpGs are not in that panel (overlap:
+1). Measured: delete 60% of the GrimAge-only panel and `DNAmFitAge` still reported `coverage = 1.0`
+on every sample and `score_dropped = 0`, while `GrimAgeV1` dropped 613 CpGs under its `omit`
+policy. The row gate warned about the 8 surrogates and said nothing about FitAge. A user reading
+the FitAge row got a clean bill on a score built from a wrecked input.
+
+**Why not widen the panel instead.** The obvious fix -- make the composite's declared panel the
+transitive union (1201 / 1212) -- is an upstream `probe_sets` / `n_cpgs` change, and it collides
+with `policy` being a single field: the union spans `vendor_mean` (fitness components) and `omit`
+(GrimAge side), so `score_used` / `score_dropped` would need computing per source and the record's
+one `policy` value becomes a lie in the other direction. Rejected: it reconciles two declarations
+where deleting one is available.
+
+**The rule is about reading betas, not about being a composite.** "Composite" does not predict
+which records are honest -- `GrimAgeV1` is a *pure* composite (all 8 cox operands are `inputs`) and
+its 1030 panel happens to equal its dependencies' union exactly, while `GrimAgeV2` is a hybrid that
+recomputes 8 surrogates from its own betas (`internal` roles) and genuinely owns 830 CpGs no
+dependency declares. The predicate that separates them is whether the branch ever reads a beta.
+`clock_reads_cpgs()` switches on `score_type()`, so it is a fact about the closed branch set and
+needs no clock list.
+
+**It is information-preserving, and that is forced, not lucky.** A clock that reads no betas can
+only be fed through its dependencies, so its declared panel is necessarily a subset of the
+CpG-reading descendants' union. Verified over the catalog: `panel \ leaf-closure` is empty for all
+10 selected clocks (`GrimAgeV1` at equality, the aliases trivially at panel = 0). Nothing that was
+reported before is unreachable now; it moved down one level.
+
+**The aliases go too, and that reverses 2026-07-24.** The earlier split kept a *stitched*
+per-sample miss on a sex-routed alias, on the grounds that each row was scored by exactly one
+member so the per-sample quantity routes. True, but it made the alias the one clock reporting
+numbers it did not count, and it forced `alias_sample_rows()` + `stitch_routed_sample_miss()` to
+exist solely to launder member counts into an alias column. Both are deleted. The cost is real and
+was accepted deliberately: `samples_coverage()` no longer has a row for `DNAmGrip_wAge`, and a
+caller wanting per-sample coverage reads `DNAmGrip_wAge_Female` / `_Male` instead -- with `NA` on
+the samples that sex did not score, which is the honest shape.
+
+**One span, three views.** `per_clock` spanned the compute sequence while `sample_miss` spanned the
+returned columns, so dropping the alias column would have discarded the members' per-sample counts
+at `construct_mc_result()` -- the components would have stopped reporting on the sample axis, which
+is the opposite of the point. `per_clock`, `sample_miss` and `samples_coverage()` now span exactly
+the clocks with a record: routing targets in, pure composites out even when returned.
+
+**And then the format pays for the deletion.** `samples_coverage()` is long, so an NA-coverage row
+can just go rather than be explained. NA has exactly one source -- `mask_routed_rows()` on a row a
+member's sex did not score; a non-routed clock has none, and `n_observed` goes NA with it -- so
+dropping those rows is not a heuristic, it is the same invariant one level down: a member emitting
+a row for a sample it never scored is reporting coverage for a sample it is not true of, which is
+what we just deleted the alias stitch for. Measured on 6 samples of `DNAmGrip_wAge`: 12 rows -> 5.
+What survives is one row per sample, under the model that scored it, against that model's own
+panel -- the old stitch's information, without the stitch, and keyed by the clock that actually
+counted rather than the alias that did not. A sample no model scored (unknown sex) drops out
+entirely; that is the same fact its `NA` score already carries, and the frame was never a complete
+sample x clock grid anyway (a pure composite contributes no rows at all).
+
+**Not changed: the pre-score gate.** `check_coverage()` still gates `GrimAgeV1` and
+`DNAmFitAge_{Sex}` on their declared panels via `cpg_list`. That is gating on the same fiction, but
+it fails *conservatively* -- it can stop on less coverage than the clock really has, never more --
+and relaxing a `stop()` gate is not something to fold into a reporting change. Left for a separate
+decision.
+
+## 2026-07-29 -- one named index instead of two aligned vectors; `miss_vec()` stops instead of NULL
+
+`dev/missing_data_audit.md` F7, both halves. Neither moves a number.
+
+**The alignment invariant had exactly one reader left.** `mc_block()` carried `usable` (names) and
+`usable_idx` (positions) as two vectors that had to stay index-aligned, and every lookup spelled
+that out: `usable_idx[match(cols, usable)]`. F6 removed the two branches that read
+`block[["usable"]]` directly, leaving `block_cols()` as its only consumer -- so naming the index
+collapses the pair into one object and the lookup into `usable_idx[cols]`. `block[["usable"]]` is
+gone from the block. The `anyNA()` guard is untouched and still catches a CpG outside the set;
+`block_cols()` returns `unname(idx)`, because names on a subscript are harmless in both consumers
+(matrix `[` and the `col_stats` kernel ignore them) but the function's contract is positions.
+
+**The other half was a defensive callee facing a trusting caller.** `miss_vec()` returned `NULL`
+when a clock had no column in the panel matrix, and `clock_sample_rows()` passed it straight into
+`panel_ratio()`, where `present - NULL` is `numeric(0)` and the `data.frame()` call would fail on
+differing row counts. Both sides were wrong about the same fact -- **the column is guaranteed**.
+`construct_mc_result()` builds `sample_miss$score` over `output_ids`, which *is*
+`provenance$clocks`, which is exactly what `samples_coverage()` loops over; and `sample_miss$norm`
+over the clocks whose record says `normalizes`, which is exactly the condition
+`clock_sample_rows()` already guards its norm branch with. So `miss_vec()` now `stop()`s in
+package-bug wording, and the norm read moved inside the `normalizes` guard where its precondition
+is established. Neither invariant is new -- the `NULL` was pretending they did not hold, and a
+silent `numeric(0)` was the price.
+
+Walked all three `samples_coverage()` shapes by hand: DunedinPACE (score **and** norm rows,
+19999/20000 on the holed sample), a sex-routed alias (per-sex denominators 52 and 64 from the
+member that scored each row), and a plain clock. `devtools::test()`: 791 pass, 0 fail, 0 error,
+0 warning, 248 skip. Parity was not run and `R CMD check` was not run.
+
+## 2026-07-29 -- one derivation of "present": the resolved panel, never the block's usable set
+
+`dev/missing_data_audit.md` F6 found three derivations of a clock's present CpGs: the declared one
+(`resolve_cpgs()` -> `cpgs[["score_present"]]`, which coverage counts), plus
+`intersect(names(coef), block[["usable"]])` in `score_GrimAge()` and
+`match(pack[["cpgs"]], block[["usable"]], 0L) > 0L` in `pack_design()`. They agreed on today's
+catalog; the audit's point was that nothing made them agree.
+
+**They were never equally risky, and the two fixes differ.** `block[["usable"]]` is the union of
+*every* requested panel, so it is exactly the set that hides a stray coefficient: a CpG outside the
+clock's panel but inside someone else's is "usable", gets scored, and is counted by nobody.
+
+- **The pack one was pure duplication.** For an external clock the declared panel *is*
+  `pack[["cpgs"]]` (`clock_scoring_cpgs()` returns it), so `pack_design()` was re-running
+  `resolve_cpgs()`'s own expression on `resolve_cpgs()`'s own input. Deleted: it takes the resolved
+  `cpgs` and reads `score_present` / `score_absent`. `pack` was the only other thing it needed, so
+  that argument went too (`pack_design(id, cpgs, block)`), and `score_pack_group()` now takes the
+  group's shared panel -- the batched scorers already assumed one panel per group by using
+  `ids[[1]]`'s design for all of them. Verified on a 5-sample cohort with 50 CpGs fully absent and
+  a partial hole: the resolved split is `identical()` to the old inline one for every external
+  clock, across all three packs.
+- **The GrimAge one was the real gap, and it was already solved elsewhere.** `physage_raws()` has
+  always written `intersect(names(coef), cpgs[["score_present"]])`; GrimAge was the outlier. Both
+  now call `component_present()`, which does that intersection *and* `stop()`s when the component
+  names a CpG the clock's panel does not declare. GrimAgeV2 is the only clock that reaches the
+  branch (V1's stack is all `inputs` + `covariates`, scored as separate clocks); its 8 surrogates
+  carry 42-211 coefficients and **0** outside the declared panel, so the resolved `present` is
+  identical to the old one and no score moves.
+
+**A stop, not a silent narrowing.** Intersecting with the panel and moving on would have been
+enough to keep coverage honest -- the stray CpG would simply land in the absent set and be
+vendor-filled or dropped. That is the wrong trade: it converts an upstream declaration bug into a
+plausible number, which is the failure mode this audit keeps finding. An accessor that cannot find
+its declaration fails; so does a component that escapes its panel.
+
+**No census test.** The guard runs inside scoring, and the always-on smoke tier scores every clock
+in the callable pool, so the shipped catalog is checked on every run without a test naming GrimAgeV2
+or PhysAge. The unit test in `test-score-grimage.R` pins the guard itself on a hand-built panel.
+`devtools::test()`: 791 pass, 0 fail, 0 error, 0 warning, 248 skip -- `test-score-external.R` runs
+in full here (packs are staged), including both vendor-fill-the-absent-CpGs tests, which are the
+ones that exercise the rewritten split. Parity was not run and `R CMD check` was not run.
+
+## 2026-07-29 -- a coverage record counts CpGs; the sample axis lives in `sample_miss`
+
+`dev/missing_data_audit.md` F5 read this as a units mismatch: `score_imputed_partial` was
+`sum(score_miss)` -- filled *cells*, summed over samples -- sitting in a run of CpG counts
+(`score_needed` / `score_present` / `score_used` / `score_imputed_full` / `score_dropped`), and the
+audit proposed carrying the unit in the name (`score_partial_cells`).
+
+**Rejected: renaming. The number is the defect, not its label** (maintainer). A cell sum collapses
+both axes at once and is recoverable from neither. Measured on Horvath1 with 3 panel CpGs holed in
+9 of 10 samples: the row read `score_imputed_partial = 27` beside `score_present = 353`, which any
+reader takes for CpGs; at 200 samples the same 3 holes read 600 -- larger than the panel the column
+is counted over, which no CpG count can be. Only a probe-wise or a sample-wise statistic says
+anything.
+
+**Taken: the record keeps the probe axis, `sample_miss` keeps the sample axis.**
+`score_imputed_partial` / `norm_imputed_partial` are now the number of the panel's present CpGs
+that were cohort-mean filled for any sample -- `length(cached_cols(present, partial_cache))`, the
+same set `panel_sample_miss()` already counts over, so it costs nothing and the two axes cannot
+disagree. The same run now reports 3. No rename: in CpGs the existing name is true.
+
+**`coverage_record()` no longer takes the per-sample vectors at all.** It takes two integers, so it
+*cannot* re-collapse the sample axis into a record field. That also collapsed the loops in
+`compute_coverage()` from three to two -- the record no longer depends on the masked `score_miss`,
+so it is written in the same pass that builds it, leaving only the alias stitch behind (which does
+depend on that pass).
+
+**Chunking gets simpler, not harder.** `partial_fill` is a cohort fact from pass 1, so the filled
+column set is identical in every block: assembly goes from "sum `score_imputed_partial` across
+blocks" to "take it", and `per_clock` is now block-invariant *in every field*. `dev/id-streaming-plan.md`
+sec 5.4 / sec 10 updated; `test-chunk-invariance.R` asserts per-block equality where it summed.
+
+**Routed members are deliberately not row-restricted** (maintainer). The probe count asks whether a
+column was filled in this cohort, and the fill value is itself a cohort mean over all rows, so it is
+a statement about columns and not about the samples a member scored. A shared CpG holed only on male
+rows would therefore count for the female member too; that is not the invariant "coverage is never
+reported for a sample it is not true of", which is about per-sample quantities and is still enforced
+where they live. Restricting it would cost a second row-subset sweep per member to sharpen a number
+nobody reads per member.
+
+**`mask_routed_rows()` stays, and is now unobservable.** With the record off the per-sample vectors,
+the mask only shapes `score_miss` -- whose member entries never become columns of
+`$coverage$sample_miss` and are read only by the alias stitch, which by yesterday's measurement
+never touches the masked rows. It is one line, it keeps the internal vector honest for the next
+reader, and deleting it would re-open the F4 hazard the moment anything summed those vectors again.
+`test-score-fitage.R`'s guard (female member 1, male 0) still passes -- now because the holed CpG is
+on the female panel only, rather than because a male row was masked out.
+
+**Two test expectations moved, both of them the confusion in assertion form.** "one CpG filled in
+three samples" went 3 -> 1, and "2 CpGs filled for sample 1, 1 for sample 4" went 3 -> 2 with its
+per-sample vector `c(2, 0, 0, 1, 0, 0)` unchanged beside it. `devtools::test()`: 789 pass, 0 fail,
+0 error, 0 warning, 248 skip. Parity was not run and `R CMD check` was not run.
+
+## 2026-07-29 -- routed members are masked where they are counted, not two loops later
+
+`dev/missing_data_audit.md` F4 claimed four order-dependent loops in `compute_coverage()`. Walked
+it on `DNAmGrip_wAge` (6 samples, rows 1-3 female; member panels are **disjoint** -- 52 female
+CpGs, 64 male, zero shared) with one partial hole per member panel, each on one female and one
+male row. **One of the two claimed hazards is not one.**
+
+**Not a hazard: stitch vs blank.** The audit said moving the blanking pass above the stitch makes
+every alias all-`NA`. Measured: the alias comes out identical. It cannot do otherwise -- blanking
+erases the member on `!rows[[sex]]` and the stitch reads it on `rows[[sex]]`, the same
+`sex_rows()` masks, so the blanked rows are exactly the rows the stitch does not read. Those two
+passes commute.
+
+**Real: blank vs records.** `score_imputed_partial` is `sum(score_miss, na.rm = TRUE)`, and loop 1
+counted per panel over the whole block, before anyone consults sex. Built before the blanking pass
+the female member scores 2 instead of 1 -- the second is a male row holed on a female-panel CpG
+that no model read for that sample. Small, plausible, right units, no error: a coverage figure
+reported for a sample it is not true of.
+
+**Fixed by deleting the constraint rather than commenting it.** `mask_routed_rows()` applies the
+mask in loop 1, at the point the count is written, so no unmasked member vector ever exists for a
+later pass to read. The blanking pass is gone (4 loops -> 3) and the remaining order is free. The
+stitch now reads masked members, which is safe precisely because of the commutation above -- that
+measurement is what licenses this shape, not an assumption. `norm_miss` gets the same mask for
+symmetry; no routed member normalizes today, so nothing observable changed.
+
+**No new test.** `test-score-fitage.R` "per-sample QC routes with the score; panel counts do not"
+already holes a female-panel CpG on one female and one male row and pins the female member at 1 --
+it is the regression guard for the hazard, and it passes unchanged. Member-level masking is not
+otherwise observable from a record: members are never columns of `sample_miss`.
+
+## 2026-07-29 -- the norm half of `sample_miss` is assigned with `[`, on purpose
+
+`dev/missing_data_audit.md` F3. `compute_coverage()` pre-allocates `norm_miss` named by the whole
+compute sequence, then filled it with `norm_miss[[id]] <- norm_part_miss[[j]]`. `[[<-` with a
+`NULL` RHS **deletes the element**, and `norm_part_miss` is `NULL` for every clock with no norm
+panel -- so the surviving names were the ones the loop never touched, i.e. exactly the sex-routed
+aliases. Measured before the fix on a 30-clock `DNAmFitAge` sequence: 7 names, all `NULL`, all
+aliases. The list was keyed by "is an alias" rather than by clock, which is the opposite of what
+the field is for. After: 30 entries, keyed by the sequence, in sequence order.
+
+**So one line uses `[`, in a package whose rule is "always `[[`".** That rule is about `$` vs
+`[[` (partial matching), and it does not reach this: `x[i] <- list(NULL)` is the only way to
+*store* a `NULL` in a list. `norm_miss[id] <- norm_part_miss[j]` keeps the element; the `[[` form
+silently removes it. Do not "restore consistency" here -- it is the bug. The `score_miss[[id]]`
+assignment on the line above stays `[[` because that RHS is never `NULL`.
+
+Nothing observable changed today (`miss_matrix()` and `check_row_coverage()` both read by name,
+and `[[` on an absent name in a list returns `NULL`), which is why it survived: it was a shape
+that only broke the first time someone iterated `norm` positionally or zipped it against `score`.
+
+## 2026-07-29 -- a non-finite *score* warns, instead of widening the column scan
+
+`dev/missing_data_audit.md` F1: `check_col_values()` only ever sees `present_needed` (the panel
+union), and `score_Zhang2019()` takes per-sample moments over **every** column of the input. A
+single `Inf` in an out-of-panel column therefore produced a `NaN` score with no warning of any
+kind and an unchanged `clocks_coverage()`.
+
+**Rejected: scanning the full matrix for the full-panel clocks.** `clock_needs_full_panel()` names
+that set, so the gate had a declaration to key off -- but the fix costs a second `col_stats()`
+sweep over the whole array (the point of the current one is that it strides only the columns some
+panel declares), and it still would not be complete: it gates the *input* for one op's benefit,
+while the thing that actually went wrong is one number. The blast radius of a bad cell here is a
+score, not a panel.
+
+**Taken: `check_score_values()` (`R/missingness.R`), called on the output columns after
+`finalize_cross_sample()`,** beside the existing post-score `check_row_coverage()` warning. It
+warns per clock with a sample count, and names the full-panel clocks as the likely route when one
+of them is implicated. This is a *value* gate, so it lives with the other value gates and keeps
+their cli licence; it is a warning, never a stop, exactly like the Inf gate it backstops.
+
+**`NA` is not "non-finite" here.** `is.na(NaN)` is `TRUE` in R, so the predicate is
+`is.nan(v) | is.infinite(v)`. An `NA` score is a *declared* outcome -- unknown-sex rows on a
+sex-routed alias, a sample a branch declined to fit, a missing covariate -- and warning on it
+would fire on every ordinary run. Only `NaN` / `Inf` mean arithmetic went wrong.
+
+**Scope: output columns, not the whole compute sequence.** A dependency that goes `NaN`
+propagates into the column that consumes it, so the outputs are sufficient, and they are the only
+values the caller can act on. (`check_row_coverage()` walks every computed clock instead, because
+coverage is per panel and a member alias has no column of its own.)
+
+F2 in the same audit -- `Zhang2019` filling a partial NA for its numerator while `na.rm` drops the
+same cell from its moments -- was **not** touched, but it is no longer a judgement call. The
+author's `pred.R` (staged under `papers/PMID_31443728_.../code/original/`) runs `addna()` (per-probe
+mean fill) over the **whole input matrix** and only then `apply(., 1, scale)`, so the fill
+participates in the moments and there is no `na.rm` anywhere in it. Measured against a literal
+transcription of that script: on a complete matrix we agree exactly; with 3 NA cells on the panel
+and 2 off-panel over 5 samples the gaps are -5.0e-2 and +3.2e-3 years. Feeding our engine the
+matrix pre-filled the author's way reproduces the script to 2.8e-14, so the *only* divergence is
+that our moments do not see the fill (and never fill off-panel columns at all, since the partial
+cache is panel-scoped).
+
+**Matching it was then rejected (maintainer, same day).** Mean-filling a column and then taking a
+moment over it biases the moment -- every filled cell pulls the sample's sd toward zero and its
+mean toward the cohort, and it does so in proportion to how much is missing, so the "faithful"
+form propagates the author's bias into every sample that has a hole. It also costs a filled copy
+of the entire input array for one clock. `na.rm` on the raw matrix is the better estimator of the
+same quantity; the divergence is a bug in the oracle, not in us. Do not re-open this as a parity
+question either -- neither staged cohort has an NA on that panel, so nothing is measurable there.
+
+Also here: `coverage_bullets()` -> `capped_bullets()` in `R/utils.R` next to `bullets()`, since the
+new gate is not a coverage gate and the helper is just "cap a bullet list at 10".
+
 ## 2026-07-29 -- dedup the linear scorers, but DunedinPACE keeps its own matmul
 
 A housekeeping audit (`dev/housekeeping.md`, local-only) listed hoists across the scoring paths.

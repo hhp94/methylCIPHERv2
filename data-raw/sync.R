@@ -46,6 +46,9 @@ META_REMOTE <- "https://github.com/hhp94/methylCIPHER-meta.git"
 # external families as release assets, rest in sysdata
 EXTERNAL_GROUPS <- c("SystemsAge", "PCClocks", "PCBrainAge")
 
+# single external clocks inside an otherwise-bundled group (group in both buckets)
+EXTERNAL_CLOCKS <- c("Zhang2019BLUP")
+
 # bump when pack layout changes (new payload_hash).
 EXTERNAL_ENCODING_VERSION <- 3L
 
@@ -657,7 +660,10 @@ build_catalog <- function(repo_path, manifest) {
     entry[["covariates_required"]] <- extract_covariates(meta)
     entry[["clock_inputs"]] <- extract_clock_inputs(meta)
     entry[["cross_sample_at"]] <- first_cross_sample_step(meta)
-    entry[["external_group"]] <- gid %in% EXTERNAL_GROUPS
+    # the field is per-clock; a group may be partly bundled and partly external
+    entry[["external_group"]] <- cid %in%
+      EXTERNAL_CLOCKS ||
+      gid %in% EXTERNAL_GROUPS
     entry[["fixtures"]] <- prune_fixtures(meta[["fixtures"]])
     entry[["meta_path"]] <- rel_from_repo(mp, repo_path)
     entry[["bundle_hash"]] <- released[[cid]][["bundle_hash"]]
@@ -1028,14 +1034,39 @@ attach_sex_routed_aliases <- function(catalog) {
 
 # materialize
 
-# per-group tensor payload for the given group_ids.
-build_group_bundles <- function(repo_path, catalog, group_ids) {
+# group ids on one side of the bundled/external split (a group may be on both)
+split_group_ids <- function(catalog, external) {
+  gids <- vapply(
+    catalog[["clocks"]],
+    function(e) {
+      if (isTRUE(e[["external_group"]]) == external) {
+        as.character(e[["group_id"]])
+      } else {
+        NA_character_
+      }
+    },
+    character(1L)
+  )
+  sort(unique(gids[!is.na(gids)]))
+}
+
+# per-group tensor payload for the given group_ids, restricted to the members on
+# one side of the split -- so a mixed group ships some tensors and packs others.
+build_group_bundles <- function(
+  repo_path,
+  catalog,
+  group_ids,
+  external = FALSE
+) {
   bundles <- list()
   for (gid in group_ids) {
     member_ids <- names(catalog[["clocks"]])[
       vapply(
         catalog[["clocks"]],
-        function(c) identical(c[["group_id"]], gid),
+        function(c) {
+          identical(c[["group_id"]], gid) &&
+            isTRUE(c[["external_group"]]) == external
+        },
         logical(1L)
       )
     ]
@@ -1166,6 +1197,23 @@ add_scoring_probe_set <- function(entry, cpgs) {
     entry[["probe_sets"]] %||% list(),
     list(list(name = "scoring_derived", role = "scoring", cpgs = unique(cpgs)))
   )
+}
+
+# the resolved scoring panel of one clock (post resolve_group_scoring_probe_sets)
+resolved_scoring_cpgs <- function(entry, cid) {
+  hits <- Filter(
+    function(ps) identical(as.character(ps[["role"]]), "scoring"),
+    entry[["probe_sets"]] %||% list()
+  )
+  if (length(hits) != 1L) {
+    stop(
+      cid,
+      ": expected 1 scoring probe_set, found ",
+      length(hits),
+      call. = FALSE
+    )
+  }
+  as.character(hits[[1L]][["cpgs"]])
 }
 
 # the clock's own cpg-keyed tensors (coef file or row_key==cpg components)
@@ -1639,6 +1687,31 @@ encode_pcbrainage <- function(bundle, catalog) {
   bundle
 }
 
+# zhang2019: the BLUP arm alone. One dense coefficient vector, so there is no
+# shared row order to canonicalize; policy is omit, so there is no vendored ref.
+encode_zhang2019 <- function(bundle, catalog) {
+  gid <- "Zhang2019"
+  ids <- as.character(bundle[["clocks"]] %||% character())
+  if (length(ids) != 1L) {
+    stop(
+      gid,
+      ": expected 1 external member, found ",
+      length(ids),
+      call. = FALSE
+    )
+  }
+  entry <- catalog[["clocks"]][[ids[[1L]]]]
+  rel <- entry[["coef_path"]]
+  if (is.null(rel) || is.null(bundle[["tensors"]][[rel]])) {
+    stop(gid, ": missing coefficient tensor for ", ids[[1L]], call. = FALSE)
+  }
+
+  bundle[["cpgs"]] <- resolved_scoring_cpgs(entry, ids[[1L]])
+  # the coefficients stay a raw tensor, keyed by the coef_path clock_coefs() reads
+  bundle[["encoding"]] <- "raw_tensors"
+  bundle
+}
+
 encode_external_asset <- function(bundle, catalog) {
   gid <- bundle[["group_id"]] %||% NA_character_
   if (identical(gid, "PCClocks")) {
@@ -1647,6 +1720,8 @@ encode_external_asset <- function(bundle, catalog) {
     encode_systemsage(bundle, catalog)
   } else if (identical(gid, "PCBrainAge")) {
     encode_pcbrainage(bundle, catalog)
+  } else if (identical(gid, "Zhang2019")) {
+    encode_zhang2019(bundle, catalog)
   } else {
     stop("No external encoding for group_id=", gid, call. = FALSE)
   }
@@ -1940,7 +2015,7 @@ build_sysdata <- function(
     n_clocks = catalog[["n_clocks"]],
     n_ship_groups = length(ship_groups),
     ship_groups = ship_groups,
-    external_groups = EXTERNAL_GROUPS,
+    external_groups = split_group_ids(catalog, TRUE),
     external_assets = ext_reg
   )
 
@@ -2240,7 +2315,12 @@ build_external_assets <- function(repo_path, catalog, external_groups) {
 
   for (gid in external_groups) {
     message("sync: building external asset for ", gid, "...")
-    raw_bundle <- build_group_bundles(repo_path, catalog, gid)[[gid]]
+    raw_bundle <- build_group_bundles(
+      repo_path,
+      catalog,
+      gid,
+      external = TRUE
+    )[[gid]]
     # resolve probe sets before encoding, adopt catalog so pack and sysdata match
     catalog <- resolve_group_scoring_probe_sets(
       catalog,
@@ -2314,15 +2394,20 @@ read_lockfile <- function() {
   tryCatch(readRDS(LOCKFILE), error = function(e) NULL)
 }
 
-# per-clock bundle_hash for the external groups, the pack staleness key.
-external_bundle_hashes <- function(catalog, external_groups) {
-  ids <- names(catalog[["clocks"]])[
+# clock ids whose weights live in a pack
+external_clock_ids <- function(catalog) {
+  names(catalog[["clocks"]])[
     vapply(
       catalog[["clocks"]],
-      function(e) as.character(e[["group_id"]] %||% "") %in% external_groups,
+      function(e) isTRUE(e[["external_group"]]),
       logical(1L)
     )
   ]
+}
+
+# per-clock bundle_hash for the external clocks, the pack staleness key.
+external_bundle_hashes <- function(catalog) {
+  ids <- external_clock_ids(catalog)
   hashes <- vapply(
     catalog[["clocks"]][ids],
     function(e) as.character(e[["bundle_hash"]] %||% NA_character_),
@@ -2379,13 +2464,9 @@ sync <- function(source_git_sha = NULL, upload = FALSE, force = FALSE) {
   catalog <- build_catalog(src$path, read_manifest(src$path))
   catalog[["source_git_sha"]] <- current_sha
 
-  gids <- unique(vapply(
-    catalog[["clocks"]],
-    function(c) c[["group_id"]],
-    character(1L)
-  ))
-  external <- sort(intersect(gids, EXTERNAL_GROUPS))
-  ship <- sort(setdiff(gids, EXTERNAL_GROUPS))
+  # a group with both bundled and external members is in both buckets
+  external <- split_group_ids(catalog, TRUE)
+  ship <- split_group_ids(catalog, FALSE)
   message(
     "sync: ",
     catalog[["n_clocks"]],
@@ -2395,7 +2476,7 @@ sync <- function(source_git_sha = NULL, upload = FALSE, force = FALSE) {
     paste(external, collapse = ", ")
   )
 
-  ext_hashes <- external_bundle_hashes(catalog, external)
+  ext_hashes <- external_bundle_hashes(catalog)
   code_fp <- sync_code_fingerprint()
   lock <- if (isTRUE(force)) NULL else read_lockfile()
   # name the case the bundle_hashes cannot explain, or the rebuild looks arbitrary
@@ -2426,18 +2507,11 @@ sync <- function(source_git_sha = NULL, upload = FALSE, force = FALSE) {
     assets <- ext$assets
     # adopt catalog with resolved external probe sets.
     catalog <- ext$catalog
-    ext_ids <- names(catalog[["clocks"]])[
-      vapply(
-        catalog[["clocks"]],
-        function(e) as.character(e[["group_id"]] %||% "") %in% external,
-        logical(1L)
-      )
-    ]
     write_lockfile(
       current_sha,
       ext_hashes,
       assets,
-      catalog[["clocks"]][ext_ids],
+      catalog[["clocks"]][external_clock_ids(catalog)],
       code_fp
     )
   }

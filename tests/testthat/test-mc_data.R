@@ -134,11 +134,14 @@ test_that("list_mc_assets() answers what exists, what is staged, what is reclaim
   expect_error(list_mc_assets("NotAClockGroup"))
 })
 
-test_that("the shipped registry covers the three external groups", {
-  expect_setequal(
-    mc_external_groups(),
-    c("SystemsAge", "PCClocks", "PCBrainAge")
-  )
+test_that("the shipped registry covers exactly the groups holding external clocks", {
+  # derived, not listed -- group is external because a clock of it is. the two
+  # sysdata objects are built separately, so a half-applied split shows here
+  declared <- unique(unlist(lapply(mc_catalog, function(e) {
+    if (isTRUE(e[["external_group"]])) e[["group_id"]] else NULL
+  })))
+  expect_setequal(mc_external_groups(), declared)
+  expect_gt(length(declared), 0)
   for (gid in mc_external_groups()) {
     row <- mc_asset(gid)
     expect_equal(row$group_id, gid)

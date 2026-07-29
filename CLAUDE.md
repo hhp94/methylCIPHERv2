@@ -67,12 +67,22 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   every clock has a score panel; a normalizing clock (only DunedinPACE) also has a norm panel. The
   counts follow the policy uniformly -- `vendor_mean` fills every absent CpG into the predictor
   (`used = present + imputed_full`), anything else drops them (`used = present`, `dropped = absent`).
-  Sex-routed aliases keep a `NULL` record and a stitched score-panel miss; routed members are masked
-  to the samples they scored. `coverage_record()` (`R/coverage.R`) owns the per-clock record fields --
+  Routed members are masked to the samples they scored. `coverage_record()` (`R/coverage.R`) owns
+  the per-clock record fields --
   including `normalizes` (**the one declared panel fact**; readers must not re-derive it from
   `norm_needed`) and the per-panel `score_imputed_partial` / `norm_imputed_partial`.
+  **The record is one axis: every count in it is a CpG count**, the partial ones included --
+  `score_imputed_partial` is how many of the panel's present CpGs were cohort-mean filled for any
+  sample, so it reads against `score_needed` / `score_present` like its neighbours and is
+  block-invariant (the fill columns are cohort facts from pass 1). Never store the cell sum
+  `sum(sample_miss)` there: it collapses both axes at once, is neither a probe fact nor a sample
+  fact, and can exceed `score_present`. **The sample axis is `$coverage$sample_miss`, and only
+  that** (DECISIONS 2026-07-29).
   `$coverage$sample_miss` is `list(score = <n x k matrix>, norm = <n x k' matrix over just the
-  normalizing columns>)`. `cached_cols()` / `count_sample_miss()` (integer) / `score_matrix()`
+  normalizing columns>)`. **`$per_clock`, `$sample_miss` and `samples_coverage()` span one set --
+  the clocks that read CpGs** -- so `k` is neither the returned columns nor the whole sequence:
+  routing targets are in, pure composites are out even when returned (DECISIONS 2026-07-29,
+  "pure composites"). `cached_cols()` / `count_sample_miss()` (integer) / `score_matrix()`
   remain the shared shape helpers (see DECISIONS 2026-07-24).
 - **Result is an S3 record over `list`** (class `mc_result`): `$scores` (n x k double), `$pheno`,
   `$coverage`, `$provenance`. Never a `matrix` subclass (drops class + attrs on first subset).
@@ -128,16 +138,36 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   carry no multiplicity guard. The two remaining scans are the two whose predicate is not a key:
   `component_tensor()` on `row_key` and `stack_step()` on `op`, both of which genuinely collide in
   the shipped catalog, so `pick_one()` stays load-bearing there (DECISIONS 2026-07-28).
-- **Coverage is never reported for a sample it is not true of.** A clock assembled from other
-  clocks' scores records coverage **iff every component contributes to every sample**
-  (`GrimAgeV1`, `DNAmFitAge_{Sex}` do). Where components are selected per sample -- sex-routed
-  aliases -- **the split is per-sample vs per-panel, not scores vs coverage.** A per-sample
-  quantity routes exactly as the score does, because the row was scored by exactly one member: the
-  alias's `sample_miss` is stitched and real. A per-panel quantity does not, because the two
-  members' panels differ (172 vs 190 CpGs for FitAge) and a count only means something against the
-  panel it was counted over: `per_clock[[alias]]` is `NULL` and those counts stay on the members,
-  which keep `per_clock` rows without having columns. Do not "fill in" that `NULL` with a merged
-  figure; read the member rows for the denominators.
+- **Coverage is never reported for a sample it is not true of, and a clock reports only what it
+  counted itself.** A clock whose branch reads no betas -- it is assembled purely from other
+  clocks' scores -- **has no coverage of its own**: `per_clock[[id]]` is `NULL`, it gets no
+  `sample_miss` column and no `samples_coverage()` row, and its all-`NA` `clocks_coverage()` row
+  says so. `clock_reads_cpgs()` (`R/score_cohort.R`) is the one source; it switches on
+  `score_type()`, so it is a fact about the closed branch set, not a clock list. Today it selects
+  the 7 sex-routed aliases, `GrimAgeV1` and `DNAmFitAge_{Sex}` -- `GrimAgeV2` keeps its record
+  because its cox stack declares `internal` surrogates and it really does read its 1030 CpGs.
+  **This loses nothing**: a clock that reads no betas can only be fed through its dependencies, so
+  every CpG in its declared panel is already counted on a descendant that does read one (verified:
+  `panel \ leaf-closure` is empty for all 10). The rule replaces the older "records coverage iff
+  every component contributes to every sample", which let `DNAmFitAge` report 100% coverage and
+  `score_dropped = 0` while 613 CpGs of its `GrimAgeV1` component were dropped -- its declared
+  172-CpG panel is a strict subset of the 1201 that feed it (DECISIONS 2026-07-29). Do not "fill
+  in" a `NULL` record with a merged figure, and do not restore a stitched per-sample count for an
+  alias: read the descendants' rows for the denominators. **`samples_coverage()` drops NA-coverage
+  rows**, which has exactly one source -- a routed member masked on a row its sex did not score --
+  so the long frame carries one row per sample per family, under the model that scored it. A
+  sample no model scored (unknown sex) therefore has no row at all, which is the same fact its
+  `NA` score already carries. The frame was never a complete sample x clock grid; do not make it
+  one by keeping rows that assert nothing.
+  **The converse binds too: never score a CpG coverage did not count.** Coverage counts the
+  *declared* panel, so a branch takes its CpGs from the resolved `cpgs` it is handed
+  (`score_present` / `score_absent`) and never re-derives them against the block's cohort-wide
+  `usable` set -- that set is every panel's union, so a stray coefficient would resolve against it
+  and be scored silently. A branch holding a bare coef vector (GrimAgeV2 surrogates, PhysAge
+  surrogates) goes through `component_present()` (`R/score_default.R`), which intersects with the
+  declared panel and `stop()`s if the component names a CpG the panel does not -- the sync gap that
+  would otherwise be invisible. The always-on smoke tier scores every bundled clock, so it exercises
+  that guard over the shipped catalog without naming a clock (DECISIONS 2026-07-29).
 - **The callable pool is not the catalog, and neither is the output.** Clocks that exist only as
   routing targets (the 14 sex-resolved DNAmFitAge members) are internal machinery: scored, kept
   for coverage, **never a score column**, and a hard error if requested by name, pointing at their
@@ -203,17 +233,33 @@ contribute** (the catalog is committed). `sync()` needs read access to `methylCI
        bundles, diff every panel against the committed `R/sysdata.rda`) before regenerating.
        `assert_declared_n_cpgs()` is the standing guard: every clock's derived scoring panel must
        equal its declared `n_cpgs`, with no exemption list.
-  3. **External packs** (SystemsAge, PCClocks, PCBrainAge): reuse when `force = FALSE` and
-     `data-raw/assets/lockfile.rds` hits (every external clock's `bundle_hash` unchanged and every
-     staged pack on disk); else rebuild the three content-addressed `<group>-<payload_hash>.qs2`
+  3. **External packs** (SystemsAge, PCClocks, PCBrainAge, Zhang2019): reuse when `force = FALSE`
+     and `data-raw/assets/lockfile.rds` hits (every external clock's `bundle_hash` unchanged and
+     every staged pack on disk); else rebuild the content-addressed `<group>-<payload_hash>.qs2`
      packs and rewrite the lockfile. `bundle_hash` (from `manifest.json`) moves iff that clock's
      meta or one of its declared artifacts moved -- unlike `source_git_sha`, which moved on every
      upstream commit and could not say which clock changed.
   4. `upload = TRUE` publishes packs to GitHub Releases; idempotent (content-address + remote
      "asset already present" skip mean unchanged weights are never re-uploaded).
-- **Distribution tiers:** small groups ship **bundled** in `R/sysdata.rda`; the three heavy packs
-  ship **external** as release assets, cached at runtime in
-  `tools::R_user_dir("methylCIPHERv2", "cache")`. No silent first-use download.
+- **Distribution tiers, and the unit is the clock, not the group.** Small groups ship **bundled** in
+  `R/sysdata.rda`; the heavy packs ship **external** as release assets, cached at runtime in
+  `tools::R_user_dir("methylCIPHERv2", "cache")`. No silent first-use download. `external_group` is
+  a **per-clock** field, so a group may be on both sides of the split: `Zhang2019` bundles its
+  514-CpG EN arm and packs its 319607-CpG BLUP arm. `EXTERNAL_GROUPS` and `EXTERNAL_CLOCKS`
+  (`data-raw/sync.R`) both feed that one field, and everything downstream reads the field --
+  `split_group_ids()` puts a mixed group in both buckets, `build_group_bundles(external =)`
+  partitions its tensors by declaring member (DECISIONS 2026-07-29).
+- **An external clock is not necessarily a pack-scored one.** `clock_is_external()` says where the
+  weights live; `is_pack_scored()` says whether `score_pack_group()` computes the score. They agreed
+  only while every external clock happened to be a batched weighted sum. Keep them apart: **needing a
+  pack** (`pack_groups_needed()`, parity's `skip_if_no_pack()`) keys on externality, and **how the
+  arithmetic runs** (`score_type()`'s group hooks, parity's relaxed `packs` tolerance) keys on the
+  scoring path. `score_type()`'s external branch carries a group hook per group whose arithmetic is
+  not a plain weighted sum -- `SystemsAge` (`center_scale`), `Zhang2019` (`sample_scale`) -- and
+  those clocks reach their coefficients through `clock_coefs(id, packs)`, which reads the pack's
+  raw tensor by the same `coef_path` the bundled arm reads out of `mc_bundles`. Do **not** hoist the
+  `switch(gid, ...)` above the external check to avoid the hooks: that changes dispatch precedence
+  for every clock in the catalog to solve a one-group problem (DECISIONS 2026-07-29).
 - **"Assets" are the packs; the dir holding them is a cache only in the CRAN sense.** Public names
   say **assets** and nothing else, and **every one of them is `<verb>_mc_<noun>`** --
   `get_mc_assets_dir()` / `set_mc_assets_dir()` (the setter `NULL`-clears and returns the old value
@@ -311,11 +357,20 @@ output**, not implementation detail (see "Test altitude").
   agreement proves the tensors and the engine are right and the divergence is in the oracle's
   input. **Do not "fix" this with a tolerance** -- the residual spans 4.2e-08 to 2.7e-01, so any
   bound wide enough is vacuous (DECISIONS 2026-07-25).
+  **`Horvath1` is the one exception to the absent-probe reading, because it is the one the oracle
+  BMIQ'd.** 14 of the 15 declare `scheme = none`; `Horvath1` (= the oracle's `DNAmAge`) declares
+  `bmiq`, and parity scores it with `normalize` at its opt-in default of **off**. Measured on
+  `cohort_450K`, where it has **zero** absent probes on both panels: raw 7.715 abs / 2.70e-1 rel,
+  and `normalize = c(Horvath1 = TRUE)` 0.114 abs / 1.93e-3 rel. So its gap is a normalization gap,
+  not a fill gap, and "zero absent probes -> ~1e-8" is a claim about the other 14. What survives
+  BMIQ is an EM implementation difference (mean +0.024 yr, sd 0.022, uncorrelated with age), and
+  the block stays skipped anyway -- admitting it would need a third tolerance regime, which is the
+  maintainer's call and has not been made (DECISIONS 2026-07-29).
   **A fixture is scored on the panel the oracle used, which is not always the scoring panel.** A
   recipe that declares a `sample_scale` op z-scores each sample over **every** probe in the input
   matrix, so feeding it the union of scoring panels moves each sample's mean/sd and the score with
   it (measured: 1.8e1 absolute, 82% relative). `needs_full_panel()` reads that op off the declared
-  recipe -- never a clock list, today only `Zhang2019` -- and the target loads the cohort's whole
+  recipe -- never a clock list, today only the two `Zhang2019` arms -- and the target loads the whole
   array with `cohort_betas_full()` instead (DECISIONS 2026-07-25).
   **The blocks are generated, so a dropped fixture is silence, not a failure.** `parity_targets()`
   loops over `clock_fixtures()`; a fixture upstream drops emits **no test at all** -- not a skip,
@@ -331,6 +386,10 @@ output**, not implementation detail (see "Test altitude").
   (an all-finite check plus the abs and rel bounds): 214 x 3 + PhysAge 2 x 6 + census 3 = 657.
   Read a parity run by its **fail and skip** counts -- 0 and 30 -- and check the two against each
   other before concluding anything from the pass number.
+  **These counts predate the 2026-07-29 Zhang2019 split and have not been re-measured.** The split
+  added one clock, so `core` gains its two cohort targets (`Zhang2019BLUP` skips wherever its pack
+  is not staged). Re-measure on the next parity run before trusting the totals; the fail count is
+  still 0-or-bust.
   `KNOWN_PARITY_GAPS` (clock- or `clock@cohort`-keyed) holds only genuine skips and is **empty**
   today. `KNOWN_PARITY_GAP_GROUPS` (group-keyed) is empty too but stays a **separate** map,
   because group ids and clock ids share a namespace (`DNAmFitAge` is both) and one flat map could

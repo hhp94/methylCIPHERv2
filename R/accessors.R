@@ -235,11 +235,14 @@ clock_reduction <- function(id) {
   if ("linear_mean" %in% ops) "mean" else "sum"
 }
 
-# named cpg->coef for one bundled single-vector clock
-clock_coefs <- function(id) {
+# named cpg->coef for one single-vector clock (pack tensor for external clocks)
+clock_coefs <- function(id, packs = NULL) {
   entry <- clock_entry(id)
   wf <- entry[["weights_format"]]
   if (identical(wf, "cpg_coefficient")) {
+    if (isTRUE(entry[["external_group"]])) {
+      return(pack_tensor(id, packs, entry[["coef_path"]]))
+    }
     return(bundle_tensor(entry[["group_id"]], entry[["coef_path"]]))
   }
   if (identical(wf, "component_matrices")) {
@@ -354,6 +357,16 @@ clock_pack <- function(id, packs) {
     )
   }
   pack
+}
+
+# named numeric tensor a pack carries under its declared weights/ path
+pack_tensor <- function(id, packs, path) {
+  pack <- clock_pack(id, packs)
+  tensor <- pack[["tensors"]][[path]]
+  if (is.null(tensor)) {
+    catalog_bug("Pack %s has no tensor %s.", clock_group_id(id), path)
+  }
+  tensor
 }
 
 # family/group label for pack dispatch

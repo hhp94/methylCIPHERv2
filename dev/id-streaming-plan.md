@@ -96,9 +96,10 @@ that table, which is why colname agreement is an error and not a repair (sec 5.3
 
 **Pre-imputing the block outside the scorer is rejected**, and it is the one thing that would break
 this. It is score-equivalent but it erases the record of what was imputed: `count_sample_miss()`
-counts NAs in the **raw** matrix over the cached columns, so a pre-filled block reports
-`score_imputed_partial = 0` for every clock and an all-zero `sample_miss`, and `check_row_coverage()`
-degrades into a per-clock constant. That breaks "coverage is never reported for a sample it is not
+counts NAs in the **raw** matrix over the cached columns, so a pre-filled block reports an all-zero
+`sample_miss` and `check_row_coverage()` degrades into a per-clock constant. (The per-clock
+`score_imputed_partial` survives it, being a CpG count off the cohort facts -- which is exactly why
+it cannot stand in for the sample axis.) That breaks "coverage is never reported for a sample it is not
 true of" **silently**, which is the worst available failure mode. Handing the block over raw, with
 the fill applied inside, keeps the NA pattern visible exactly where coverage reads it.
 
@@ -169,7 +170,9 @@ by the existing `compute_coverage()`, keyed by clock id, exactly as it is today.
 coverage machinery is chunk-aware, and nothing is patched after the fact.
 
 **Two ordering consequences, both live.** The samples gate is warn-only and reads assembled counts,
-so `check_row_coverage()` now runs *after* the scoring loop rather than before it. And asset loading
+so `check_row_coverage()` now runs *after* the scoring loop rather than before it -- as does
+`check_score_values()`, the `NaN`/`Inf` gate on the assembled output columns, which the chunked
+front end must call once over the bound scores rather than per block. And asset loading
 is in the data-independent tier, so `load_mc_assets()` -- which may prompt and download -- now runs
 before `check_DNAm()` and the pheno checks. A caller who asks for an external pack with a malformed
 matrix is prompted first and errors second. That is the price of hoisting resolution out of the
@@ -301,31 +304,47 @@ Two kernels are ours, and they live in this package's own C++ (the package is go
   Its `!R_finite` test also covers `+/-Inf`, but that branch is unreachable through the supported
   path: `col_stats()` scans the same columns earlier in `scan_missing_cpgs()` and aborts on the
   first one (sec 5.4), so only NA and NaN reach the fill.
-- **`col_stats(obj, cols)`** -- one traversal, returning a **list**: `stats` (a 2 x ncol matrix with named
-  rows `sum` and `n_obs`), the two global range flags `any_lt0` / `any_gt1`, and `inf_at`. The mean
+- **`col_stats(obj, cols, row_moments)`** -- one traversal, returning a **list**: `stats` (a 2 x ncol matrix with named
+  rows `sum` and `n_obs`), the two global range flags `any_lt0` / `any_gt1`, the `any_inf` flag, and
+  `overflow_col`. The mean
   is `sum/n_obs` and the NA count is `nrow - n_obs`, so one pass classifies the columns, supplies the
   fill, **and** carries the value gates (sec 5.4). This is what `scan_missing_cpgs()` now runs on,
   replacing `slideimp::mat_miss(col = TRUE)` plus `slideimp::mean_imp_col()` -- two traversals
   collapsed into one, and the classification and the fill values can no longer disagree because they
   come off the same sweep. One accumulator called by both front ends is also what makes sec 4.2's
   agreement structural rather than lucky.
-  **It fails fast on `Inf`:** the scan stops at the first one and returns its 1-based `c(row, col)`
-  in `inf_at`, with `stats` set to `NULL` and the range flags covering only the scanned prefix. So
-  `inf_at` is checked **first** and nothing else in the list is read in that branch -- a contract the
-  caller has to honor, not something the shape enforces.
+  **Every non-finite value is missing** -- NA, NaN and `+/-Inf` alike are skipped, not summed, and
+  not counted in `n_obs` or `row_obs`, so they fill from the cohort mean identically. `any_inf`
+  says an `Inf` was among them, which is a data bug worth naming but not a different fate
+  (DECISIONS 2026-07-27).
+  **It bails only on an overflowed column sum:** finite entries large enough to poison `sum` stop
+  the sweep at that column, and `stats` / `row_obs` / `row_mean` / `row_m2` all come back `NULL`
+  with `overflow_col` set. So `overflow_col` is checked **first** and nothing else in the list is
+  read in that branch -- `check_overflow_col()` (`R/missingness.R`) is that check, and every caller
+  that reads the results runs it.
   The kernel **reports and does not decide**: `check_col_values()` (R) raises the abort and the
-  warnings so all three reach the user through cli. Missing and bad are counted apart -- NA/NaN are
-  "not observed" and fill from the cohort mean, `+/-Inf` is bad data no fill can repair.
+  warnings so all of them reach the user through cli.
+  **`row_moments = TRUE` adds a Welford per-sample mean/sd**, returned as `row_mean` / `row_m2`
+  (`sd` is `sqrt(row_m2 / (row_obs - 1))`, computed in R). It is dispatched once outside the column
+  loop, so the default path allocates nothing and pays nothing. **The two halves have different
+  column domains and the kernel owns that split:** pass 1 sweeps `cols` for the column stats fused
+  with the moments, pass 2 sweeps only the complement and only into the row accumulators. So
+  `stats` and the value gates stay `cols`-scoped while `row_obs` / `row_mean` / `row_m2` cover the
+  whole of `obj` -- which is the only width a `sample_scale` clock's moments are right at -- and
+  each column is still read exactly once. `cols` must be **unique** for this: a repeated index is
+  accumulated twice in pass 1 and skipped in pass 2. `scan_missing_cpgs()` (sec 5.5) is the only
+  caller, and its `needed_idx` is unique by construction.
   **`cols` is 1-based column indices into `obj`, and `NULL` scans every column** -- so the caller
   hands the kernel the whole matrix and an index rather than a materialized slice, and
   `scan_missing_cpgs()` no longer duplicates the panel union. Positions in `stats` and in
-  `inf_at[2]` are relative to `cols`, not to `obj`, which is what keeps `check_col_values()`
-  indexing `present_needed` unchanged. Out-of-range, `NA`, or non-positive indices `stop()`.
+  `overflow_col` are relative to `cols`, not to `obj`, which is what keeps `check_col_values()`
+  indexing `present_needed` unchanged. Out-of-range, `NA`, or non-positive indices `stop()`; the
+  `NULL` case skips that validation entirely rather than materializing `seq_len(ncol)`.
   **`row_obs` serves the row half too.** `count_sample_miss()` (`R/coverage.R`) takes a clock's
   cohort-mean-filled columns as `length(cached) - row_obs`, which is per row and correct against any
   block. That retired `slideimp::mat_miss(col = FALSE)`, the package's last `slideimp` call, so the
-  Import is gone. `row_obs` is `NULL` on the `Inf` bail, which cannot happen downstream of the value
-  gate -- `count_sample_miss()` `stop()`s on it rather than trusting the reasoning.
+  Import is gone. `row_obs` is `NULL` on the overflow bail, which cannot happen downstream of the
+  value gate -- `row_observed()` `stop()`s on it rather than trusting the reasoning.
 
 `DelayedMatrixStats` is deliberately **not** a dependency: its `rowMeans2()` traverses in its own
 block order and lands ~5.6e-16 from a plain `colMeans()`, which is the same non-determinism as
@@ -382,18 +401,19 @@ plus global id uniqueness and the pheno subset against the union id set. The sur
 pass 2 read fewer columns.
 
 **The value gates already ride this sweep** (built ahead of Phase 6, because a latent bug forced it
--- see below). `check_col_values()` reads `inf_at` and the two range flags off `col_stats()`: any
-`+/-Inf` **stops**, naming the sample and CpG it sits at; `any_lt0` and `any_gt1` each **warn**,
-separately, because a matrix can trip both and neither implies the other. The range check is the
+-- see below). `check_col_values()` reads `overflow_col`, `any_inf` and the two range flags off
+`col_stats()`: an overflowed column sum **stops**, naming the CpG it sits at; `any_inf`, `any_lt0`
+and `any_gt1` each **warn**,
+separately, because a matrix can trip several and none implies another. The range check is the
 beta-vs-M-value tell -- `check_DNAm()` validates `mode = "double"` but not the range, so a minfi
 `GenomicRatioSet` whose assay holds M-values would otherwise score plausible garbage. Exactly 0 and
 exactly 1 pass, since those are ordinary saturated betas. It warns rather than stops because the
 range is strong evidence, not a definition.
 
 Deliberate asymmetry in what each gate can say: the abort carries an exact position, the warnings
-carry none. An `Inf` is a single point defect worth locating, and the scan is already stopping
+carry none. An overflowed sum is a single defect worth locating, and the scan is already stopping
 there; out-of-range values are a property of the whole matrix, where naming ten of 866k columns
-would be noise. Two global booleans is the whole cost.
+would be noise. Three global booleans is the whole cost.
 
 **An all-missing column is classified, not rejected.** `n_obs == 0` means no cohort mean exists,
 which is an ordinary expected case: the column lands in `all_na_cols`, leaves `usable_cols`, and
@@ -423,13 +443,13 @@ block and the facts. Coverage for the block comes out of the unchanged `compute_
 counts NAs in the raw block over the cached columns. Keep the score matrices and the coverage
 fragment.
 
-**Assembly** is a concatenate and a sum, never a replace:
+**Assembly** is a concatenate, never a replace and never a sum:
 
 - score matrices and `pending` intermediates -- concatenate by clock id (disjoint rows)
 - `sample_miss$score` / `$norm` -- concatenate the per-block vectors (disjoint rows)
-- `score_imputed_partial` / `norm_imputed_partial` -- sum across blocks
-- every other `per_clock` field is derived from the shared `cpg_list`, so every block already
-  computed the identical value; take it
+- **every** `per_clock` field is a CpG count off the shared cohort facts -- `cpg_list` for the panel
+  fields, `partial_fill` for `score_imputed_partial` / `norm_imputed_partial` -- so every block
+  already computed the identical value; take it
 
 Then reorder by `sample_id`, call `finalize_cross_sample()` on the assembled intermediates (sec 6.2),
 and run the samples gate once.
@@ -441,19 +461,35 @@ binds finished records whose counts must stay per-record and whose reductions al
 Naming: `calc_clocks_chunked()` follows the existing family. The wrapper stores a chunk label per
 sample (sec 8).
 
-### 5.5 Column narrowing conflicts with Zhang2019
+### 5.5 Column narrowing and Zhang2019 (resolved -- moments are banked)
 
-The obvious RSS win is reading only the union panel, but a `sample_scale` clock takes its moments
-over **every** probe in the input. Reuse the existing declared-recipe predicate `needs_full_panel()`
-rather than a clock list -- it currently lives in `test-fixtures-parity.R` and moves to `R/` as part
-of this phase. Whole-array column means cost ~7 MB even at 866k probes, so filling full width when
-that predicate is true is affordable.
+A `sample_scale` clock takes its moments over **every** probe in the input, which used to mean the
+scoring pass had to keep full width whenever `clock_needs_full_panel()` was true. It no longer does.
+`mc_cohort()` already reads full width to classify columns, so it banks the per-sample mean/sd there
+as `facts$sample_moments`, gated on the catalog-declared `spec$needs_moments`; `block_moments()`
+narrows them to the rows in hand exactly as `block_pheno()` does. The scoring pass may therefore
+narrow columns freely -- `score_Zhang2019()` reads the banked vectors and never touches the matrix
+at full width. `block$DNAm_full` was that clock's only reader and is gone
+(DECISIONS 2026-07-29).
+
+What this does **not** buy: the moments must still be taken over every column, so the *fact-building*
+pass reads full width. The saving is on the scoring pass, and on scoring both Zhang arms, which used
+to scan the block twice each.
+
+That full-width read is **the panel scan itself** -- `scan_missing_cpgs(..., row_moments = TRUE)`
+passes the same narrow `needed_idx` it always did, and the kernel sweeps the complement columns into
+the row accumulators only (sec 5.4). Each column is read exactly once, there is no second
+accumulator and no second traversal, and the moments treat a non-finite value as missing exactly as
+the classification does. The column half is unaffected: `stats` and the value gates stay the panel's,
+so an off-panel value reaches the score without being range-checked. The one thing that does not
+ride the sweep is the dead-row gate, which needs `row_obs` over the *scoring* panel and so re-reads
+it narrowly whenever moments were asked for (DECISIONS 2026-07-29).
 
 ## 6. Phases 2 and 3 -- cohort reductions leave the scoring loop
 
 ### 6.1 Phase 2 -- the split, derived (built)
 
-Exactly **2 of 129** catalog clocks are cross-sample: `DNAmPhysAge` and `DNAmPhysAge_years`
+Exactly **2 of 130** catalog clocks are cross-sample: `DNAmPhysAge` and `DNAmPhysAge_years`
 (`cross_sample_at = 11`). The fill does not touch them.
 
 `clock_cross_sample_at()` / `clock_is_cross_sample()` read the declared field (`R/accessors.R`),
@@ -725,9 +761,9 @@ every test reuses it, so the shapes cannot drift apart between assertions:
   on the sync fix in sec 6).
 - **The block-dependency case**: a column partial cohort-wide but all-NA within one block lands in
   `partial_fill` and counts as `imputed_partial`, not `imputed_full`, with every row of that block
-  counted as imputed for it.
-- **Coverage assembles by concatenate and sum**: `score_imputed_partial` sums across blocks,
-  `sample_miss` concatenates, and panel-derived fields are already identical per block.
+  counted as imputed for it in `sample_miss`.
+- **Coverage assembles by concatenate, never by sum**: `sample_miss` concatenates, and every
+  `per_clock` field -- `score_imputed_partial` included -- is already identical per block.
 - **The clocks gate throws out of `mc_cohort()`**, before anything is scored.
 
 Still to write, with Phase 6:

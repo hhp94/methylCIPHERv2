@@ -41,6 +41,19 @@ test_that("a declined clock asks for no normalization panel", {
   expect_false("Knight" %in% colnames(res$coverage$sample_miss$norm))
 })
 
+# the norm half of sample_miss is keyed by clock, like the score half
+test_that("a clock with no norm panel keeps its entry rather than losing it", {
+  spec <- mc_spec(c("Hannum", "DunedinPACE"))
+  DNAm <- random_betas(panels_union(spec$panels), n = 4L)
+  miss <- score_cohort(DNAm, spec, mc_cohort(DNAm, spec))$coverage$sample_miss
+
+  expect_equal(names(miss$norm), spec$sequence)
+  expect_equal(names(miss$score), spec$sequence)
+  # present but empty for the clock that does not normalize
+  expect_null(miss$norm[["Hannum"]])
+  expect_equal(length(miss$norm[["DunedinPACE"]]), nrow(DNAm))
+})
+
 # sim_DNAm builds over the same resolved decision
 test_that("sim_DNAm omits the gold panel when normalization is declined", {
   sim <- sim_DNAm("Horvath1", n = 3L)

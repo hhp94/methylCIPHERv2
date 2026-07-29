@@ -7,9 +7,9 @@ check_col_values <- function(scan, cols) {
     cli::cli_abort(
       c(
         "DNAm column {.val {cols[at[[1L]]]}} does not sum to a finite value.",
-        "i" = "Its entries are finite but astronomically large -- far outside
-               the {.val {0}} to {.val {1}} beta range. Fix the matrix before
-               scoring.",
+        "i" = "Its entries look finite but are extremely large -- far outside
+               the usual beta range of {.val {0}} to {.val {1}}. Please check
+               that column before scoring.",
         "i" = "The scan stops at the first such column, so there may be others."
       ),
       call = NULL
@@ -24,8 +24,8 @@ check_col_values <- function(scan, cols) {
         "i" = "They are treated as missing: filled from the cohort mean where
                the probe is partly observed, and counted absent where it is
                not.",
-        "i" = "An infinite beta is usually an upstream divide-by-zero.
-               {.fn clocks_coverage} reports what was imputed."
+        "i" = "An infinite beta is often an upstream divide-by-zero.
+               {.fn clocks_coverage} shows what was imputed."
       ),
       call = NULL
     )
@@ -37,9 +37,10 @@ check_col_values <- function(scan, cols) {
       c(
         "DNAm contains values below {.val {0}}.",
         "i" = "{.fn calc_clocks} expects beta values in {.val {0}} to
-               {.val {1}}. An M-value matrix is the usual cause -- it scores
-               without error but is wrong.",
-        "i" = "Convert with {.code beta <- 2^m / (2^m + 1)} if that is it."
+               {.val {1}}. An M-value matrix is a common cause -- it will
+               score without error, but the ages won't be meaningful.",
+        "i" = "If that sounds right, convert with
+               {.code beta <- 2^m / (2^m + 1)}."
       ),
       call = NULL
     )
@@ -49,7 +50,8 @@ check_col_values <- function(scan, cols) {
       c(
         "DNAm contains values above {.val {1}}.",
         "i" = "{.fn calc_clocks} expects beta values in {.val {0}} to
-               {.val {1}}."
+               {.val {1}}. You may want to double-check the scale of
+               {.arg DNAm}."
       ),
       call = NULL
     )
@@ -57,18 +59,78 @@ check_col_values <- function(scan, cols) {
   invisible(NULL)
 }
 
-# one col_stats() sweep: classify columns, means, value gates, row_obs
-scan_missing_cpgs <- function(DNAm, needed_cpgs, score_cpgs) {
+# post-score value gate: NaN/Inf in a score. NA is legitimate (sample the
+# branch declined), so only non-finite non-NA values count
+check_score_values <- function(scores) {
+  n_bad <- vapply(
+    scores,
+    function(v) sum(is.nan(v) | is.infinite(v)),
+    integer(1L)
+  )
+  bad <- n_bad[n_bad > 0L]
+  if (!length(bad)) {
+    return(invisible(NULL))
+  }
+
+  lines <- sprintf(
+    "%s: %d of %d sample(s)",
+    names(bad),
+    bad,
+    lengths(scores[names(bad)])
+  )
+  # a full-panel clock divides by a per-sample sd, which can be 0 or undefined
+  full <- names(bad)[vapply(names(bad), clock_needs_full_panel, logical(1))]
+  hint <- if (length(full)) {
+    c(
+      "i" = "{.val {full}} divide{cli::qty(full)}{?s/} by a per-sample sd taken
+             over every column of {.arg DNAm}, so a sample observing one value,
+             or the same value everywhere, has no spread to scale by."
+    )
+  }
+
+  cli::cli_warn(
+    c(
+      "{length(bad)} clock{?s} produced {cli::qty(sum(bad))}non-finite
+       score{?s}:",
+      capped_bullets(lines),
+      hint,
+      "i" = "{.code NaN} or {.code Inf} usually means a non-finite value
+             reached the arithmetic. Please check {.arg DNAm} rather than
+             the score itself."
+    ),
+    call = NULL
+  )
+  invisible(NULL)
+}
+
+# one col_stats() sweep: columns, means, value gates, row_obs, and for a
+# sample_scale clock the per-sample moments it z-scores by
+scan_missing_cpgs <- function(
+  DNAm,
+  needed_cpgs,
+  score_cpgs,
+  row_moments = FALSE
+) {
   present_needed <- intersect(needed_cpgs, colnames(DNAm))
+  # unique by construction (intersect + match). row_moments needs that or a
+  # repeated index hits the subset pass twice and the complement never
+  needed_idx <- match(present_needed, colnames(DNAm))
   nr <- nrow(DNAm)
 
-  # index, not a slice: the kernel strides over DNAm's own columns
-  scan <- col_stats(DNAm, match(present_needed, colnames(DNAm)))
+  # index into DNAm, not a slice. with row_moments the complement is swept only
+  # into row accumulators so sample_scale still sees every column. row_obs stays
+  # the panel count. complement obs go in row_obs_complement
+  scan <- col_stats(DNAm, needed_idx, row_moments = row_moments)
   check_col_values(scan, present_needed)
 
-  # a dead row is dead on the scoring panels: a normalization CpG can never
-  # score a sample. empty panel is the coverage gate's problem, not this one.
-  present_score <- intersect(score_cpgs, colnames(DNAm))
+  # dead on the scoring panels only -- a norm CpG never scores a sample.
+  # empty panel is the coverage gate's problem, not this one
+  # identical inputs intersect the same colnames identically skip the rescan
+  present_score <- if (identical(score_cpgs, needed_cpgs)) {
+    present_needed
+  } else {
+    intersect(score_cpgs, colnames(DNAm))
+  }
   if (length(present_score)) {
     obs <- if (identical(present_score, present_needed)) {
       scan[["row_obs"]]
@@ -81,26 +143,38 @@ scan_missing_cpgs <- function(DNAm, needed_cpgs, score_cpgs) {
         c(
           "{length(dead)} sample{?s} {?has/have} no observed CpGs on any
            scoring panel: {.val {utils::head(dead, 10L)}}.",
-          "i" = "Remove or fix {cli::qty(dead)}{?it/them} before scoring."
+          "i" = "Please remove or repair {cli::qty(dead)}{?it/them} before
+                 scoring."
         ),
         call = NULL
       )
     }
   }
 
-  # past the Inf gate, stats is populated
+  # past the overflow gate, stats is populated -- and it is the panel's alone
   st <- scan[["stats"]]
   n_obs <- st["n_obs", ]
   all_na <- present_needed[n_obs == 0]
   partial <- present_needed[n_obs > 0 & n_obs < nr]
   i <- match(partial, present_needed)
 
+  # moments span every column, so sd's divisor is panel row_obs plus whatever
+  # the complement pass observed
+  moments <- if (row_moments) {
+    n_all <- scan[["row_obs"]] + scan[["row_obs_complement"]]
+    list(
+      mean = scan[["row_mean"]],
+      sd = sqrt(scan[["row_m2"]] / (n_all - 1))
+    )
+  }
+
   # only partial columns get a mean (all-NA columns are classified, not divided)
   list(
     usable_cols = setdiff(present_needed, all_na),
     partial_na_cols = partial,
     all_na_cols = all_na,
-    col_mean = stats::setNames(st["sum", i] / st["n_obs", i], partial)
+    col_mean = stats::setNames(st["sum", i] / st["n_obs", i], partial),
+    sample_moments = moments
   )
 }
 

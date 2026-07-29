@@ -12,8 +12,9 @@ check_DNAm <- function(DNAm) {
   if (is.null(rownames(DNAm))) {
     cli::cli_abort(
       c(
-        "{.arg DNAm} needs sample ids as rownames.",
-        "i" = "If the rows are anonymous, name them yourself:
+        "{.arg DNAm} needs sample ids as rownames so scores can be matched
+         to samples.",
+        "i" = "If the rows are anonymous, you can name them with:
                {.code rownames(DNAm) <- paste0(\"sample\", seq_len(nrow(DNAm)))}"
       ),
       call = NULL
@@ -29,7 +30,7 @@ check_DNAm <- function(DNAm) {
         } else {
           "No DNAm column names look like CpG ids (cg...)."
         },
-        "i" = "{.fn calc_clocks} wants samples in rows and CpGs in columns.
+        "i" = "{.fn calc_clocks} expects samples in rows and CpGs in columns.
                Try {.code t(DNAm)} if yours is the other way around."
       ),
       call = NULL
@@ -44,14 +45,8 @@ note_full_panel_clocks <- function(clock_ids) {
   if (!length(full)) {
     return(invisible(NULL))
   }
-  message(
-    sprintf(
-      paste0(
-        "%s take(s) per-sample moments over all CpGs -- a large subset ",
-        "is usually enough."
-      ),
-      paste(full, collapse = ", ")
-    )
+  cli::cli_inform(
+    "{.val {full}} {?takes/take} per-sample moments over all, not just a subset of, CpGs."
   )
   invisible(NULL)
 }
@@ -78,8 +73,11 @@ check_pheno <- function(
   miss <- setdiff(extra_columns, names(pheno))
   if (length(miss)) {
     cli::cli_abort(
-      "{.arg pheno} is missing {length(miss)} column{?s} the requested clocks
-       need: {.field {miss}}.",
+      c(
+        "{.arg pheno} is missing {length(miss)} column{?s} the requested
+         clocks need: {.field {miss}}.",
+        "i" = "Add {cli::qty(miss)}{?it/them} to {.arg pheno} and try again."
+      ),
       call = NULL
     )
   }
@@ -141,7 +139,7 @@ warn_missing_covariates <- function(
         },
         character(1L)
       )),
-      "i" = "Clocks that need them score NA for those samples."
+      "i" = "Clocks that need them will score NA for those samples."
     ),
     call = NULL
   )
@@ -160,8 +158,10 @@ resolve_pheno <- function(DNAm, pheno, pheno_id, keep) {
   if (length(missing)) {
     cli::cli_abort(
       c(
-        "pheno is missing {length(missing)} sample id{?s} from DNAm:",
-        "x" = "{.val {utils::head(missing, 10L)}}"
+        "{.arg pheno} is missing {length(missing)} sample id{?s} that appear
+         in DNAm:",
+        "x" = "{.val {utils::head(missing, 10L)}}",
+        "i" = "Every DNAm row needs a matching id in the pheno id column."
       ),
       call = NULL
     )
