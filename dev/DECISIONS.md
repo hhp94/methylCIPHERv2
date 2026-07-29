@@ -1,14 +1,621 @@
 # Decisions log (package rewrite)
 
-Append-only, date-stamped. Records **why** we chose a design during the rewrite under
-`dev/migration-plan.md` — the “we tried X / other maintainers will ask this” history that
-should not bloat the plan’s operational sections.
+Append-only, date-stamped. Records **why** we chose a design -- the "we tried X / other
+maintainers will ask this" history that should not bloat an operational doc.
 
 **Scope:** R package rewrite, packaging, API, and local maintainer workflow. Upstream
 metadata contract decisions live in `data-raw/methylCIPHER-meta/control/DECISIONS.md`.
 
 Newest first. Add an entry when a decision reverses a prior approach or is likely to be
-second-guessed; do not restate rules already stated in the migration / detail plans.
+second-guessed; do not restate rules already stated in `CLAUDE.md` or `dev/id-streaming-plan.md`.
+
+**`migration-plan.md` and `detail-plan.md` were retired 2026-07-28.** Entries below cite them by
+`sec N`; read those out of git history, not as live references.
+
+---
+
+## 2026-07-29 -- dedup the linear scorers, but DunedinPACE keeps its own matmul
+
+A housekeeping audit (`dev/housekeeping.md`, local-only) listed hoists across the scoring paths.
+Took the behavior-preserving ones; **rejected one that looked like the tidiest of them.**
+
+**Taken.** `mean_cpg_contrib()` and `component_linpred()` in `score_default.R` now own the two
+shapes that were written out three and two times: the mean reduction (`linear_score` mean branch,
+each PhysAge surrogate) and the resolve-coef / split-present / `absent_fill` / `linear_predictor` /
+combine sequence (GrimAge internal stack rows, PhysAge surrogates). `linear_score` uses only the
+mean helper -- it holds a *declared* `cpgs[["score_absent"]]`, while `component_linpred` is for
+callers holding a bare coef vector and derives absent as `setdiff(names(coef), present)`. Those two
+sets should agree; making `linear_score` derive its own would have made a catalog disagreement
+silent, so it does not.
+
+**Rejected: routing DunedinPACE's post-QN step through `linear_score(..., observed = )`,** which the
+audit proposed as the last "raw matmul" outlier next to the BMIQ path. It is not equivalent.
+`score_Dunedin()` fills every absent background CpG with the gold target *before* QN, so an absent
+scoring CpG already contributes a normalized value. `linear_score()` cannot see that -- it
+unconditionally computes `absent_fill(id, coef, cpgs[["score_absent"]])`, and DunedinPACE's declared
+policy is `vendor_mean`. The absent CpG would be counted twice: once as the QN'd target, once as a
+vendor offset. **The failure is input-dependent** -- exact on a complete panel, wrong in proportion
+to how many PACE CpGs the array is missing -- so a fixture cohort with full coverage would not catch
+it. Making it equivalent means teaching `linear_score` that fill is already applied, i.e. a
+signature change on the shared engine to tidy one branch. Not worth it. If someone revisits this,
+the question to answer first is what `score_absent` should mean for a branch that force-completes
+its panel.
+
+**Verification.** Before/after over 12 clocks x 12 samples (29 score columns incl. both GrimAge,
+both PhysAge, the DNAmFitAge alias + members, DunedinPACE, Zhang2019), with 3% of CpGs dropped and
+1% of cells NA'd so the fill paths fire: max absolute and max relative difference both exactly 0,
+NA pattern identical, `clocks_coverage()` / `samples_coverage()` frames identical. `devtools::test()`
+is FAIL 0 / PASS 767. Parity was **not** run.
+
+**One observable change, deliberate:** `clock_cpgs()` (sim_DNAm only) now calls
+`panels_union(clock_panels(...))` instead of re-implementing the union per clock, so `sim_DNAm()`
+returns the same 39025-CpG set over the 101 bundled clocks in a different column order (score
+panels then norm panels, rather than interleaved per clock). Nothing resolves CpGs positionally --
+scoring is by name -- and the old order was itself just catalog order.
+
+---
+
+## 2026-07-29 -- drain `calc_clocks.R` and `utils.R` into their functional owners
+
+**Pure move, no behavior change.** Two files had absorbed other files' jobs: `calc_clocks.R` carried
+the closed routing table (`score_type()` + friends) and the `mc_result` constructor alongside the
+public wrapper; `utils.R` was a four-topic grab bag (engine helpers, coverage writers, notes,
+sex masks, a soft-dep check) including load-bearing pieces like `coverage_record()` that do not read
+as "misc." Moved:
+
+- `unroutable`, `score_type`, `PACK_SCORE_TYPES`, `is_pack_scored`, `pack_groups_needed`
+  (routing/dispatch) -> `score_cohort.R`, next to the `switch(score_type(...))` that consumes them.
+- `construct_mc_result`, `miss_matrix` (result-record constructor) -> `generics.R`, renamed
+  `mc_result.R` (constructor + `print`/`as.matrix`/`rbind` methods, one file per class).
+- `cached_cols`, `block_cols`, `observed_panel`, `vendor_offset`, `absent_fill`, `score_matrix`
+  (shared engine helpers) -> `score_default.R`.
+- `coverage_record`, `count_sample_miss`, `panel_ratio`, `row_observed` (coverage writers) ->
+  `coverage.R`.
+- `new_notes`, `note_scoring_failure`, `collect_notes` -> `score_cohort.R` (only caller of
+  `new_notes()` is `mc_block()`, in this file).
+- `sex_rows` -> `score_routed.R`.
+- `require_betanorm` -> `score_normalized.R` (its only caller).
+- `bullets` and `poly_eval` stay in `utils.R` -- genuinely shared (poly_eval: `score_PhysAge.R` and
+  `score_systemsage.R` both call it; bullets: cli glue).
+
+**Why now, not folded into other work.** File boundaries do not affect package loading or the value
+gates in `CLAUDE.md`; this is purely "which file does an agent open" clarity, tracked in
+`dev/move_functions.md` (untracked audit, not committed). Done as its own commit so it is reviewable
+as a pure diff with no logic changes mixed in.
+
+**Not done.** The one-branch-per-file `score_*.R` pattern stays split (consolidating loses the
+agent-navigable map). `tags.R` -> `list_clocks.R` and `coverage_gates.R` -> `coverage.R` merges were
+both in the audit's "optional" tier and are skipped.
+
+**Pointers updated.** `CLAUDE.md` named `coverage_record()` as living in `R/utils.R` and cited
+`R/generics.R` as `#' @export` precedent; both now point at the new homes (`R/coverage.R`,
+`R/mc_result.R`). `dev/id-streaming-plan.md` had the same two stale pointers (`count_sample_miss()`,
+`rbind.mc_result`), fixed likewise. Older entries in this log that name `R/utils.R` or `R/generics.R`
+are left as-is -- they describe file state as of their own date, not current truth.
+
+---
+
+## 2026-07-29 -- an `Inf` is a missing value; both kernels ask one question
+
+**Reverses the abort.** `check_col_values()` used to stop on any infinite beta, wording it
+"Infinite values are not missing values -- no imputation can repair one." The two kernels did not
+actually agree on that: `col_stats()` let an `Inf` into `sum`, poisoned the column, and bailed,
+while `fill_imp_col()` tested `std::isnan` and so treated the same `Inf` as an ordinary observed
+value it must leave alone. Only the abort firing first kept them from disagreeing out loud.
+
+**Both now use `std::isfinite`, and every non-finite entry is missing.** `NA`, `NaN`, `+Inf` and
+`-Inf` are one class: skipped by `col_stats()` (not summed, not counted in `n_obs` or `row_obs`,
+and not judged against the `[0, 1]` range flags), filled by `fill_imp_col()`. What one calls
+missing, the other fills -- which is the property the partial-cache path always assumed and never
+had.
+
+**The consequences fall out of the existing machinery rather than needing new paths.** A partly
+infinite probe is cohort-mean filled and counted in `score_imputed_partial`; a wholly infinite one
+classifies into `all_na_cols` and is absent, so it takes the clock's declared `vendor_mean`-or-drop
+policy; a sample whose whole scoring panel is `Inf` trips the existing dead-row abort. Verified: an
+`Inf` and an `NA` in the same cell produce equal `$scores` and equal `$coverage$sample_miss`.
+
+**Not silent, but a warning rather than a stop.** An infinite beta is still a data bug -- usually an
+upstream divide-by-zero -- so `col_stats()` carries an `any_inf` flag and `check_col_values()`
+warns. That is the same tier as the existing out-of-range warnings, and the right one: the old
+abort killed a 2000-sample run over one cell, while the imputation it now takes is reported through
+`clocks_coverage()` / `samples_coverage()` like every other filled cell.
+
+**Cost, measured at `-O2` on the same 100 x 39,025 slice at 2% NA as the kernel-rewrite entry
+below (ms/call, best of 5 x 300):**
+
+| | current (`isnan`) | `isfinite` | `isfinite` + `any_inf` |
+|---|---|---|---|
+| `col_stats()` | 2.63 | 2.87 | **3.00** |
+| `fill_imp_col()` | 1.43 | **1.43** | -- |
+
+The fill is free: it was already a branchless select, and `isfinite(v) ? v : m` selects just as
+well as `isnan(v) ? m : v`. `col_stats()` gives back 14%, which is the price of the entry below's
+central trick -- one predicate per element with `Inf` caught per column -- and it is no longer
+available, because an `Inf` that never enters `sum` cannot be detected from `sum`. 9 of those 14
+points are the predicate and 5 are the `any_inf` flag; dropping the warning would recover the 5.
+Judged worth it: this is one sweep per `calc_clocks()` call, so 0.37 ms against a run measured in
+seconds.
+
+(The first draft of the fill row read 1.23 vs 1.40 and was wrong, in exactly the way this file
+already warns about: `m <- base` does not copy, Rcpp mutates the shared storage, and every rep
+after the first ran on a matrix with no missing values left. Forcing a duplicate with
+`m[1] <- m[1]` gives 1.43 for both.)
+
+**`inf_at` is now `overflow_col`, a column and no row.** The field could report a row because the
+kernel rescanned the poisoned column to find the `Inf`. With `Inf` excluded from `sum`, the only
+remaining way to poison it is a genuine overflow of finite values (~1e306, which the range gate
+only warns about), and no row explains that -- a rescan would either find nothing or, worse, point
+at an `Inf` the kernel deliberately ignored. So the rescan is deleted and the field is a scalar
+column index. `check_col_values()` loses its `DNAm` argument with it: nothing else needed the
+rownames.
+
+---
+
+## 2026-07-28 -- `mc_block()` hoists a column index, not a narrowed matrix
+
+**Closes the "Not done here" left open in the entry below** (the `slideimp` removal entry, Decision
+2). That entry established that no reader needs `block[["DNAm"]]` narrowed -- both index by name
+over subsets of `usable` -- but kept `narrowed <- DNAm[, usable_cols, drop = FALSE]` because the
+field is the seam the chunked front end fills from disk, so deleting the copy would leave a field
+that means nothing until Phase 6. The field stays; only the copy goes.
+
+**The hoist was never about the copy, it was about the name resolution.** The 2026-07-28 entry
+below measured narrow-once at 0.22 -> 0.25s against per-clock gathering's 0.22 -> 0.67s and read
+that as a win from narrowing the data. It is not: the gather is the same number of doubles either
+way. What narrowing shrank was the vector each character subscript hashes -- `colnames(narrowed)`
+(|usable|) instead of `colnames(DNAm)` (ncol). So the speedup is recoverable without the copy, by
+resolving names against `usable` once per block and subscripting by integer thereafter.
+
+`mc_block()` now carries `usable_idx = match(usable, colnames(DNAm))` and `block_cols()`
+(`R/utils.R`) maps any subset of `usable` to positions in the block's matrix. `observed_panel()`
+and `panel_sample_miss()` subscript by integer; `row_observed()` / `count_sample_miss()` take
+positions rather than names, which also drops the `match()` they each did internally.
+
+**Measured, on 40 samples x 380,554 CpGs (the PCBrainAge width), `clocks = "all"`, 115 clocks:**
+
+| | peak Vcells | elapsed |
+|---|---|---|
+| narrowed copy | 665.1 MB | 2.08-2.14s |
+| integer index | 523.7 MB | 1.95-2.00s |
+
+141.5 MB of peak reclaimed and no time given back -- slightly faster, consistent over three reps.
+The saving is `nrow x |usable| x 8` plus the gather's own transient, so it scales with the cohort:
+3.5 MB per sample here, ~7 GB at 2000 samples. Scores are **bit-identical** (`identical()` on the
+115-column matrix, not merely `max_abs = 0`), and `clocks_coverage()` / `samples_coverage()` /
+`per_clock` / `sample_miss` / `provenance` all compare equal.
+
+**`block_cols()` fails loudly, because integer subscripting does not.** `narrowed[, "notthere"]`
+was a subscript-out-of-bounds error; `DNAm[, NA_integer_]` is a silent column of NAs that would
+reach `%*%` and score. Every caller derives its names from `usable`, so the guard is unreachable
+today -- which is the same argument the `row_observed()` `NULL` guard rejected, for the same
+reason. `anyNA()` on an integer vector costs nothing at this size.
+
+**`DNAm` and `DNAm_full` now alias the same object, and both fields stay.** R stores two references,
+not two matrices, so the duplication is free. They are still a real distinction: Zhang2019's
+`sample_scale` op needs the caller's untouched matrix, and a chunked block may hand `mc_block()` an
+already-narrowed matrix from disk -- at which point `usable_idx` is computed against whatever
+arrived and the two diverge again. Resolving the index inside `mc_block()` rather than in
+`mc_cohort()` is what makes that work: cohort facts stay matrix-agnostic.
+
+---
+
+## 2026-07-28 -- a dead row is judged on the scoring panel; chunk bit-exactness retired; two plans retired
+
+Three outcomes of one audit that traced the chunking missingness path end to end. The chain itself
+is sound: over a 3-block split of all 101 sequence entries, every `per_clock` panel field is
+block-invariant, `score_imputed_partial` / `norm_imputed_partial` sum across blocks exactly, and
+`sample_miss$score` / `$norm` concatenate exactly -- also under non-contiguous reordered blocks, 30
+single-row blocks, and single-sex blocks. What follows is what did **not** hold.
+
+**1. `scan_missing_cpgs()`'s dead-row abort was scoped to the wrong panel.** It read `row_obs` off
+the one sweep, which covers `panels_union()` -- scoring **and** normalization CpGs. A sample is dead
+iff it observes nothing it can be *scored* from, and a normalization CpG scores no one. Measured: a
+`DunedinPACE` sample with 0/173 scoring CpGs and all 19,827 background CpGs present passed the gate
+silently and was then scored off a fully vendor-filled panel. The principle is already settled
+elsewhere -- `check_coverage()` stops on the scoring panel and only *warns* on a thin normalization
+background -- so this was the row-wise half failing to follow the column-wise half.
+
+**Decision.** `scan_missing_cpgs(DNAm, needed_cpgs, score_cpgs)` takes the scoring union as its own
+argument; `panels_union(panels, roles)` supplies it. The union sweep still drives classification,
+means and the value gates, because those genuinely need both panels. The dead check reuses the union
+`row_obs` when the two sets coincide -- every request without a normalizing clock, i.e. nearly all of
+them -- and otherwise pays one extra `col_stats()` pass over the scoring columns only.
+`row_observed()` (`R/utils.R`) is the shared "past the value gate, so never NULL" reader, so
+`count_sample_miss()` and the dead check no longer carry two copies of that guard.
+
+**Rejected: two disjoint sweeps** (scoring columns, then norm-only columns), which would have cost
+the same total traversal and needed no second pass. It splits `check_col_values()` in half, so the
+two range warnings can fire twice for one matrix and `inf_at`'s column position needs an offset to
+stay meaningful. Not worth it for a pass that is cheap and rarely taken.
+
+**2. "Chunk invariance is bit-exact" was never true of the pool, and is now retired.** The claim in
+`id-streaming-plan.md` sec 4.2 was measured over `MIXED`, the test's own hardcoded 6-clock list.
+Swept over all 101 entries: **94 differ**, worst 9.3e-10 absolute (`DNAmB2M`, scale 6.7e6) and
+5.1e-13 relative (`DNAmPhysAge`) -- ~200x inside `PARITY_REL_TOL`, so chunking is sound. Even
+`Hannum` and `Horvath1`, both *in* `MIXED`, drift; the test passes because `expect_equal`'s default
+tolerance is 1.49e-8, ~29,000x looser than the worst observed miss.
+
+**The cause is not missingness.** `observed_panel()` returns `identical()` `cols` and `values` for a
+block and for the whole cohort -- the cohort facts do exactly their job. The reassociation is in
+`%*%`: reference BLAS `dgemm` blocks by `M`, so row count changes accumulation order.
+Package-independent reproducer -- `A[1:k, ] %*% b` differs from `(A %*% b)[1:k]` at some `k` and not
+others, and is bit-exact at every `k` under `options(matprod = "internal")`.
+
+**Decision: loosen the wording, not the test.** The assertion stays a bare `expect_equal`, which is
+the honest claim -- agreement within tolerance. No explicit `tolerance =` was added, and the
+CLAUDE.md sentence requiring one for chunk invariance and parity was **removed**: parity already
+carries real bounds in `PARITY_ABS_TOL` / `PARITY_REL_TOL`, and pinning a second, hand-chosen
+number on the chunk test buys nothing but a knob to re-tune whenever BLAS or a panel changes.
+Consequence recorded for Phase 6: one shared pass-1 accumulator is still right for the *means*, but
+it cannot deliver bit-exact *scores* -- the drift above exists with the means held fixed.
+
+**3. `migration-plan.md` and `detail-plan.md` retired.** Both described a rewrite whose destination
+is now known, and both had drifted (`detail-plan.md` still specified `slideimp::mat_miss`, retired
+above; sec 5.4 of the surviving plan still described `col_stats()` as returning `min`/`max` and a
+live `anyNA()` short-circuit, neither of which exists). Built behavior is specified by `CLAUDE.md`'s
+invariants plus the code; `dev/id-streaming-plan.md` survives as the one live design doc and covers
+**only unbuilt work**. Recoverable from git history, and older entries here cite them by `sec N`.
+**Do not reconstitute them** -- a long-form spec of shipped behavior is a copy that rots, which is
+what these two demonstrated.
+
+**Not a bug, re-verified:** the sex-mask loop in `compute_coverage()` masks `score_miss` but not
+`norm_miss`. It is unreachable from user input, not merely latent -- all 14 routed members and 7
+aliases declare `normalization = "none"`, `clock_norm_cpgs()` returns an empty panel under
+`normalize = TRUE` *and* `FALSE`, and `resolve_normalize()` hard-errors on a named
+`c(DNAmFitAge_Female = TRUE)`. Only an upstream catalog change could reach it, so no guard was
+added for a state the catalog cannot express.
+
+**Sites.** `R/missingness.R` (`scan_missing_cpgs()`), `R/utils.R` (`row_observed()`,
+`count_sample_miss()`), `R/resolve_inputs.R` (`panels_union()`), `R/score_cohort.R` (`mc_cohort()`),
+`tests/testthat/test-value-gates.R` (new dead-row scoping test, which does not fire under the old
+union scoping), `CLAUDE.md` (test altitude, source-of-truth docs), `dev/id-streaming-plan.md`
+(header, sec 4.2, 5.4, 6.2, 7). Always-on tier after: 0 failures, 761 passing. Parity not run.
+
+---
+
+## 2026-07-28 -- `col_stats()` takes a column index, and that retires `slideimp`
+
+**Context.** `scan_missing_cpgs()` built `DNAm[, present_needed, drop = FALSE]` purely so the kernel
+had something contiguous to walk. On the shipped catalog the panel union is 384,554 CpGs -- ~45% of
+an EPIC array -- so at 1,000 samples that temporary is 2.87 GB, allocated and thrown away. The
+`subset` argument was already written down as a Phase 6 to-do (`dev/id-streaming-plan.md` sec 5.2).
+
+**Decision 1 -- `cols` is an index into `obj`, and positions stay relative to `cols`.** The
+alternative was to have `inf_at[2]` report the column of `obj`, which reads more naturally in
+isolation but would have forced `check_col_values()` to stop indexing `present_needed` and start
+translating back through the index. Keeping positions `cols`-relative meant the R-side contract did
+not move at all: one line changed in `scan_missing_cpgs()`, and `check_col_values()` was untouched.
+`NULL` scans every column, which is what kept the existing kernel tests as-is.
+
+**Measured, and bit-exact.** On 300 x 80,000 scanning 40,000 scattered columns (a 92 MB slice): peak
+333 -> 243 MB, and 0.054 -> 0.034 s. The result is `identical()` to the old path, not merely equal --
+columns are independent accumulators and rows are visited in the same order within each, so the
+summation order cannot move. **No parity implication for this half**: it is arithmetically the same
+sequence of additions.
+
+**Decision 2 -- the row half comes off the same sweep, reversing "slideimp keeps the row half".**
+The 2026-07-27 entry below split the work deliberately: `col_stats()` took the column half and
+`slideimp::mat_miss(col = FALSE)` kept the row half, on the grounds that the row half "is per row and
+correct against any block". That reasoning still holds -- it just stopped being a reason to call
+another package, because `col_stats()` already returns `row_obs` for the all-NA-sample gate.
+`count_sample_miss()` is now `length(cached) - row_obs`, which also removes a second slice
+(`DNAm[, cached]`, once per distinct panel -- 92 of them on `clocks = "all"`).
+
+**The semantics are identical, which was checked rather than assumed.** The 2026-07-27 entry says
+`mat_miss()` "counted only NA"; it counts NaN too. The real difference was only ever `Inf`, and on
+the row half there is none: `mat_miss` treats `Inf` as not-missing and `row_obs` treats it as
+observed -- the same claim. Verified over 200 randomized matrices with NA and NaN at random
+densities and random panels: `identical()` every time. So this half does not move a number either,
+though unlike Decision 1 that is a measured fact rather than a structural one.
+
+**The one real difference is the bail, and it is guarded, not reasoned away.** `col_stats()` returns
+`row_obs = NULL` when it stops at a non-finite value, where `mat_miss()` would have returned counts.
+That branch is unreachable from `compute_coverage()` -- `cached` is a subset of `usable`, which is a
+subset of `present_needed`, and `check_col_values()` already aborted on any `Inf` there. Unreachable
+is not the same as impossible, and the failure would surface as a length error three frames away, so
+`count_sample_miss()` `stop()`s on `NULL` explicitly.
+
+**Consequence: `slideimp` leaves `Imports`.** It was the last `slideimp::` call in `R/`. The install
+closure drops from 19 packages to 9 -- `BH`, `bigmemory`, `bigmemory.sri`, `collapse`, `mirai`,
+`nanonext`, `RcppArmadillo`, `RcppThread`, `slideimp`, `uuid`. That was never the motivation (the
+memory was), but it is the larger effect: four heavy compiled trees for one two-line counter.
+
+**Not done here.** `mc_block()` still materializes `narrowed <- DNAm[, usable_cols, drop = FALSE]`
+and retains it for the whole scoring pass -- the same size as the slice Decision 1 deleted, so peak
+RSS is unchanged until that is resolved. No reader needs it narrowed (both index by name over
+subsets of `usable`, and `resolve_cpgs()` defines `present` by intersection with `usable`), but the
+field is the seam the chunked front end fills from disk, so removing the copy leaves a field that
+means nothing until Phase 6. Left open deliberately.
+
+---
+
+## 2026-07-28 -- pack staleness keys on the encoder code; sync sources its shared vocabulary from `R/`
+
+**Context.** An upstream reviewer audited `data-raw/sync.R` after the invariant hoist
+(`dev/sync-review-audit.md`, verdicts recorded in its sec 5). Two of its findings were confirmed
+here and fixed; the rest were declined or deferred, with reasons in that file.
+
+**Decision 1 -- the external-pack lockfile keys on the encoder code, not only on upstream.**
+`lockfile_hit()` compared `bundle_hashes` plus "the packs still exist", so an edit to
+`encode_systemsage()` / `encode_pcclocks()` / `encode_pcbrainage()` with no upstream meta change
+hit the cache and **shipped the old pack bytes silently**. `sync_code_fingerprint()` now digests
+`EXTERNAL_ENCODING_VERSION` together with the **parsed** `data-raw/sync.R` and `R/accessors.R`;
+`write_lockfile()` stores it and `lockfile_hit()` requires identity.
+
+- **Parsed, not hashed as bytes**, so comments and formatting never force a rebuild -- this repo
+  trims comments in `sync.R` often (`7abe239`, `6d110a8`) and each of those would otherwise have
+  invalidated three packs.
+- **Whole-file, not a curated list of encoder functions.** A list is a thing to forget to update,
+  and every omission is a silent stale pack. The over-broad key is affordable precisely because a
+  false rebuild is cheap: identical inputs re-encode to identical bytes, so `payload_hash`, the
+  filename, the release tag and the upload skip are all unchanged. Time only.
+- **`R/accessors.R` is in the key** because of Decision 2 -- it now supplies the pack's column
+  labels, so an accessor edit can change pack contents.
+- **Fails closed.** Unreadable code returns `NA_character_` and never hits; a lockfile written
+  before the field existed has no `code_fingerprint` and never hits. The first `sync()` after this
+  change therefore rebuilds all three packs once, by design.
+- **Known narrow hole, not worth machinery:** the fingerprint reads the files on disk, so editing
+  `sync.R` and calling `sync()` *without* re-sourcing stamps the new file's fingerprint onto packs
+  built by the old in-memory code. Re-source after editing; the header line says so.
+
+**Rejected.** (a) Storing `encoding_version` alone and comparing it -- that is the documented lever,
+but a lever nobody remembers to pull is the same bug one step later; the fingerprint subsumes it
+(the constant is inside the digest, so bumping it still works). (b) Hashing the loaded function
+bodies instead of the files -- closes the hole above, but needs a list of which bindings count,
+which is exactly the maintenance burden the whole-file key avoids.
+
+**Decision 2 -- `sync.R` sources `R/accessors.R`; the mirrored constants are deleted.**
+`NORM_BACKGROUND_ROLES` and `STACK_OPERAND_FIELDS` were hand-kept copies of `NORM_ROLES` and
+`STACK_NAMESPACES` -- two copies of one fact **inside a single package**, where drift would let sync
+validate a vocabulary the accessors do not use. `sync.R` now does
+`source("R/accessors.R", local = mc_runtime)` and takes both constants from there.
+
+Also deduplicated: `systemsage_stack_labels()` re-implemented the operand-order rule (`inputs`, then
+`internal`, then `covariates`) and the `columns` label mapping. It now delegates to the accessors'
+`stack_label_map()`, keeping only its own "exactly one stack step" check. This one mattered more
+than the constants -- it is behaviour, so drift would have **mislabelled a SystemsAge column** in
+the pack rather than merely weakening an assertion.
+
+Sourcing is safe and checked: `accessors.R` parses to 51 top-level forms, all assignments, no
+load-time side effects, and its names do not intersect `sync.R`'s. It is loaded into its own
+environment (`mc_runtime`), so a future name added to either file cannot silently shadow the other.
+
+**Rejected.** (a) Moving the constants to a new `R/constants.R` -- the accessors are the executable
+schema and these constants are part of it; a second home splits it. (b) A test asserting the two
+copies agree -- `CLAUDE.md` ("Test altitude") forbids a test from sourcing or parsing anything under
+`data-raw/`, so the only available direction is sync reading `R/`, which is also the direction that
+removes the duplicate outright.
+
+**Not run.** `sync()` itself (it rewrites `R/sysdata.rda` and the staged packs) and the parity tier.
+Verified by sourcing `sync.R` in a vanilla session: constants identical to the accessors',
+`systemsage_stack_labels()` byte-identical to the deleted implementation on the real SystemsAge
+meta, fingerprint stable across sessions, insensitive to a comment-only edit, sensitive to an
+`EXTERNAL_ENCODING_VERSION` bump, and `lockfile_hit()` false on the staged lockfile / a changed
+fingerprint / an unreadable file, true only when it matches.
+
+**Sites.** `data-raw/sync.R` (`sync_code_fingerprint`, `lockfile_hit`, `write_lockfile`, `sync`,
+`assert_catalog_shape`, `systemsage_stack_labels`, setup block); `dev/sync-review-audit.md` sec 5.
+
+---
+
+## 2026-07-28 -- two tensor-header guards were already hoisted; four shape invariants now are
+
+**Decision.** Second pass over the same question as the entry below, this time for guards rather
+than lookups. Two changes:
+
+**1. `require_fields()` is gone -- one of its three callers was real.** `read_tensor_csv()`
+(`data-raw/sync.R`) already stops when a vendored tensor's CSV header does not match its declared
+`row_key` + `col_key`. The columns two callers re-checked at score time were *exactly* that
+declaration -- `EpiTOC2` params (`cpg` + `delta,beta0`) and the `DNAmFitAge` KDM table
+(`component` + `weight,center,scale`) -- so both were re-deriving a fact sync had already proven
+from the same field. Deleted. The third caller (`grimage_rescale`'s `m_cox`/`sd_cox`/`m_age`/
+`sd_age`) reads a *recipe step's* `params`, which no tensor header covers, so it stays -- inlined
+into `grimage_rescale_params()` (`R/score_GrimAge.R`), since a generic helper with one caller is
+not a helper.
+
+**Do not generalize this to "sync checks every component."** `col_key` is asserted *only when
+declared*, and `SystemsAge/systems_pca_rotation` declares none -- correctly, since a PCA rotation
+has one column per system and cannot enumerate them. The hoist is safe at these two sites because
+both declare it. `row_key` and `file`, by contrast, are declared by every component in the shipped
+catalog.
+
+**2. `assert_catalog_shape()` (`data-raw/sync.R`) asserts four invariants, verified to hold over
+all 129 clocks:** at most one `stack` op and at most one `poly` op per clock; at most one
+normalization-background probe_set; and a stack's declared `columns` covering every operand. Each
+was probed by mutation, and each fires -- inert probes were the failure mode called out in the
+entry below. Note this is *not* "recipe ops are unique": `linear` and `linear_mean` repeat by
+design, one per stack column.
+
+**Only one runtime guard could actually be retired, and that is the honest measure of this
+change.** `physage_poly_coef()` handles the zero case separately, so its `>1` branch is now dead
+and is deleted. The other three could not be:
+
+- `stack_step()` and `norm_background_probe_set()` go through `pick_one()`, which requires
+  *exactly* one. Sync asserting "at most one" retires half the condition; the zero case is still
+  live and is still a runtime stop.
+- `stack_label_map()`'s count check is directly asserted by `test-score-external.R` ("a columns
+  list that does not cover every operand is a hard stop"), which hand-mutates a step -- a state
+  sync can never see.
+
+So the value here is *when* the failure lands, not how many lines went away: a broken sync now
+fails the maintainer with the clock named, rather than surfacing at score time behind
+`get1index`. Stated plainly because the reverse would be easy to imply.
+
+**Measured, not assumed, on loud-vs-silent.** Deleting the recipe step behind a `DNAmPhysAge` stack
+operand stops (`get1index`) -- that branch was already loud, so the assertion buys a message there,
+not a prevented wrong number. The silent case remains the SystemsAge shape recorded below (a NULL
+intercept scoring a column of NAs). A first attempt to measure this via `calc_clocks()` on
+`SystemsAge` was inert -- the pristine control stopped too, on an unloaded pack -- which is the
+same trap as before: **run the pristine control first, every time.**
+
+**Rejected as a false positive:** a probe flagged `GrimAgeV1/X` and `GrimAgeV2/X2` as declaring
+unnamed `covariates`. Two different shapes share the field name -- in a `stack` step `covariates`
+is a list of operand *names* (correctly unnamed); in a coefficient block it is `name -> coef`.
+`covariate_coefs_from()`, which silently returns `numeric(0)` on unnamed input, only ever sees the
+latter. There is no reachable silent-empty path.
+
+**Verified.** `devtools::test()`: 455 tests, 731 passing expectations, 0 failures, 248 skips.
+`R/sysdata.rda` rebuilt at `ca6833cf`; `assert_catalog_shape()` is data-neutral, so every object is
+identical to the rebuild in the entry below. `test-score-fitage.R` re-derived its KDM golden through
+the deleted `fitage_kdm_params()` and now calls `component_tensor(member, "component")` directly.
+Parity and `R CMD check` were not run.
+
+---
+
+## 2026-07-28 -- sync keys the three looked-up declaration lists, so three guards stop existing
+
+**Decision.** `sync()` now names `components` (by `name`), `probe_sets` (by `role`) and `recipe`
+(by `out`) before they reach `R/sysdata.rda` -- `key_catalog_lists()` / `key_declarations()` in
+`data-raw/sync.R`, applied after `trim_build_only_fields()`. `component_named()`,
+`probe_sets_cpgs()` and `recipe_step_out()` (`R/accessors.R`) become `[[` lookups. Uniqueness is
+asserted once, at build, where a collision is a sync stop.
+
+**Why these three and not the other two scans.** Measured over the shipped 129 clocks:
+
+| scan | key | unique + total? |
+| --- | --- | --- |
+| `component_named` | `name` | yes; 0 components lack a name |
+| `probe_sets_cpgs` | `role` | yes |
+| `recipe_step_out` | `out` | unique; 24 steps carry no `out` (left unnamed, never looked up) |
+| `component_tensor` | `row_key` | **no** -- DNAmPhysAge, DNAmPhysAge_years, GrimAgeV2, SystemsAge |
+| `stack_step` | `op == "stack"` | not a key; `op` collides on 4 clocks |
+
+So `pick_one()` stays, and keeps exactly the two callers whose predicate is not a key. This is the
+same loud-vs-silent filter as the entry below, applied one level up: the three multiplicity guards
+did not get deleted for being unreachable, they stopped being expressible.
+
+**Not the thing rejected in `dev/simplification.md`.** That verdict refused flattening
+`stack_*` / `pick_one` / `recipe_step_out` because it "would make every future plan field require
+meta-repo access plus a `sysdata.rda` regen". That reasoning is about moving *derived values*
+upstream; naming list elements moves no semantics. A contributor still reads
+`comps[["dnam_beta"]][["new_field"]]` off the same entry with no meta repo, and adding a whole new
+component already needed sync. What is genuinely new is a build-time contract: a component whose
+`name` collides, or a probe_set whose `role` does, now stops `sync()`.
+
+**Considered and rejected: an environment.** The literal ask was a structure that hard-errors on
+absent and does not scan. R does not have one. On R 4.6.0 `env[["missing"]]` returns `NULL` exactly
+like a list; only `get(k, envir = e, inherits = FALSE)` errors, and it names the key, not the clock,
+so `required_field()` gets rewritten rather than removed. Against that: reference semantics inside
+`sysdata.rda`, no `lapply`/`Filter` over the records, and nothing legible from `str()`. The
+hard-error property has to come from a wrapper in R either way, and `required_field()` is four lines
+covering every call site.
+
+**Cost, stated plainly.** `accessors.R` loses ~22 lines; `sync.R` gains 76. This is a net increase
+in total lines and is not a size argument -- it moves an invariant from N runtime checks to one
+build-time one.
+
+**Verified.** Rebuilt against the staged meta at `ca6833cf` (the sha the committed `sysdata.rda`
+already recorded, so no upstream drift): `mc_groups`, `mc_bundles`, `mc_index`, `mc_citations` and
+`mc_provenance` are identical, and `mc_catalog` is identical once the new names are stripped --
+i.e. the delta is names and nothing else. `devtools::test()`: 455 tests, 731 passing expectations,
+0 failures, 248 skips, matching the entry below. Parity and `R CMD check` were not run.
+
+---
+
+## 2026-07-28 -- catalog guards: reachability was the wrong test, silence is the right one
+
+**Decision.** The `CATALOG_BUG` constant is gone. Of its 20 sites, **10 were deleted** and **8 kept**
+behind a compact `catalog_bug(fmt, ...)` helper (`R/accessors.R`); `unroutable()` and the `MC_TAGS`
+abort keep their own wording. Accessor error-block lines drop from 143 to 40. **No catalog-contract
+test was added** -- see below.
+
+**This reverses the plan recorded one entry earlier**, which was "replace all 21 with one
+catalog-contract test". Two things were wrong with it.
+
+**First: a contract test would have encoded the wiring.** To assert every accessor precondition, the
+test has to know which `(id, row_key)` pairs `component_tensor()` is called with, which names
+`component_named()` is asked for, which recipe `out` values are read. That is the call graph copied
+into `tests/` -- the same anti-pattern as an internal dispatch-tag table, which the altitude rules
+forbid, and it rots the moment a branch changes. The catalog's *shape* can be asserted generically;
+the accessors' *preconditions* cannot, because they are a property of the code.
+
+**Second: reachability was the wrong filter.** All 20 were unreachable against the shipped catalog,
+so by the earlier entry's own logic all 20 should have gone. But unreachable-today says nothing
+about what happens the day a sync breaks the assumption, and the failure modes are not alike. The
+filter that matters is: **if this guard were absent, would a corrupt catalog fail loudly, or score a
+wrong number quietly?**
+
+Measured, by mutating `mc_catalog` in the loaded namespace and running the real consumer:
+
+- **Loud, so deleted** -- dropped `coef_path`, dropped `vendor_mean` ref, two declared normalization
+  schemes, a normalization probe_set with no `file`, a Cox operand absent from the stack
+  declaration, a stack input with no `linear_mean` op, a PCA tensor missing from a SystemsAge pack,
+  a rotation tensor lacking its declared `row_key` column. Each dies at the next line
+  (`get1index`, `subscript out of bounds`, `'data' must be of a vector type`, or a surviving
+  `pick_one`). Cryptic, but a stop is a stop, and these are sync faults a maintainer reads with the
+  traceback in hand.
+- **Silent, so kept** -- `pick_one()` and `recipe_step_out()` multiplicity (an unguarded `Filter`
+  scores the *first* hit), `physage_poly_coef()`'s two-poly case (same), and `systemsage_step()`'s
+  absent-step case, which is the sharpest: a missing recipe step yields a `NULL` intercept,
+  `as.numeric(NULL)` is `numeric(0)`, and **`matrix(numeric(0), nrow = n, ncol = 1)` returns a
+  column of NAs without error**. Also kept: `required_field()`, `require_fields()` and
+  `bundle_tensor()`, which are shared helpers covering many call sites for two lines each, and
+  `stack_label_map()`, which `test-score-external.R` already asserts.
+
+**Why the surviving guards need no test to back them.** They fire at runtime, and the smoke tier
+runs `calc_clocks()` over every callable clock -- so an ambiguity a sync introduces fails
+`devtools::test()` through the guard itself. Guard plus existing tier is complete; a contract test
+would only restate it, in the one form the altitude rules reject.
+
+**Method note for the next audit.** Two of the first-pass probes were inert and read as findings:
+one mutated `internal` for `GrimAgeV1`, whose stack declares every operand under `inputs`, and one
+filtered a recipe with a predicate that kept everything. Both "silently returned a value" because
+nothing had been corrupted. **Probe the real consumer, and diff the score against the pristine run
+before calling anything silent** -- an unchanged score is evidence the mutation missed, not evidence
+the guard was load-bearing.
+
+**Verified with `devtools::test()`:** 455 tests, 731 passing expectations, 0 failures, 248 skips
+(parity tier off). Parity and `R CMD check` were not run.
+
+---
+
+## 2026-07-28 -- the pheno-column check moves to the front door, and dead guards go
+
+**Decision.** The "clock X needs pheno column Y" error is now raised once, in `check_pheno()`
+(`R/validate_inputs.R`), against `spec$covariates`. The three copies in the score branches
+(`linear_predictor()`, `score_GrimAge()`, `pack_cov_contrib()`) are gone, and
+`linear_predictor()` loses its `id` argument -- it existed only to name that message.
+
+**Why.** All three were unreachable. Every clock's coefficient covariates are a subset of its
+declared `covariates_required` (checked: 0 exceptions over 129 entries), and the whole covariate
+universe is `{Age, Female}`; `mc_cohort()` already stops when a required covariate's pheno is
+absent, and `resolve_pheno()`'s column subset stops when the column is. So the carefully worded
+message sat on a dead path while the live path fell through to checkmate --
+`Assertion on 'pheno[["Female"]]' failed: Must be of type 'integerish', not 'NULL'`. That is the
+inversion worth naming: **a guard's message is only worth what its reachability is.** The check
+belongs where the fact is known (the front door, which has the covariate union), not where the
+value is consumed.
+
+**Also removed, as dead or duplicated:** the `is.environment(notes)` test in
+`note_scoring_failure()` (`mc_block()` is the only constructor and always sets `new_notes()`);
+`clock_entry()`'s arity check on an internal accessor only ever called with a scalar;
+zero-length fallbacks in `clock_norm_scheme()` / `clock_cross_sample_at()` that `optional_field()`
+already defaults -- and where a silent `"none"` would have been a *wrong score* rather than a
+stop; the post-delete `file_exists()` sweep in `clear_mc_assets()` (`fs::file_delete()` throws);
+`check_row_coverage()`'s `assert_number()`, which `calc_clocks()` already does before scoring
+rather than after; and `mc_canonicalize_ext_data()`'s `is_path_string()` test, which
+`mc_resolve_assets_dir()` repeats one call later. The `mc_resolve_assets_dir()` copy **stays** --
+it is the gate the 2026-07-23 entry hardened.
+
+**Not merged, though it looks duplicated:** `load_mc_assets()`'s inline group normalization is not
+`mc_resolve_groups()`. They disagree on the empty set on purpose -- `mc_resolve_groups(character(0))`
+means *all* external groups, `load_mc_assets(character(0))` means *no packs needed*, which is the
+common case (`pack_groups_needed()` returns empty for a bundled-only run). Collapsing them would
+download three packs for a run that needs none.
+
+**One-character bug, found by the same pass.** `list_clocks()` read
+`suggestion_pools()[["group"]]`; the field is `groups`, so every unknown-group call died inside cli
+(`argument lengths differ`) instead of suggesting anything. `expect_error()` with no regex passed
+throughout, because something did error. That test now pins `"Horvath"` -- a narrow exception to
+"assert *that*, not the wording", justified by the rule's own carve-out: without it the test
+cannot tell a working rejection from a broken suggestion pool. This is the standing cost of
+hand-built messages that the altitude rule deliberately does not hold, and the argument for
+taking the `CATALOG_BUG` sites next -- done in the entry above, though not the way this one
+proposed.
+
+**Verified with `devtools::test()`:** 455 tests, 731 passing expectations, 0 failures, 248 skips
+(parity tier off). Parity and `R CMD check` were not run.
 
 ---
 

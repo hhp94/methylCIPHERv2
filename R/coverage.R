@@ -1,10 +1,43 @@
 # coverage/QC, once upstream of scoring, keyed by clock id
 
+# per-sample observed count over column positions (callers are past the value gate)
+row_observed <- function(DNAm, idx) {
+  obs <- col_stats(DNAm, idx)[["row_obs"]]
+  # NULL means the kernel bailed on a column whose sum overflowed, which the
+  # value gate in scan_missing_cpgs() already ruled out for these columns
+  if (is.null(obs)) {
+    stop(
+      "row_observed: col_stats bailed on a non-finite value past the value
+       gate. This is a package bug -- please report it.",
+      call. = FALSE
+    )
+  }
+  obs
+}
+
+# per-sample count of cohort-mean fills over cached column positions (integer)
+count_sample_miss <- function(DNAm, cached_idx) {
+  out <- if (length(cached_idx)) {
+    length(cached_idx) - row_observed(DNAm, cached_idx)
+  } else {
+    integer(nrow(DNAm))
+  }
+  names(out) <- rownames(DNAm)
+  out
+}
+
+# one panel's per-sample coverage from present/needed scalars and miss counts
+panel_ratio <- function(present, miss, needed) {
+  n_observed <- present - miss
+  list(n_observed = n_observed, cov = n_observed / needed, needed = needed)
+}
+
 # per-sample partial-fill count over one panel's present CpGs
 panel_sample_miss <- function(present, block) {
+  # counted on the raw matrix -- the cache has the NAs already filled
   count_sample_miss(
     block[["DNAm"]],
-    cached_cols(present, block[["partial_cache"]])
+    block_cols(cached_cols(present, block[["partial_cache"]]), block)
   )
 }
 
@@ -25,6 +58,32 @@ stitch_routed_sample_miss <- function(alias, score_miss, female, sample_id) {
     }
   }
   miss
+}
+
+# one clock's coverage record (the only writer of record fields)
+coverage_record <- function(cpgs, score_miss, norm_miss = NULL) {
+  policy <- clock_impute(cpgs[["clock_id"]])[["policy"]]
+  fill <- identical(policy, "vendor_mean")
+  n_absent <- length(cpgs[["score_absent"]])
+  list(
+    clock_id = cpgs[["clock_id"]],
+    policy = policy,
+    normalizes = cpgs[["normalizes"]],
+    score_needed = length(cpgs[["score_needed"]]),
+    score_present = length(cpgs[["score_present"]]),
+    score_used = length(cpgs[["score_present"]]) + if (fill) n_absent else 0L,
+    score_imputed_partial = sum(score_miss, na.rm = TRUE),
+    score_imputed_full = if (fill) n_absent else 0L,
+    score_dropped = if (fill) 0L else n_absent,
+    norm_needed = length(cpgs[["norm_needed"]]),
+    norm_present = length(cpgs[["norm_present"]]),
+    norm_imputed_partial = if (is.null(norm_miss)) {
+      0L
+    } else {
+      sum(norm_miss, na.rm = TRUE)
+    },
+    missing_cpgs = cpgs[["score_absent"]]
+  )
 }
 
 # full coverage for the compute sequence (per_clock records + per-panel sample_miss)

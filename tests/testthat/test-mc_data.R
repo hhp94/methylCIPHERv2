@@ -73,7 +73,10 @@ test_that("the assets dir resolves arg > option > env > default", {
   expect_equal(get_mc_assets_dir(), path.expand("from-option"))
 
   # an explicit source beats both layers
-  expect_equal(mc_resolve_assets_dir("ext-data-arg"), path.expand("ext-data-arg"))
+  expect_equal(
+    mc_resolve_assets_dir("ext-data-arg"),
+    path.expand("ext-data-arg")
+  )
 })
 
 test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", {

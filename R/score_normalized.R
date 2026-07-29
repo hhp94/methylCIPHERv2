@@ -1,5 +1,22 @@
 # normalize-then-linear over the clock's declared panel and target
 
+# betanorm is a soft dep (every normalizing branch needs it)
+require_betanorm <- function(id) {
+  if (!requireNamespace("betanorm", quietly = TRUE)) {
+    stop(
+      sprintf(
+        paste0(
+          "%s needs the betanorm package for normalization. ",
+          "Install it from GitHub: pak::pak(\"hhp94/betanorm\")."
+        ),
+        id
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
+}
+
 score_normalized <- function(id, cpgs, block, results) {
   # declined or not requested -- score raw
   if (!cpgs[["normalizes"]]) {

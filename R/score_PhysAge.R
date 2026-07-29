@@ -9,24 +9,15 @@ physage_raws <- function(id, cpgs, block, results) {
   cols <- lapply(surrogates, function(s) {
     coef <- s[["coef"]]
     present <- intersect(names(coef), cpgs[["score_present"]])
-    absent <- setdiff(names(coef), present)
-    fill <- absent_fill(
+    # mean over present CpGs only
+    raw <- component_linpred(
       id,
       coef,
-      absent,
-      label = paste0(id, " surrogate ", s[["name"]])
+      present,
+      block,
+      label = paste0(id, " surrogate ", s[["name"]]),
+      reduction = "mean"
     )
-    lp <- linear_predictor(
-      coef = coef,
-      intercept = 0,
-      cov_coefs = numeric(0),
-      score_present = present,
-      block = block,
-      id = s[["name"]]
-    )
-    # mean over present CpGs only
-    n_terms <- length(present) + length(fill[["filled"]])
-    raw <- (as.numeric(lp[["cpg_contrib"]]) + fill[["offset"]]) / n_terms
     if (s[["negate"]]) -raw else raw
   })
 
@@ -133,18 +124,8 @@ physage_surrogates <- function(id) {
   )
 
   lapply(order, function(raw_name) {
+    # a stack input with no linear_mean op leaves component_named() 0 hits
     op <- by_out[[raw_name]]
-    if (is.null(op)) {
-      stop(
-        sprintf(
-          "%s: stack input %s has no matching linear_mean op. %s",
-          id,
-          raw_name,
-          CATALOG_BUG
-        ),
-        call. = FALSE
-      )
-    }
     comp <- component_named(entry[["components"]], op[["coef"]], id)
     list(
       name = raw_name,
@@ -162,17 +143,6 @@ physage_poly_coef <- function(id) {
   )
   if (!length(step)) {
     return(NULL)
-  }
-  if (length(step) != 1L) {
-    stop(
-      sprintf(
-        "%s has %d poly ops (expected 0 or 1). %s",
-        id,
-        length(step),
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
   }
   as.numeric(unlist(step[[1]][["coef"]]))
 }

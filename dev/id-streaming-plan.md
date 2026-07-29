@@ -1,8 +1,11 @@
 # Chunked scoring, prepared inputs, and record binding
 
-Tracked design doc. Cited by `dev/detail-plan.md` sec 5.1 / 6 / 7.1 and by four `dev/DECISIONS.md`
-entries, **by phase number** -- see "Phase identifiers are stable" below before renumbering anything.
-Section numbers are cited by nothing and may move freely.
+The one tracked design doc, and it covers **only work that is not built yet**. Shipped behavior is
+specified by `CLAUDE.md`'s invariants plus the code; `migration-plan.md` and `detail-plan.md` were
+retired on 2026-07-28 and must not be reconstituted (DECISIONS).
+
+Cited by four `dev/DECISIONS.md` entries **by phase number** -- see "Phase identifiers are stable"
+below before renumbering anything. Section numbers are cited by nothing and may move freely.
 
 Three problems share one seam (Phase 5) and are therefore designed together: chunking, binding, and
 the prepared-input record `prep()` (Phase 7). Per-clock normalization was originally folded into
@@ -210,20 +213,25 @@ Testable, and the only thing that actually proves chunk-safety: score a cohort, 
 blocks, `expect_equal`. Lives in the always-on tier as `tests/testthat/test-chunk-invariance.R`
 (sec 10), and needs no chunk source -- it splits a matrix in memory and calls the seam directly.
 
-**Measured: every clock agrees to the last bit** across a 3-block split, on a cohort carrying all
-three missingness shapes at once, with **no exclusion**. That is stronger than the doc required, and
-the reason is that Phase 5 computes each mean once in `mc_cohort()` and every block reads the same
-number, so there is no per-block re-summation to reassociate. The two PhysAge clocks were the sole
-exception until Phase 3 (off by 2.8 and 11 **years** on a 3-block split, exactly as sec 6 predicts --
-a block z-scored against the block); now their intermediates concatenate and reduce once, and they
-land bit-identical too.
+**Measured: every clock agrees, across a 3-block split, on a cohort carrying all three missingness
+shapes at once, with no exclusion.** The assertion is `expect_equal` -- agreement within tolerance,
+which is the claim being made. It is **not** bit-exactness: swept over all 101 sequence entries
+(2026-07-28), 94 of them differ in the last bits, worst **9.3e-10 absolute** (`DNAmB2M`, whose scale
+is 6.7e6) and worst **5.1e-13 relative** (`DNAmPhysAge`). That is ~200x inside `PARITY_REL_TOL`, so
+chunking is sound; the earlier "agrees to the last bit" claim here was measured over a 6-clock list,
+not the pool, and is retired (DECISIONS 2026-07-28).
 
-**Equal, not identical, and the reason is the mean.** Bit-exactness above is a property of the
-single-pass accumulator, not a promise Phase 6 inherits: once pass 1 sums block by block and adds the
-partials, the association order changes and the means can differ in the last bit, moving every score
-built on them. Either the single-pass path accumulates in the same block order -- one shared
-accumulator, agreement by construction -- or the test carries an explicit bound. Prefer the shared
-accumulator and keep the bound tight; `expect_identical` is banned package-wide regardless
+**The drift is not the fill, and not the mean.** `observed_panel()` returns `identical()` `cols`
+and `values` for a block and for the whole cohort -- the cohort facts do their job exactly. The
+reassociation is downstream, in `%*%` (`linear_score()`): reference BLAS `dgemm` blocks by `M`, so
+the row count changes the accumulation order. Reproducible with no package involved -- `A[1:k, ] %*% b`
+differs from `(A %*% b)[1:k]` at some `k` and not others -- and bit-exact at every `k` under
+`options(matprod = "internal")`.
+
+**Consequence for Phase 6.** Computing each mean once in `mc_cohort()` is still right, and pass 1
+should accumulate in one shared accumulator so the means themselves do not move. But that cannot buy
+bit-exactness for the scores: the drift above exists with the means held fixed, so an explicit bound
+is the only option, not the fallback. `expect_identical` is banned package-wide regardless
 (CLAUDE.md, "Test altitude").
 
 ## 5. Phase 6 -- chunk sources and the two passes (not started)
@@ -293,7 +301,7 @@ Two kernels are ours, and they live in this package's own C++ (the package is go
   Its `!R_finite` test also covers `+/-Inf`, but that branch is unreachable through the supported
   path: `col_stats()` scans the same columns earlier in `scan_missing_cpgs()` and aborts on the
   first one (sec 5.4), so only NA and NaN reach the fill.
-- **`col_stats(obj)`** -- one traversal, returning a **list**: `stats` (a 2 x ncol matrix with named
+- **`col_stats(obj, cols)`** -- one traversal, returning a **list**: `stats` (a 2 x ncol matrix with named
   rows `sum` and `n_obs`), the two global range flags `any_lt0` / `any_gt1`, and `inf_at`. The mean
   is `sum/n_obs` and the NA count is `nrow - n_obs`, so one pass classifies the columns, supplies the
   fill, **and** carries the value gates (sec 5.4). This is what `scan_missing_cpgs()` now runs on,
@@ -308,9 +316,16 @@ Two kernels are ours, and they live in this package's own C++ (the package is go
   The kernel **reports and does not decide**: `check_col_values()` (R) raises the abort and the
   warnings so all three reach the user through cli. Missing and bad are counted apart -- NA/NaN are
   "not observed" and fill from the cohort mean, `+/-Inf` is bad data no fill can repair.
-  **Still to add for Phase 6:** a `subset` argument so the slice happens inside the kernel.
-  `slideimp` keeps the row half (`mat_miss(col = FALSE)`), which is per row and correct against any
-  block.
+  **`cols` is 1-based column indices into `obj`, and `NULL` scans every column** -- so the caller
+  hands the kernel the whole matrix and an index rather than a materialized slice, and
+  `scan_missing_cpgs()` no longer duplicates the panel union. Positions in `stats` and in
+  `inf_at[2]` are relative to `cols`, not to `obj`, which is what keeps `check_col_values()`
+  indexing `present_needed` unchanged. Out-of-range, `NA`, or non-positive indices `stop()`.
+  **`row_obs` serves the row half too.** `count_sample_miss()` (`R/coverage.R`) takes a clock's
+  cohort-mean-filled columns as `length(cached) - row_obs`, which is per row and correct against any
+  block. That retired `slideimp::mat_miss(col = FALSE)`, the package's last `slideimp` call, so the
+  Import is gone. `row_obs` is `NULL` on the `Inf` bail, which cannot happen downstream of the value
+  gate -- `count_sample_miss()` `stop()`s on it rather than trusting the reasoning.
 
 `DelayedMatrixStats` is deliberately **not** a dependency: its `rowMeans2()` traverses in its own
 block order and lands ~5.6e-16 from a plain `colMeans()`, which is the same non-determinism as
@@ -350,9 +365,10 @@ garbage when wrong.
 ### 5.4 The two passes
 
 **Pass 1** is one fused traversal over the needed panel, accumulating per block via `col_stats()`:
-per-column `(sum, n_obs, min, max)`, the sample ids, the within-block row predicates, and column
-agreement. Then once, at the end -- this is exactly what `mc_cohort()` already derives today from a
-single traversal, so Phase 6 replaces the accumulator and nothing below it:
+per-column `(sum, n_obs)` plus the two range flags and `row_obs`, the sample ids, the within-block
+row predicates, and column agreement. Then once, at the end -- this is exactly what `mc_cohort()`
+already derives today from a single traversal, so Phase 6 replaces the accumulator and nothing below
+it:
 
 | derived | from |
 |---|---|
@@ -390,8 +406,16 @@ arises. Erroring on it instead would refuse every matrix missing one probe.
 whether an `Inf` was filled depended on whether an *unrelated* NA existed elsewhere in the matrix:
 the same `Inf` gave a `-Inf` score with no NA present and a plausible 60.0 with one. (The
 pre-Phase-5 `slideimp::mat_miss()` counted only NA, so it was consistently the former.) The scan now
-runs unconditionally over the needed panel, which is what makes the gates reachable at all; only the
-full-width row half stays behind `anyNA()`, since it scans every column rather than the panel.
+runs unconditionally over the needed panel, which is what makes the gates reachable at all, and no
+`anyNA()` short-circuit survives anywhere in `R/`.
+
+**The dead-row half is scoped to the scoring panels, and that is a separate predicate.** The sweep
+covers `panels_union()` -- score **and** norm -- because both halves need classification and fill
+values, but a sample is dead iff it observes nothing on the **scoring** panels: a normalization CpG
+cannot score anyone. Judging it on the union let a DunedinPACE sample with 0/173 scoring CpGs and
+all 19,827 background CpGs pass, then score off a fully vendor-filled panel. `scan_missing_cpgs()`
+now takes the scoring union as its own argument and reuses the union `row_obs` only when the two
+sets coincide, which is every request with no normalizing clock (DECISIONS 2026-07-28).
 
 **Pass 2**, per block: re-read **raw**, build the block's cache with
 `fill_imp_col(block[, names(partial_fill)], values = partial_fill)`, call `score_cohort()` with the
@@ -489,9 +513,10 @@ carrying them costs nothing and avoids a second accumulator to keep bit-agreeing
 also would not have covered `DNAmPhysAge_years`, whose *second* `cohort_zscore` reduces over `phys`,
 itself a function of the first -- not streamable at all, trivial with the raws in hand.
 
-**Two properties measured, both bit-exact:** a 3-block split now finalizes to the single-pass answer
-for both clocks (from 2.8 and 11 years off), and single-pass output is `identical()` to the
-pre-Phase-3 implementation -- so the standing parity run is undisturbed.
+**Two properties measured:** a 3-block split now finalizes to the single-pass answer for both clocks
+(from 2.8 and 11 **years** off, to within the residual float drift of sec 4.2 -- `DNAmPhysAge` is
+its worst relative case at 5.1e-13), and single-pass output is `identical()` to the pre-Phase-3
+implementation -- so the standing parity run is undisturbed.
 
 Both front ends call `finalize_cross_sample()` **unconditionally**; `pending` is empty for the other
 127 clocks, so it is a no-op for a typical request. Nothing anywhere tests "is this PhysAge" or "are
@@ -500,13 +525,13 @@ we chunked".
 ## 7. What `augment()` owns (not started)
 
 Cross-sample derivations that are not a clock's definition -- age acceleration / residuals,
-user-requested z-scores -- happen in `augment()`, after binding, never in the scoring loop. This is
-what `dev/detail-plan.md` sec 7.1 means by the third `cbind` gate being "dissolved". `augment()` does
-not exist yet; CLAUDE.md listing it among the verbs is stated intent (DECISIONS 2026-07-24).
+user-requested z-scores -- happen in `augment()`, after binding, never in the scoring loop. That is
+what dissolves the third `cbind` gate. `augment()` does not exist yet and is an **unbuilt idea, not
+a contract** -- adding it is a new API decision (CLAUDE.md; DECISIONS 2026-07-27).
 
 ## 8. Phase 4 -- `rbind` (not started)
 
-`rbind.mc_result` refuses today (`R/generics.R`). It can admit records under gates:
+`rbind.mc_result` refuses today (`R/mc_result.R`). It can admit records under gates:
 
 **Phase 3 did not make a score column batch-independent, and the earlier wording here claimed it
 did.** It relocated the reduction from inside the scoring loop to after assembly *within one run*,

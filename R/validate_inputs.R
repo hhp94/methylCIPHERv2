@@ -1,6 +1,5 @@
 # DNAm/pheno structure checks, run before any clock is resolved
 
-
 check_DNAm <- function(DNAm) {
   checkmate::assert_matrix(
     DNAm,
@@ -68,7 +67,6 @@ check_pheno <- function(
     return(invisible(NULL))
   }
   checkmate::assert_data_frame(pheno, min.rows = 1)
-  checkmate::assert_string(ID, null.ok = FALSE)
   checkmate::assert_choice(ID, names(pheno))
   checkmate::assert_character(
     pheno[[ID]],
@@ -76,6 +74,15 @@ check_pheno <- function(
     unique = TRUE,
     null.ok = FALSE
   )
+  # required covariates must exist -- the score branches read them unguarded
+  miss <- setdiff(extra_columns, names(pheno))
+  if (length(miss)) {
+    cli::cli_abort(
+      "{.arg pheno} is missing {length(miss)} column{?s} the requested clocks
+       need: {.field {miss}}.",
+      call = NULL
+    )
+  }
   if ("Female" %in% extra_columns) {
     checkmate::assert_integerish(
       pheno[["Female"]],

@@ -2,6 +2,9 @@
 #include <cmath>
 using namespace Rcpp;
 
+// Fills every non-finite entry -- NA, NaN and +/-Inf alike -- with the column
+// mean. The predicate matches col_stats(), which computed that mean over the
+// same set: what one calls missing, the other fills.
 // [[Rcpp::export]]
 void fill_imp_col(NumericMatrix obj, NumericVector mean_vec)
 {
@@ -21,7 +24,7 @@ void fill_imp_col(NumericMatrix obj, NumericVector mean_vec)
     for (R_xlen_t i = 0; i < nr; ++i)
     {
       const double v = col[i];
-      col[i] = std::isnan(v) ? m : v;
+      col[i] = std::isfinite(v) ? v : m;
     }
   }
 }

@@ -9,27 +9,26 @@ MIAGE_STARTS <- c(
   500
 )
 
-# best multi-start fit for one sample (hoist log(b), bind bn/residual per n)
-miage_fit <- function(betaj, b, c, d) {
+miage_fit <- function(betaj, b, cc, d) {
   logb <- log(b)
-  at <- NA_real_
-  bn <- NULL
-  res <- NULL
+  st <- new.env(parent = emptyenv())
+  st[["at"]] <- NA_real_
   bind <- function(n) {
-    if (!isTRUE(n == at)) {
-      bn <<- b^(n - 1)
-      res <<- c + bn * d - betaj
-      at <<- n
+    if (!isTRUE(n == st[["at"]])) {
+      bn <- b^(n - 1)
+      st[["bn"]] <- bn
+      st[["res"]] <- cc + bn * d - betaj
+      st[["at"]] <- n
     }
+    st
   }
 
   objective <- function(n) {
-    bind(n)
-    sum(res^2)
+    sum(bind(n)[["res"]]^2)
   }
   gradient <- function(n) {
-    bind(n)
-    2 * sum(res * bn * logb * d)
+    s <- bind(n)
+    2 * sum(s[["res"]] * s[["bn"]] * logb * d)
   }
 
   fits <- lapply(MIAGE_STARTS, function(start) {
@@ -48,22 +47,20 @@ miage_fit <- function(betaj, b, c, d) {
 
 score_MiAge <- function(id, cpgs, block, results) {
   sample_id <- block[["sample_id"]]
-  n <- length(sample_id)
-
   params <- miage_params(id)
-  present <- cpgs[["score_present"]]
-  cache <- block[["partial_cache"]]
-  cached <- cached_cols(present, cache)
-  betas <- block[["DNAm"]][, present, drop = FALSE]
-  if (length(cached)) {
-    betas[, cached] <- cache[, cached]
-  }
+  obs <- observed_panel(cpgs[["score_present"]], block)
+  betas <- obs[["values"]]
+  panel <- obs[["cols"]]
 
-  b <- params[["b"]][present]
-  cc <- params[["c"]][present]
-  d <- params[["d"]][present]
+  b <- params[["b"]][panel]
+  cc <- params[["c"]][panel]
+  d <- params[["d"]][panel]
   score_matrix(
-    vapply(seq_len(n), function(i) miage_fit(betas[i, ], b, cc, d), numeric(1)),
+    vapply(
+      seq_along(sample_id),
+      function(i) miage_fit(betas[i, ], b, cc, d),
+      numeric(1)
+    ),
     sample_id,
     id
   )

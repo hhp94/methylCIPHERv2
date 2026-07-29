@@ -76,16 +76,19 @@ print.mc_sim <- function(x, n = 6, p = 6, ...) {
   invisible(x)
 }
 
+# CpG union a request needs -- the same panels the scorer resolves
 clock_cpgs <- function(clock_ids, packs, normalize) {
-  results <- lapply(clock_ids, function(cid) {
-    scoring <- clock_scoring_cpgs(cid, packs)
-    if (!length(scoring)) {
-      # sex-routed aliases own no panel
-      return(if (length(clock_depends_on(cid))) character(0) else NULL)
-    }
-    c(scoring, clock_norm_cpgs(cid, normalize[[cid]]))
-  })
-  unresolved <- clock_ids[vapply(results, is.null, logical(1))]
+  panels <- clock_panels(clock_ids, packs, normalize)
+  score <- panels[["score"]]
+  # an empty scoring panel is fine only for a sex-routed alias (owns no panel)
+  unresolved <- clock_ids[vapply(
+    seq_along(clock_ids),
+    function(i) {
+      !length(score[["uniq"]][[score[["idx"]][[i]]]]) &&
+        !length(clock_depends_on(clock_ids[[i]]))
+    },
+    logical(1)
+  )]
 
   if (length(unresolved)) {
     cli::cli_abort(
@@ -97,6 +100,6 @@ clock_cpgs <- function(clock_ids, packs, normalize) {
     )
   }
 
-  cpgs <- unlist(results, use.names = FALSE)
-  unique(cpgs[nzchar(cpgs) & !is.na(cpgs)])
+  cpgs <- panels_union(panels)
+  cpgs[nzchar(cpgs) & !is.na(cpgs)]
 }

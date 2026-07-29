@@ -10,13 +10,10 @@ check_mc_result <- function(x, arg = "x") {
   invisible(x)
 }
 
-# per-sample miss vector from the finished matrix, or NULL
-score_miss_vec <- function(x, id) {
-  m <- x[["coverage"]][["sample_miss"]][["score"]]
-  if (id %in% colnames(m)) m[, id] else NULL
-}
-norm_miss_vec <- function(x, id) {
-  m <- x[["coverage"]][["sample_miss"]][["norm"]]
+# per-sample miss vector from the finished panel matrix, or NULL
+miss_vec <- function(x, id, panel = c("score", "norm")) {
+  panel <- match.arg(panel)
+  m <- x[["coverage"]][["sample_miss"]][[panel]]
   if (!is.null(m) && id %in% colnames(m)) m[, id] else NULL
 }
 
@@ -86,8 +83,8 @@ panel_rows <- function(id, panel, ratio, sample_id) {
 # score-panel rows, plus a norm-panel row when the clock normalizes
 clock_sample_rows <- function(x, id, sample_id) {
   rec <- x[["coverage"]][["per_clock"]][[id]]
-  sm <- score_miss_vec(x, id)
-  nm <- norm_miss_vec(x, id)
+  sm <- miss_vec(x, id, "score")
+  nm <- miss_vec(x, id, "norm")
 
   rows <- list()
   rows[["score"]] <- panel_rows(
@@ -118,7 +115,7 @@ alias_sample_rows <- function(x, alias, sample_id) {
     idx <- match(sample_id, pheno[[pheno_id]])
     female <- as.integer(pheno[["Female"]])[idx]
   }
-  miss <- score_miss_vec(x, alias)
+  miss <- miss_vec(x, alias, "score")
 
   n_observed <- rep(NA_integer_, length(sample_id))
   n_needed <- rep(NA_integer_, length(sample_id))

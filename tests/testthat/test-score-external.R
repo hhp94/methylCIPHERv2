@@ -40,7 +40,7 @@ fake_pcclocks_pack <- function(cpgs, seed = 3L) {
 
 # systemsAge full pack layout for the family orchestrator
 fake_systemsage_pack <- function(cpgs, seed = 1L) {
-  order <- systemsage_stack_order("SystemsAge") # 12 labels, stack order
+  order <- unname(systemsage_stack_map("SystemsAge")) # 12 labels, stack order
   organs <- setdiff(order, "Age_prediction") # 11 organ labels
   ncpg <- length(cpgs)
   pcs <- paste0("PC", seq_len(12L))

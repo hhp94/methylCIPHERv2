@@ -1,5 +1,3 @@
-# user tokens -> compute sequence -> per-clock CpG panels
-
 # typo-suggestion pools: matched names, recommended token values
 suggestion_pools <- function() {
   routed <- sex_routed_members()
@@ -296,9 +294,12 @@ clock_panels <- function(clock_sequence, packs = NULL, normalize = NULL) {
   )
 }
 
-# union of scoring + norm CpGs
-panels_union <- function(panels) {
-  unique(unlist(c(panels[["score"]][["uniq"]], panels[["norm"]][["uniq"]]), use.names = FALSE))
+# union of the named panel roles (both by default)
+panels_union <- function(panels, roles = c("score", "norm")) {
+  unique(unlist(
+    lapply(roles, function(r) panels[[r]][["uniq"]]),
+    use.names = FALSE
+  ))
 }
 
 # per-clock present/absent CpG sets over usable_cols
@@ -351,4 +352,3 @@ resolve_cpgs <- function(usable_cols, panels) {
 
   list(per_clock = per_clock, panel_index = panel_index)
 }
-

@@ -68,7 +68,7 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   counts follow the policy uniformly -- `vendor_mean` fills every absent CpG into the predictor
   (`used = present + imputed_full`), anything else drops them (`used = present`, `dropped = absent`).
   Sex-routed aliases keep a `NULL` record and a stitched score-panel miss; routed members are masked
-  to the samples they scored. `coverage_record()` (`R/utils.R`) owns the per-clock record fields --
+  to the samples they scored. `coverage_record()` (`R/coverage.R`) owns the per-clock record fields --
   including `normalizes` (**the one declared panel fact**; readers must not re-derive it from
   `norm_needed`) and the per-panel `score_imputed_partial` / `norm_imputed_partial`.
   `$coverage$sample_miss` is `list(score = <n x k matrix>, norm = <n x k' matrix over just the
@@ -94,17 +94,40 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   (shared cache); a fully absent probe -> the clock's vendored ref, or drop by policy.
 - **Accessors are the executable schema.** `calc_clocks` consumes accessors (`get_clock`,
   `clock_coefs`, ...), never raw nested catalog lists. No hand-written `schema.md`.
-- **Read the catalog with `[[`, never `$`.** `$` partial-matches on lists, so a missing exact
-  field silently resolves to a longer one (`entry$covariates` -> `covariates_required`) and the
-  caller gets a wrong value, not an error. This is a hard rule in `R/accessors.R` and anywhere
-  else catalog/pack/tensor structures are read. `options(warnPartialMatchDollar)` is **not** the
-  fix -- a package cannot set a session global for its users and it does not fire under
-  `R CMD check`.
+- **Never `$` in `R/`. Always `[[`.** `$` partial-matches on lists, so a missing exact field
+  silently resolves to a longer one (`entry$covariates` -> `covariates_required`) and the caller
+  gets a wrong value, not an error. The rule is **blanket, not scoped to catalog/pack/tensor
+  reads**: a scoped rule needs a judgement call at every site about what the object is, and the
+  list that is "obviously not a catalog entry" today is the one someone widens tomorrow. So it
+  binds on every `$` in `R/` alike -- catalog entries, result records, `optim()` output, and
+  environments, where `$` is exact and harmless but is not worth the exception.
+  `tests/testthat/test-source-hygiene.R` enforces it by scanning **parse tokens**, not text, so a
+  `$` inside a comment or a `"\\.qs2$"` regex does not count and a real access cannot hide; the
+  only exempt file is the generated `R/RcppExports.R`. `options(warnPartialMatchDollar)` is
+  **not** the fix -- a package cannot set a session global for its users and it does not fire
+  under `R CMD check`.
+- **Never `<<-` in `R/`. Mutable state is an explicit environment.** `<<-` does not name a target:
+  it walks the enclosing frames and assigns into the first one that already binds that name,
+  **creating a global** if none does. So renaming or deleting a local silently promotes a local
+  update to a package/global one -- no error, and nothing at the read site says where the value
+  came from. The replacement is a store you can point at: `st <- new.env(parent = emptyenv())`,
+  write `st[["x"]] <- ...`, and have the mutator **return `st`** so readers take it as a value
+  instead of inheriting it from a frame. Reads and writes on that env go through `[[` like
+  everything else -- the rule above is blanket. Precedent: `miage_fit()` in `R/score_MiAge.R`,
+  whose L-BFGS-B objective and gradient share one cached `b^(n-1)` that way. Outside `R/` this is
+  a preference, not a rule: `data-raw/sync.R` and a condition collector in `tests/` still use
+  `<<-` legitimately.
 - **Accessors read declarations; they never search.** No `grep`/regex/fuzzy match over tensor
   names, clock ids, or file paths to find a payload. Resolve the declared pointer (component,
-  `probe_sets[[i]]$file`, `imputation$ref`) and `stop()` when it is absent or ambiguous -- an
-  accessor that cannot find its declaration has done its job by failing. Searching hides an
-  upstream/sync gap and can silently return a sibling clock's tensor.
+  `probe_sets[["scoring"]][["file"]]`, `imputation[["ref"]]`) and `stop()` when it is absent or
+  ambiguous -- an accessor that cannot find its declaration has done its job by failing. Searching
+  hides an upstream/sync gap and can silently return a sibling clock's tensor.
+  **Three of those lists are keyed by sync, so the lookup is a lookup.** `components` is named by
+  `name`, `probe_sets` by `role`, `recipe` by `out` (steps without one stay unnamed), and
+  `key_declarations()` stops the build on a collision -- which is why the accessors reading them
+  carry no multiplicity guard. The two remaining scans are the two whose predicate is not a key:
+  `component_tensor()` on `row_key` and `stack_step()` on `op`, both of which genuinely collide in
+  the shipped catalog, so `pick_one()` stays load-bearing there (DECISIONS 2026-07-28).
 - **Coverage is never reported for a sample it is not true of.** A clock assembled from other
   clocks' scores records coverage **iff every component contributes to every sample**
   (`GrimAgeV1`, `DNAmFitAge_{Sex}` do). Where components are selected per sample -- sex-routed
@@ -145,7 +168,7 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   anything added by hand. This has bitten once: a hand-added
   `useDynLib(methylCIPHERv2, .registration = TRUE)` vanished on the next `document()` and took every
   compiled kernel down with it (`.Call()` -> "not available for .Call() for package"). So a new
-  export or S3 method gets a bare `#' @export` beside the function (precedent in `R/generics.R`),
+  export or S3 method gets a bare `#' @export` beside the function (precedent in `R/mc_result.R`),
   and package-level wiring -- `@useDynLib`, `@importFrom` -- lives in
   `R/methylCIPHERv2-package.R`. Then run `document()` and check the diff is only what you intended.
   The maintainer still owns the exported *surface*: say in your summary which `export()` /
@@ -331,9 +354,7 @@ refactor is too tight -- loosen or delete it.
   Floating-point results that are correct to every digit anyone can act on still fail it, and the
   failure looks like a real numeric regression, so time gets spent chasing a last-bit difference in
   a summation order. `expect_equal()` applies a tolerance by default and is the right altitude for
-  everything in this package, including counts. Where a bound is the actual point -- chunk
-  invariance, parity -- state it explicitly (`expect_equal(x, y, tolerance = 1e-12)`), which is a
-  claim about how close is close enough rather than an accident of how the number was reached.
+  everything in this package, including counts.
 - **No internal dispatch-tag tables.** Do not hard-code `clock_reduction()` / `score_type()` per
   clock; prove routing through output. The one allowed invariant: every catalog clock maps to a
   *known* tag -- and since `score_type()` stops otherwise, that test also proves the catalog
@@ -420,21 +441,26 @@ Rules that still apply on the keep set:
 
 ## Source-of-truth docs (`dev/`)
 
-The `dev/` folder is local-only **except** these three, which are tracked:
+The `dev/` folder is local-only **except** these two, which are tracked:
 
-- `dev/migration-plan.md` -- compressed overview and pointers.
-- `dev/detail-plan.md` -- **canonical** long-form design (API, engine, memory, packs, sync,
-  fixtures). Put behavior specs here; keep the overview short.
 - `dev/DECISIONS.md` -- append-only, newest-first, date-stamped log of *why* / reversals. Add an
   entry when a decision reverses a prior approach or is likely second-guessed; do not restate rules
-  already in the plans.
+  already stated here.
+- `dev/id-streaming-plan.md` -- the one live design doc: chunking, binding, `prep()`. It covers
+  work that is **not built yet**; everything already shipped is specified by this file's invariants
+  and by the code.
+
+`migration-plan.md` and `detail-plan.md` were retired on 2026-07-28 (DECISIONS). **Do not
+reconstitute them.** Built behavior is specified by the invariants above plus the code; a separate
+long-form spec of shipped behavior is a copy that rots. `sec N` citations in older DECISIONS
+entries point at those retired files -- read them out of git history, not as live references.
 What upstream declares (coef-path rule, declared-path set, tensor `row_key`/`col_key`, recipe
 operand namespaces, the panel rule) is **not** restated in a `dev/` doc -- `data-raw/sync.R` is
 self-documenting and is the only source for it. Read `sync.R` itself before touching `sync.R`.
 
-Plans state **current truth only** -- superseded design is not annotated inline; its history lives
-solely in `dev/DECISIONS.md`. When code and a plan disagree, the code is truth: fix the plan and
-record the reconciliation in `dev/DECISIONS.md`.
+The plan states **current truth only** -- superseded design is not annotated inline; its history
+lives solely in `dev/DECISIONS.md`. When code and the plan disagree, the code is truth: fix the plan
+and record the reconciliation in `dev/DECISIONS.md`.
 
 Local-only (gitignored): `dev/legacy/` (frozen pre-rewrite sources), `dev/scratch.R`,
 `dev/clock_tracker.csv`, and the `dev/*.py` build scripts.

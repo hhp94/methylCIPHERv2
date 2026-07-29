@@ -19,12 +19,7 @@ score_GrimAge <- function(id, cpgs, block, results) {
   roles <- grimage_stack_roles(id, stack_names)
   for (nm in stack_names) {
     if (identical(roles[[nm]], "covariates")) {
-      if (is.null(pheno) || !nm %in% names(pheno)) {
-        stop(
-          sprintf("%s needs pheno column %s. Add it to pheno.", id, nm),
-          call. = FALSE
-        )
-      }
+      # presence is a front-door check (check_pheno)
       X[, nm] <- as.numeric(pheno[[nm]])
     } else if (identical(roles[[nm]], "internal")) {
       comp <- component_named(comps, nm, id)
@@ -32,16 +27,15 @@ score_GrimAge <- function(id, cpgs, block, results) {
       intercept <- if (is.null(comp[["intercept"]])) 0 else comp[["intercept"]]
       present <- intersect(names(coef), block[["usable"]])
       # surrogate follows the clock's declared absent-CpG policy
-      fill <- absent_fill(id, coef, setdiff(names(coef), present), label = nm)
-      lp <- linear_predictor(
-        coef = coef,
+      X[, nm] <- component_linpred(
+        id,
+        coef,
+        present,
+        block,
+        label = nm,
         intercept = intercept,
-        cov_coefs = covariate_coefs_from(comp[["covariates"]]),
-        score_present = present,
-        block = block,
-        id = nm
+        cov_coefs = covariate_coefs_from(comp[["covariates"]])
       )
-      X[, nm] <- lp[["linpred"]] + fill[["offset"]]
     } else {
       X[, nm] <- as.numeric(results[[nm]])
     }
@@ -80,32 +74,19 @@ grimage_rescale_params <- function(id) {
     id
   )
   need <- c("m_cox", "sd_cox", "m_age", "sd_age")
-  p <- require_fields(
-    step[["params"]],
-    need,
-    "grimage_rescale transform",
-    id
-  )
+  p <- step[["params"]]
+  miss <- setdiff(need, names(p))
+  if (length(miss)) {
+    catalog_bug(
+      "%s: grimage_rescale transform lacks param(s) %s.",
+      id,
+      paste(miss, collapse = ", ")
+    )
+  }
   vapply(p[need], as.numeric, numeric(1))
 }
 
 # cox stack operands in coefficient order, tagged by namespace
 grimage_stack_roles <- function(id, order) {
-  roles <- stack_roles(stack_step(id))
-  undeclared <- setdiff(order, names(roles))
-  if (length(undeclared)) {
-    stop(
-      sprintf(
-        paste0(
-          "%s: %d Cox coefficient(s) not declared as a stack operand: %s. %s"
-        ),
-        id,
-        length(undeclared),
-        paste(undeclared, collapse = ", "),
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
-  }
-  roles[order]
+  stack_roles(stack_step(id))[order]
 }

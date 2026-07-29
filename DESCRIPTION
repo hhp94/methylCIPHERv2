@@ -20,7 +20,6 @@ Imports:
     matrixStats,
     qs2,
     Rcpp,
-    slideimp,
     stats,
     tools,
     utils

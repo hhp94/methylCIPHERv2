@@ -52,7 +52,12 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
     }
     list(
       level = level,
-      line = panel_line(x[["clock_id"]], x[["score_present"]], x[["score_needed"]], "scoring")
+      line = panel_line(
+        x[["clock_id"]],
+        x[["score_present"]],
+        x[["score_needed"]],
+        "scoring"
+      )
     )
   }
 
@@ -99,7 +104,12 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
       ) {
         return(NA_character_)
       }
-      panel_line(x[["clock_id"]], x[["norm_present"]], x[["norm_needed"]], "normalization")
+      panel_line(
+        x[["clock_id"]],
+        x[["norm_present"]],
+        x[["norm_needed"]],
+        "normalization"
+      )
     },
     character(1L)
   )
@@ -148,7 +158,7 @@ row_coverage <- function(cov, score_miss, norm_miss) {
 
 # per-sample coverage gate (warn only) over the hoisted coverage structure
 check_row_coverage <- function(coverage, threshold = 0.75) {
-  checkmate::assert_number(threshold, lower = 0, upper = 1)
+  # threshold is validated at the calc_clocks() front door, before scoring
   routed <- sex_routed_members()
 
   line_for <- function(id) {

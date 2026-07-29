@@ -1,3 +1,14 @@
+# male/female masks for sex-routed members (unknown sex is neither)
+sex_rows <- function(female, n) {
+  none <- rep(FALSE, n)
+  if (!length(female)) {
+    return(list(female = none, male = none))
+  }
+  f <- as.numeric(female)
+  known <- !is.na(f)
+  list(female = known & f == 1, male = known & f == 0)
+}
+
 # sex-routed alias: pick the member score matching each sample's sex
 score_sex_routed <- function(id, cpgs, block, results) {
   sample_id <- block[["sample_id"]]

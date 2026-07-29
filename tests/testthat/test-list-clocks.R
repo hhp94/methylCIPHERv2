@@ -119,5 +119,6 @@ test_that("list_clocks filters, and rejects an unknown group", {
   expect_true(all(list_clocks(group = "GrimAge")[["group_id"]] == "GrimAge"))
   expect_gt(nrow(list_clocks(pattern = "horvath")), 0L)
   expect_equal(nrow(list_clocks(pattern = "nothing-matches-this")), 0L)
-  expect_error(list_clocks(group = "Horvat"))
+  # names a real group, so a broken suggestion pool is not mistaken for a reject
+  expect_error(list_clocks(group = "Horvat"), "Horvath")
 })

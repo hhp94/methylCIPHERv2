@@ -164,7 +164,7 @@ test_that("DNAmFitAge mixes same-sex members by KDM and carries no batch stamp",
   for (sx in c("female", "male")) {
     member <- clock_routing("DNAmFitAge")[[sx]]
     rows <- if (sx == "female") which(female == 1) else which(female == 0)
-    kdm <- fitage_kdm_params(member)
+    kdm <- component_tensor(member, "component")
     acc <- numeric(length(rows))
     for (i in seq_len(nrow(kdm))) {
       acc <- acc +

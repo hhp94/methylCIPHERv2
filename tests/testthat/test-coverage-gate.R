@@ -54,7 +54,10 @@ test_that("the gates name a clock the caller is allowed to request", {
   alias <- routed$alias[[member]]
 
   # the member is not requestable, so a gate that names it is not actionable
-  expect_error(calc_clocks(random_betas(clock_scoring_cpgs(member), 4L), member))
+  expect_error(calc_clocks(
+    random_betas(clock_scoring_cpgs(member), 4L),
+    member
+  ))
   expect_true(startsWith(gate_label(member, routed), alias))
   expect_equal(gate_label("Hannum", routed), "Hannum")
 

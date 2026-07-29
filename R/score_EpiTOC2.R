@@ -11,8 +11,7 @@ score_EpiTOC2 <- function(id, cpgs, block, results) {
     intercept = 0,
     cov_coefs = numeric(0),
     score_present = present,
-    block = block,
-    id = id
+    block = block
   )
 
   ground <- sum(coef * beta0)
@@ -25,12 +24,8 @@ score_EpiTOC2 <- function(id, cpgs, block, results) {
 
 # epiTOC2 per-CpG ground state: named delta (de-novo rate) and beta0 vectors
 epitoc2_params <- function(id) {
-  tab <- require_fields(
-    component_tensor(id, "cpg"),
-    c("cpg", "delta", "beta0"),
-    "params tensor",
-    id
-  )
+  # (cpg, delta, beta0) -- sync asserts the header against the declared col_key
+  tab <- component_tensor(id, "cpg")
   list(
     delta = stats::setNames(as.numeric(tab[["delta"]]), tab[["cpg"]]),
     beta0 = stats::setNames(as.numeric(tab[["beta0"]]), tab[["cpg"]])

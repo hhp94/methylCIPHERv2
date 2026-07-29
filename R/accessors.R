@@ -1,16 +1,14 @@
-# catalog accessors -- always `[[`, never `$`
-
-# shared suffix for catalog/sync faults
-CATALOG_BUG <- "Catalog/sync bug -- please report it."
+# a declaration the accessors require is absent or ambiguous
+catalog_bug <- function(fmt, ...) {
+  stop(
+    sprintf(fmt, ...),
+    " Catalog/sync bug -- please report it.",
+    call. = FALSE
+  )
+}
 
 # one catalog entry, or error
 clock_entry <- function(id) {
-  if (length(id) != 1L) {
-    stop(
-      sprintf("clock_entry() takes a single clock id, got %d.", length(id)),
-      call. = FALSE
-    )
-  }
   entry <- mc_catalog[[id]]
   if (is.null(entry)) {
     stop(sprintf("Unknown clock id: %s.", id), call. = FALSE)
@@ -22,15 +20,7 @@ clock_entry <- function(id) {
 required_field <- function(id, field) {
   value <- clock_entry(id)[[field]]
   if (is.null(value)) {
-    stop(
-      sprintf(
-        "Catalog entry %s is missing %s. %s",
-        id,
-        field,
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
+    catalog_bug("Catalog entry %s is missing %s.", id, field)
   }
   value
 }
@@ -39,24 +29,6 @@ required_field <- function(id, field) {
 optional_field <- function(id, field, default) {
   value <- clock_entry(id)[[field]]
   if (is.null(value)) default else value
-}
-
-# `x` must carry every name in `need`, or a stop listing what is absent
-require_fields <- function(x, need, what, id) {
-  miss <- setdiff(need, names(x))
-  if (length(miss)) {
-    stop(
-      sprintf(
-        "%s: %s lacks field(s) %s. %s",
-        id,
-        what,
-        paste(miss, collapse = ", "),
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
-  }
-  x
 }
 
 # named numeric tensor for a weights/ path
@@ -73,15 +45,7 @@ bundle_tensor <- function(group_id, path) {
   }
   tensor <- bundle[["tensors"]][[path]]
   if (is.null(tensor)) {
-    stop(
-      sprintf(
-        "Bundle %s has no tensor %s. %s",
-        group_id,
-        path,
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
+    catalog_bug("Bundle %s has no tensor %s.", group_id, path)
   }
   tensor
 }
@@ -89,17 +53,9 @@ bundle_tensor <- function(group_id, path) {
 # the single element of `items` matching `pred`, or a stop naming `what`
 pick_one <- function(items, pred, what, id) {
   hits <- Filter(pred, items)
+  # multiplicity matters: an unguarded Filter would silently score the first hit
   if (length(hits) != 1L) {
-    stop(
-      sprintf(
-        "%s has %d %s (expected 1). %s",
-        id,
-        length(hits),
-        what,
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
+    catalog_bug("%s has %d %s (expected 1).", id, length(hits), what)
   }
   hits[[1]]
 }
@@ -116,41 +72,24 @@ component_tensor <- function(id, row_key) {
   bundle_tensor(entry[["group_id"]], comp[["file"]])
 }
 
-# the single component declaration with this name
+# the component declaration with this name (sync keys `components` by name)
 component_named <- function(comps, name, id) {
-  pick_one(
-    comps,
-    function(c) identical(c[["name"]], name),
-    sprintf("components named '%s'", name),
-    id
-  )
+  comp <- comps[[name]]
+  if (is.null(comp)) {
+    catalog_bug("%s has no component named '%s'.", id, name)
+  }
+  comp
 }
 
 # row-key column a component declares (no first-column fallback)
 component_row_key <- function(comp) {
-  key <- as.character(comp[["row_key"]])
-  if (length(key) != 1L || !nzchar(key)) {
-    stop(
-      sprintf(
-        "Component %s declares no row_key. %s",
-        comp[["name"]],
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
-  }
-  key
+  as.character(comp[["row_key"]])
 }
 
+# CpGs of one probe_set role (sync keys `probe_sets` by role)
 probe_sets_cpgs <- function(entry, role) {
-  hits <- Filter(
-    function(p) identical(p[["role"]], role),
-    entry[["probe_sets"]]
-  )
-  if (!length(hits)) {
-    return(character(0))
-  }
-  unique(unlist(lapply(hits, function(p) p[["cpgs"]]), use.names = FALSE))
+  cpgs <- entry[["probe_sets"]][[role]][["cpgs"]]
+  if (is.null(cpgs)) character(0) else unique(as.character(cpgs))
 }
 
 # scoring CpGs for one clock (pack panel for external groups)
@@ -189,23 +128,12 @@ clock_norm_cpgs <- function(id, normalize = FALSE) {
 
 # declared background probe_set (any NORM_ROLES role), or error
 norm_background_probe_set <- function(id) {
-  ps <- pick_one(
+  pick_one(
     clock_entry(id)[["probe_sets"]],
     function(p) p[["role"]] %in% NORM_ROLES,
     "normalization background probe_sets",
     id
   )
-  if (!length(ps[["file"]])) {
-    stop(
-      sprintf(
-        "%s: normalization background probe_set has no file pointer. %s",
-        id,
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
-  }
-  ps
 }
 
 # vendored normalization target, or NULL when the scheme is not expressible
@@ -229,8 +157,7 @@ clock_routing <- function(id) {
 
 # 1-based index of first cohort-reducing recipe step, or NA
 clock_cross_sample_at <- function(id) {
-  v <- optional_field(id, "cross_sample_at", NA_integer_)
-  if (!length(v)) NA_integer_ else as.integer(v)[[1L]]
+  as.integer(optional_field(id, "cross_sample_at", NA_integer_))[[1L]]
 }
 
 # true when the score depends on other samples (not chunk-safe)
@@ -264,26 +191,7 @@ sex_routed_members <- function() {
 
 # declared array-normalization scheme, lowercased ("none" when absent)
 clock_norm_scheme <- function(id) {
-  scheme <- tolower(as.character(optional_field(id, "normalization", "none")))
-  if (!length(scheme)) {
-    return("none")
-  }
-  if (length(scheme) > 1L) {
-    stop(
-      sprintf(
-        paste0(
-          "%s declares %d normalization schemes (%s); ",
-          "exactly one is supported. %s"
-        ),
-        id,
-        length(scheme),
-        paste(scheme, collapse = ", "),
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
-  }
-  scheme
+  tolower(as.character(optional_field(id, "normalization", "none")))
 }
 
 # per-cohort parity fixture blocks (one per registry cohort), or NULL
@@ -310,35 +218,11 @@ clock_impute_ref <- function(id, packs = NULL) {
   entry <- clock_entry(id)
   if (isTRUE(entry[["external_group"]])) {
     pack <- clock_pack(id, packs)
-    ref <- pack[["impute"]]
-    if (is.null(ref)) {
-      stop(
-        sprintf(
-          "External group %s pack has no impute vector. %s",
-          entry[["group_id"]],
-          CATALOG_BUG
-        ),
-        call. = FALSE
-      )
-    }
-    ref <- as.numeric(ref)
+    ref <- as.numeric(pack[["impute"]])
     names(ref) <- pack[["cpgs"]]
     return(ref)
   }
-  imp <- entry[["imputation"]]
-  ref <- imp[["ref"]]
-  if (is.null(ref) || !is.character(ref) || length(ref) != 1L || !nzchar(ref)) {
-    stop(
-      sprintf(
-        "%s has no scalar vendor-mean ref path (policy %s). %s",
-        id,
-        imp[["policy"]],
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
-  }
-  bundle_tensor(entry[["group_id"]], ref)
+  bundle_tensor(entry[["group_id"]], entry[["imputation"]][["ref"]])
 }
 
 # linear reduction: "mean" if recipe has linear_mean, else "sum"
@@ -356,18 +240,7 @@ clock_coefs <- function(id) {
   entry <- clock_entry(id)
   wf <- entry[["weights_format"]]
   if (identical(wf, "cpg_coefficient")) {
-    path <- entry[["coef_path"]]
-    if (length(path) != 1L || !nzchar(path)) {
-      stop(
-        sprintf(
-          "%s is cpg_coefficient but has no coef tensor path. %s",
-          id,
-          CATALOG_BUG
-        ),
-        call. = FALSE
-      )
-    }
-    return(bundle_tensor(entry[["group_id"]], path))
+    return(bundle_tensor(entry[["group_id"]], entry[["coef_path"]]))
   }
   if (identical(wf, "component_matrices")) {
     cpg_comps <- Filter(
@@ -382,8 +255,8 @@ clock_coefs <- function(id) {
     sprintf(
       paste0(
         "%s is weights_format %s and does not reduce to a ",
-        "single cpg->coef vector. Use clock_group_bundle() + ",
-        "bundle_tensor(), or the clock's family orchestrator."
+        "single cpg->coef vector. Use bundle_tensor(), clock_pack(), ",
+        "or the clock's family orchestrator."
       ),
       id,
       wf
@@ -405,28 +278,9 @@ covariate_coefs_from <- function(cov) {
   stats::setNames(vapply(cov, as.numeric, numeric(1)), nms)
 }
 
-# unique recipe step producing `out`, or NULL (stops if ambiguous)
+# the recipe step producing `out`, or NULL (sync keys `recipe` by out)
 recipe_step_out <- function(id, out) {
-  step <- Filter(
-    function(s) identical(s[["out"]], out),
-    clock_entry(id)[["recipe"]]
-  )
-  if (!length(step)) {
-    return(NULL)
-  }
-  if (length(step) > 1L) {
-    stop(
-      sprintf(
-        "%s has %d recipe steps with out %s (expected at most 1). %s",
-        id,
-        length(step),
-        out,
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
-  }
-  step[[1]]
+  clock_entry(id)[["recipe"]][[out]]
 }
 
 # covariate weights, numeric(0) when none
@@ -543,15 +397,11 @@ stack_label_map <- function(step, id) {
   }
   labels <- as.character(unlist(declared))
   if (length(labels) != length(operands)) {
-    stop(
-      sprintf(
-        "%s: stack declares %d column label(s) for %d operand(s). %s",
-        id,
-        length(labels),
-        length(operands),
-        CATALOG_BUG
-      ),
-      call. = FALSE
+    catalog_bug(
+      "%s: stack declares %d column label(s) for %d operand(s).",
+      id,
+      length(labels),
+      length(operands)
     )
   }
   stats::setNames(labels, operands)

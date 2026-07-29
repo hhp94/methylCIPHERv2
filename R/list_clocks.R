@@ -55,7 +55,7 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
   if (!is.null(group)) {
     unknown <- setdiff(group, out[["group_id"]])
     if (length(unknown)) {
-      pool <- suggestion_pools()[["group"]]
+      pool <- suggestion_pools()[["groups"]]
       cli::cli_abort(
         c(
           "Unknown group{cli::qty(length(unknown))}{?s}: {.val {unknown}}.",

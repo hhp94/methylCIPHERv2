@@ -1,31 +1,31 @@
 # partial NA -> cohort mean, fully absent -> vendor ref
 
-# value gates over one col_stats() sweep: Inf stops, out-of-[0,1] warns
-check_col_values <- function(scan, DNAm, cols) {
-  at <- scan[["inf_at"]]
+# value gates over one col_stats() sweep: overflow stops, everything else warns
+check_col_values <- function(scan, cols) {
+  at <- scan[["overflow_col"]]
   if (!is.null(at)) {
-    cpg <- cols[at[[2L]]]
-    # row NA means overflow (finite entries, non-finite sum), not Inf
-    if (is.na(at[[1L]])) {
-      cli::cli_abort(
-        c(
-          "DNAm column {.val {cpg}} does not sum to a finite value.",
-          "i" = "Its entries are finite but astronomically large -- far outside
-                 the {.val {0}} to {.val {1}} beta range. Fix the matrix before
-                 scoring.",
-          "i" = "The scan stops at the first such column, so there may be
-                 others."
-        ),
-        call = NULL
-      )
-    }
     cli::cli_abort(
       c(
-        "DNAm contains an infinite value: sample {.val {rownames(DNAm)[at[[1L]]]}},
-         CpG {.val {cpg}}.",
-        "i" = "Infinite values are not missing values -- no imputation can
-               repair one. Fix the matrix before scoring.",
-        "i" = "The scan stops at the first one, so there may be others."
+        "DNAm column {.val {cols[at[[1L]]]}} does not sum to a finite value.",
+        "i" = "Its entries are finite but astronomically large -- far outside
+               the {.val {0}} to {.val {1}} beta range. Fix the matrix before
+               scoring.",
+        "i" = "The scan stops at the first such column, so there may be others."
+      ),
+      call = NULL
+    )
+  }
+
+  # an Inf is missing, not fatal -- but it is a data bug worth naming
+  if (isTRUE(scan[["any_inf"]])) {
+    cli::cli_warn(
+      c(
+        "DNAm contains infinite values.",
+        "i" = "They are treated as missing: filled from the cohort mean where
+               the probe is partly observed, and counted absent where it is
+               not.",
+        "i" = "An infinite beta is usually an upstream divide-by-zero.
+               {.fn clocks_coverage} reports what was imputed."
       ),
       call = NULL
     )
@@ -58,16 +58,24 @@ check_col_values <- function(scan, DNAm, cols) {
 }
 
 # one col_stats() sweep: classify columns, means, value gates, row_obs
-scan_missing_cpgs <- function(DNAm, needed_cpgs) {
+scan_missing_cpgs <- function(DNAm, needed_cpgs, score_cpgs) {
   present_needed <- intersect(needed_cpgs, colnames(DNAm))
   nr <- nrow(DNAm)
 
-  scan <- col_stats(DNAm[, present_needed, drop = FALSE])
-  check_col_values(scan, DNAm, present_needed)
+  # index, not a slice: the kernel strides over DNAm's own columns
+  scan <- col_stats(DNAm, match(present_needed, colnames(DNAm)))
+  check_col_values(scan, present_needed)
 
-  # empty panel is the coverage gate's problem, not the all-NA row check
-  if (length(present_needed)) {
-    dead <- rownames(DNAm)[scan[["row_obs"]] == 0L]
+  # a dead row is dead on the scoring panels: a normalization CpG can never
+  # score a sample. empty panel is the coverage gate's problem, not this one.
+  present_score <- intersect(score_cpgs, colnames(DNAm))
+  if (length(present_score)) {
+    obs <- if (identical(present_score, present_needed)) {
+      scan[["row_obs"]]
+    } else {
+      row_observed(DNAm, match(present_score, colnames(DNAm)))
+    }
+    dead <- rownames(DNAm)[obs == 0L]
     if (length(dead)) {
       cli::cli_abort(
         c(
@@ -97,11 +105,11 @@ scan_missing_cpgs <- function(DNAm, needed_cpgs) {
 }
 
 # cohort-mean fill on a fresh slice (fill_imp_col mutates in place)
-build_partial_cache <- function(DNAm, partial_fill) {
+build_partial_cache <- function(DNAm, cols, partial_fill) {
   if (!length(partial_fill)) {
     return(NULL)
   }
-  sub <- DNAm[, names(partial_fill), drop = FALSE]
+  sub <- DNAm[, cols, drop = FALSE]
   fill_imp_col(sub, partial_fill)
   sub
 }

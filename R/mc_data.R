@@ -385,13 +385,8 @@ mc_canonicalize_ext_data <- function(ext_data) {
   if (is.null(ext_data)) {
     return(NULL)
   }
+  # a path is validated once, by mc_resolve_assets_dir()
   if (is.character(ext_data)) {
-    if (!is_path_string(ext_data)) {
-      cli::cli_abort(
-        "{.arg ext_data} path must be a single non-empty string.",
-        call = NULL
-      )
-    }
     return(ext_data)
   }
   is_pack <- function(x) is.list(x) && !is.null(x[["group_id"]])
@@ -551,17 +546,8 @@ clear_mc_assets <- function(groups = "all", ask = TRUE) {
     return(invisible(character(0)))
   }
   freed <- sum(as.numeric(fs::file_size(files)))
+  # fs::file_delete() throws on failure
   fs::file_delete(files)
-  failed <- files[fs::file_exists(files)]
-  if (length(failed)) {
-    cli::cli_abort(
-      c(
-        "Could not remove {length(failed)} file{?s}:",
-        bullets(failed)
-      ),
-      call = NULL
-    )
-  }
   cli::cli_inform(
     "Removed {mc_delete_summary(length(downloaded), length(stale))}
      ({format(fs::fs_bytes(freed))}) from {.path {dir}}."

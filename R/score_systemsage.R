@@ -67,7 +67,12 @@ score_systemsage_group <- function(ids, block) {
       sysscores[, organs_pca] <- S[, organs_pca]
 
       pca <- systemsage_pca(id, packs, order)
-      cs <- sweep(sweep(sysscores, 2L, pca[["center"]], "-"), 2L, pca[["scale"]], "/")
+      cs <- sweep(
+        sweep(sysscores, 2L, pca[["center"]], "-"),
+        2L,
+        pca[["scale"]],
+        "/"
+      )
       pcs <- cs %*% pca[["rotation"]]
       out[[id]] <- record(
         id,
@@ -81,16 +86,9 @@ score_systemsage_group <- function(ids, block) {
 # unique recipe step producing out, or error (>1 already stopped upstream)
 systemsage_step <- function(id, out) {
   step <- recipe_step_out(id, out)
+  # absence is silent downstream: a NULL intercept scores a column of NAs
   if (is.null(step)) {
-    stop(
-      sprintf(
-        "%s has no recipe step with out %s. %s",
-        id,
-        out,
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
+    catalog_bug("%s has no recipe step with out %s.", id, out)
   }
   step
 }
@@ -137,11 +135,6 @@ systemsage_raw_intercepts <- function(id) {
   )
 }
 
-# stack column labels, in column order
-systemsage_stack_order <- function(id) {
-  unname(systemsage_stack_map(id))
-}
-
 # intercept of the final systems_model linear head
 systemsage_final_intercept <- function(id) {
   as.numeric(systemsage_step(id, "score")[["intercept"]])
@@ -152,21 +145,7 @@ systemsage_pca <- function(id, packs, order) {
   pack <- clock_pack(id, packs)
   comps <- clock_components(id)
   tensor_by_component <- function(name) {
-    comp <- component_named(comps, name, id)
-    t <- pack[["tensors"]][[comp[["file"]]]]
-    if (is.null(t)) {
-      stop(
-        sprintf(
-          "Pack for %s has no tensor %s (component %s). %s",
-          id,
-          comp[["file"]],
-          name,
-          CATALOG_BUG
-        ),
-        call. = FALSE
-      )
-    }
-    t
+    pack[["tensors"]][[component_named(comps, name, id)[["file"]]]]
   }
 
   center <- tensor_by_component("systems_pca_center")
@@ -175,18 +154,11 @@ systemsage_pca <- function(id, packs, order) {
   rot_df <- tensor_by_component("systems_pca_rotation")
 
   # rotation row key is declared -- no first-column fallback
-  sys_col <- component_row_key(component_named(comps, "systems_pca_rotation", id))
-  if (!sys_col %in% names(rot_df)) {
-    stop(
-      sprintf(
-        "%s: rotation tensor has no declared row_key column %s. %s",
-        id,
-        sys_col,
-        CATALOG_BUG
-      ),
-      call. = FALSE
-    )
-  }
+  sys_col <- component_row_key(component_named(
+    comps,
+    "systems_pca_rotation",
+    id
+  ))
   pc_cols <- setdiff(names(rot_df), sys_col)
   rot <- as.matrix(rot_df[, pc_cols, drop = FALSE])
   rownames(rot) <- as.character(rot_df[[sys_col]])

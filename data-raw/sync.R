@@ -18,6 +18,23 @@ for (pkg in c(
 
 `%||%` <- rlang::`%||%`
 
+SYNC_SCRIPT <- file.path("data-raw", "sync.R")
+ACCESSORS_FILE <- file.path("R", "accessors.R")
+
+# sync-time and score-time read one vocabulary, so the shared constants and the
+# stack-operand rules are sourced from R/, never re-typed here. accessors.R is
+# definitions only (no load-time side effects); its own env keeps sync's names free.
+if (!file.exists(ACCESSORS_FILE)) {
+  stop(
+    "sync.R runs from the package root; ",
+    ACCESSORS_FILE,
+    " not found",
+    call. = FALSE
+  )
+}
+mc_runtime <- new.env(parent = environment())
+source(ACCESSORS_FILE, local = mc_runtime)
+
 asset_dir <- file.path("data-raw", "assets")
 meta_dir <- file.path("data-raw", "methylCIPHER-meta")
 
@@ -31,6 +48,20 @@ EXTERNAL_GROUPS <- c("SystemsAge", "PCClocks", "PCBrainAge")
 
 # bump when pack layout changes (new payload_hash).
 EXTERNAL_ENCODING_VERSION <- 3L
+
+# Pack staleness keys on encoder code (sync.R + accessors.R) plus upstream bundle_hashes.
+# Parsed whole-file so comments never force a rebuild; re-source after editing.
+sync_code_fingerprint <- function() {
+  files <- c(SYNC_SCRIPT, ACCESSORS_FILE)
+  if (!all(file.exists(files))) {
+    # code we cannot read is never a cache hit
+    return(NA_character_)
+  }
+  digest::digest(c(
+    list(EXTERNAL_ENCODING_VERSION),
+    lapply(files, parse, keep.source = FALSE)
+  ))
+}
 
 # pin-only fields, excluded from the content-addressed pack
 EXTERNAL_PIN_FIELDS <- c("source_git_sha", "manifest_generated_at_sha")
@@ -1470,7 +1501,8 @@ encode_pcclocks <- function(bundle, catalog) {
   bundle
 }
 
-# stack operand -> column label (default name, or declared columns)
+# stack operand -> column label. Operand order (inputs, internal, covariates) and
+# the label rule are the accessors' -- the pack must be labelled the way it is read.
 systemsage_stack_labels <- function(entry) {
   stack <- Filter(
     function(s) identical(s[["op"]], "stack"),
@@ -1483,29 +1515,7 @@ systemsage_stack_labels <- function(entry) {
       call. = FALSE
     )
   }
-  stack <- stack[[1L]]
-  # inputs, then internal, then covariates -- the concatenation IS column order
-  operands <- as.character(c(
-    unlist(stack[["inputs"]] %||% character()),
-    unlist(stack[["internal"]] %||% character()),
-    unlist(stack[["covariates"]] %||% character())
-  ))
-  labels <- if (is.null(stack[["columns"]])) {
-    operands
-  } else {
-    as.character(unlist(stack[["columns"]]))
-  }
-  if (length(labels) != length(operands)) {
-    stop(
-      "SystemsAge: stack declares ",
-      length(labels),
-      " column labels for ",
-      length(operands),
-      " operands",
-      call. = FALSE
-    )
-  }
-  stats::setNames(labels, operands)
+  mc_runtime[["stack_label_map"]](stack[[1L]], "SystemsAge")
 }
 
 # component a linear step multiplies to produce each labelled stack column
@@ -1749,6 +1759,154 @@ drop_external_probe_cpgs <- function(clocks) {
   clocks
 }
 
+# name items by a declared key; stop on collisions (or missing keys when total).
+# total=FALSE leaves unkeyed elements unnamed (recipe steps with no out).
+key_declarations <- function(items, field, cid, what, total = TRUE) {
+  if (!length(items)) {
+    return(items)
+  }
+  keys <- vapply(
+    items,
+    function(x) {
+      v <- if (is.list(x)) x[[field]] else NULL
+      if (is.null(v) || !length(v)) "" else as.character(v)[[1L]]
+    },
+    character(1L)
+  )
+  if (total && !all(nzchar(keys))) {
+    stop(
+      cid,
+      ": ",
+      sum(!nzchar(keys)),
+      " of ",
+      length(keys),
+      " ",
+      what,
+      " declare no '",
+      field,
+      "'",
+      call. = FALSE
+    )
+  }
+  dup <- unique(keys[nzchar(keys) & duplicated(keys)])
+  if (length(dup)) {
+    stop(
+      cid,
+      ": ",
+      what,
+      " share a '",
+      field,
+      "': ",
+      paste(dup, collapse = ", "),
+      call. = FALSE
+    )
+  }
+  stats::setNames(items, keys)
+}
+
+# recipe ops declared at most once (linear / linear_mean may repeat per stack col).
+SINGLETON_OPS <- c("stack", "poly")
+
+# probe_set roles with a normalization background, and a stack step's operand
+# namespaces -- the accessors' own constants, not a copy of them.
+NORM_ROLES <- mc_runtime[["NORM_ROLES"]]
+STACK_NAMESPACES <- mc_runtime[["STACK_NAMESPACES"]]
+
+# shape invariants asserted once at sync (named by clock).
+assert_catalog_shape <- function(clocks) {
+  for (cid in names(clocks)) {
+    entry <- clocks[[cid]]
+    recipe <- entry[["recipe"]] %||% list()
+    ops <- vapply(
+      recipe,
+      function(s) as.character(s[["op"]] %||% "")[[1L]],
+      character(1L)
+    )
+
+    for (op in SINGLETON_OPS) {
+      n <- sum(ops == op)
+      if (n > 1L) {
+        stop(
+          cid,
+          " declares ",
+          n,
+          " '",
+          op,
+          "' ops; at most one is supported",
+          call. = FALSE
+        )
+      }
+    }
+
+    n_bg <- length(intersect(
+      NORM_ROLES,
+      names(entry[["probe_sets"]])
+    ))
+    if (n_bg > 1L) {
+      stop(
+        cid,
+        " declares ",
+        n_bg,
+        " normalization background probe_sets; at most one is supported",
+        call. = FALSE
+      )
+    }
+
+    # declared column labels must cover every operand, or the two zip wrong
+    for (step in recipe[ops == "stack"]) {
+      declared <- step[["columns"]]
+      if (is.null(declared)) {
+        next
+      }
+      n_op <- sum(lengths(lapply(
+        STACK_NAMESPACES,
+        function(k) as.character(unlist(step[[k]] %||% character()))
+      )))
+      n_lab <- length(as.character(unlist(declared)))
+      if (n_lab != n_op) {
+        stop(
+          cid,
+          ": stack declares ",
+          n_lab,
+          " column label(s) for ",
+          n_op,
+          " operand(s)",
+          call. = FALSE
+        )
+      }
+    }
+  }
+  clocks
+}
+
+# key the three per-clock declaration lists the accessors look up by name
+key_catalog_lists <- function(clocks) {
+  for (cid in names(clocks)) {
+    entry <- clocks[[cid]]
+    entry[["components"]] <- key_declarations(
+      entry[["components"]],
+      "name",
+      cid,
+      "components"
+    )
+    entry[["probe_sets"]] <- key_declarations(
+      entry[["probe_sets"]],
+      "role",
+      cid,
+      "probe_sets"
+    )
+    entry[["recipe"]] <- key_declarations(
+      entry[["recipe"]],
+      "out",
+      cid,
+      "recipe steps",
+      total = FALSE
+    )
+    clocks[[cid]] <- entry
+  }
+  clocks
+}
+
 build_sysdata <- function(
   repo_path,
   catalog,
@@ -1764,6 +1922,8 @@ build_sysdata <- function(
   catalog <- resolve_group_scoring_probe_sets(catalog, bundles)
   catalog <- attach_sex_routed_aliases(catalog)
   catalog[["clocks"]] <- trim_build_only_fields(catalog[["clocks"]])
+  catalog[["clocks"]] <- key_catalog_lists(catalog[["clocks"]])
+  catalog[["clocks"]] <- assert_catalog_shape(catalog[["clocks"]])
 
   mc_catalog <- drop_external_probe_cpgs(catalog[["clocks"]])
   mc_groups <- catalog[["groups"]]
@@ -2171,9 +2331,13 @@ external_bundle_hashes <- function(catalog, external_groups) {
   hashes[order(names(hashes))]
 }
 
-# lockfile hit when every external bundle_hash is unchanged and packs are on disk
-lockfile_hit <- function(lock, hashes) {
+# lockfile hit when the encoder code and every external bundle_hash are unchanged
+# and the packs are on disk. A lockfile written before the fingerprint existed misses.
+lockfile_hit <- function(lock, hashes, fingerprint) {
   if (is.null(lock)) {
+    return(FALSE)
+  }
+  if (is.na(fingerprint) || !identical(lock$code_fingerprint, fingerprint)) {
     return(FALSE)
   }
   prev <- lock$bundle_hashes
@@ -2191,11 +2355,12 @@ lockfile_hit <- function(lock, hashes) {
 }
 
 # store pre-trim external catalog entries for lockfile reuse.
-write_lockfile <- function(sha, hashes, assets, ext_clocks) {
+write_lockfile <- function(sha, hashes, assets, ext_clocks, fingerprint) {
   saveRDS(
     list(
       source_git_sha = sha,
       bundle_hashes = hashes,
+      code_fingerprint = fingerprint,
       assets = assets,
       ext_clocks = ext_clocks
     ),
@@ -2231,8 +2396,21 @@ sync <- function(source_git_sha = NULL, upload = FALSE, force = FALSE) {
   )
 
   ext_hashes <- external_bundle_hashes(catalog, external)
+  code_fp <- sync_code_fingerprint()
   lock <- if (isTRUE(force)) NULL else read_lockfile()
-  if (lockfile_hit(lock, ext_hashes)) {
+  # name the case the bundle_hashes cannot explain, or the rebuild looks arbitrary
+  if (
+    !is.null(lock) &&
+      identical(lock$bundle_hashes, ext_hashes) &&
+      !identical(lock$code_fingerprint, code_fp)
+  ) {
+    message(
+      "sync: upstream unchanged but ",
+      SYNC_SCRIPT,
+      " differs from the lockfile -- rebuilding external assets."
+    )
+  }
+  if (lockfile_hit(lock, ext_hashes, code_fp)) {
     message(
       "sync: external assets unchanged (bundle_hash match) -- reusing ",
       length(lock$assets),
@@ -2259,7 +2437,8 @@ sync <- function(source_git_sha = NULL, upload = FALSE, force = FALSE) {
       current_sha,
       ext_hashes,
       assets,
-      catalog[["clocks"]][ext_ids]
+      catalog[["clocks"]][ext_ids],
+      code_fp
     )
   }
 

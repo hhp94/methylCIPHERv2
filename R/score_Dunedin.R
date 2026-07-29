@@ -13,7 +13,12 @@ score_Dunedin <- function(id, cpgs, block, results) {
   target <- clock_norm_target(id)
 
   # absent background CpG takes the gold target's value (QN needs full panel)
-  panel <- matrix(0, nrow = n, ncol = length(needed), dimnames = list(sample_id, needed))
+  panel <- matrix(
+    0,
+    nrow = n,
+    ncol = length(needed),
+    dimnames = list(sample_id, needed)
+  )
   obs <- observed_panel(cpgs[["norm_present"]], block)
   if (length(obs[["cols"]])) {
     panel[, obs[["cols"]]] <- obs[["values"]]

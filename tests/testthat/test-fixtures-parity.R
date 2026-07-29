@@ -292,11 +292,13 @@ test_that("every clock declares a fixture for every registry cohort", {
 
   # every other clock: both cohorts. Partial coverage is a gap, not a pass.
   rest <- setdiff(ids, aliases)
-  incomplete <- rest[!vapply(
-    rest,
-    function(id) setequal(declared[[id]], PARITY_COHORTS),
-    logical(1)
-  )]
+  incomplete <- rest[
+    !vapply(
+      rest,
+      function(id) setequal(declared[[id]], PARITY_COHORTS),
+      logical(1)
+    )
+  ]
   expect_equal(incomplete, character(0))
 
   # a cohort outside the registry would generate targets that can never run

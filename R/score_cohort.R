@@ -1,5 +1,101 @@
 # scoring seam: mc_spec (data-independent) + mc_cohort (cohort facts) + score_cohort
 
+# stop for an unroutable catalog entry (names all four routing facts)
+unroutable <- function(p) {
+  stop(
+    sprintf(
+      paste0(
+        "No scoring path for clock %s ",
+        "(group %s, weights_format %s, computation_type %s, ",
+        "normalization %s). This is a package bug -- please report it."
+      ),
+      p,
+      clock_group_id(p),
+      clock_weights_format(p),
+      clock_type(p),
+      clock_norm_scheme(p)
+    ),
+    call. = FALSE
+  )
+}
+
+# scorer tag for calc_clocks() dispatch
+score_type <- function(p) {
+  # package-minted aliases route on kind first
+  if (identical(clock_kind(p), "sex_routed_alias")) {
+    return("sex_routed")
+  }
+
+  ct <- clock_type(p)
+  wf <- clock_weights_format(p)
+  gid <- clock_group_id(p)
+
+  if (clock_is_external(p)) {
+    if (identical(gid, "SystemsAge")) {
+      return("pack_systemsage")
+    }
+    if (wf == "cpg_coefficient" && ct %in% c("linear", "linear_transformed")) {
+      return("pack_linear")
+    }
+    unroutable(p)
+  }
+
+  # group-specific tags first
+  gtag <- switch(
+    gid,
+    Dunedin = "Dunedin",
+    Zhang2019 = "Zhang2019",
+    GrimAge = switch(
+      ct,
+      linear = "linear",
+      linear_transformed = "GrimAge",
+      NULL
+    ),
+    DNAmFitAge = switch(
+      ct,
+      linear = "linear",
+      linear_transformed = "DNAmFitAge",
+      NULL
+    ),
+    PhysAge = switch(ct, linear_transformed = "PhysAge", NULL),
+    EpiTOC2 = switch(ct, reference_code_required = "EpiTOC2", NULL),
+    MiAge = switch(ct, reference_code_required = "MiAge", NULL),
+    CellDRIFT = switch(ct, reference_code_required = "linear", NULL),
+    NULL
+  )
+  if (!is.null(gtag)) {
+    return(gtag)
+  }
+
+  # declared scheme (except Dunedin) -> normalize-then-linear (else stop)
+  scheme <- clock_norm_scheme(p)
+  if (scheme %in% NORM_SCHEMES) {
+    if (!scheme %in% NORM_SCHEMES_ROUTED) {
+      unroutable(p)
+    }
+    return("normalized")
+  }
+
+  if (wf == "cpg_coefficient" && ct %in% c("linear", "linear_transformed")) {
+    return("linear")
+  }
+  unroutable(p)
+}
+
+# pack groups use score_pack_group()
+PACK_SCORE_TYPES <- c("pack_linear", "pack_systemsage")
+
+is_pack_scored <- function(p) {
+  score_type(p) %in% PACK_SCORE_TYPES
+}
+
+# external pack groups needed for a compute sequence
+pack_groups_needed <- function(clock_sequence) {
+  unique(unlist(lapply(clock_sequence, function(p) {
+    if (is_pack_scored(p)) clock_group_id(p) else NULL
+  })))
+}
+
 # data-independent: resolved once, whatever the front end
 mc_spec <- function(
   clocks,
@@ -70,7 +166,11 @@ mc_cohort <- function(DNAm, spec, pheno = NULL, min_clocks_coverage = 0.75) {
   )
   pheno <- resolve_pheno(DNAm, pheno, spec[["pheno_id"]], spec[["covariates"]])
 
-  mna <- scan_missing_cpgs(DNAm, panels_union(spec[["panels"]]))
+  mna <- scan_missing_cpgs(
+    DNAm,
+    panels_union(spec[["panels"]]),
+    panels_union(spec[["panels"]], "score")
+  )
   cpg_list <- resolve_cpgs(mna[["usable_cols"]], spec[["panels"]])
   check_coverage(cpg_list, min_clocks_coverage)
 
@@ -92,20 +192,66 @@ block_pheno <- function(DNAm, facts) {
   facts[["pheno"]][match(rownames(DNAm), facts[["sample_id"]]), , drop = FALSE]
 }
 
-# per-block view: narrowed DNAm, full DNAm, partial cache, pheno, notes
+# scoring-time failures per clock (coverage cannot see these)
+new_notes <- function() {
+  new.env(parent = emptyenv())
+}
+
+# record that `sample_id` could not be scored for clock `id`
+note_scoring_failure <- function(block, id, sample_id) {
+  notes <- block[["notes"]]
+  if (!length(sample_id)) {
+    return(invisible(NULL))
+  }
+  notes[[id]] <- union(notes[[id]], sample_id)
+  invisible(NULL)
+}
+
+# collector -> plain named list (empty when nothing failed)
+collect_notes <- function(notes) {
+  ids <- sort(names(notes))
+  if (!length(ids)) {
+    return(list())
+  }
+  stats::setNames(lapply(ids, function(id) notes[[id]]), ids)
+}
+
+# per-block view: DNAm + its usable column index, partial cache, pheno, notes
 mc_block <- function(DNAm, spec, facts) {
-  narrowed <- DNAm[, facts[["usable_cols"]], drop = FALSE]
-  list(
-    DNAm = narrowed,
+  usable <- facts[["usable_cols"]]
+  # name -> column position, resolved once instead of per panel gather
+  usable_idx <- match(usable, colnames(DNAm))
+  if (anyNA(usable_idx)) {
+    stop(
+      sprintf(
+        paste0(
+          "mc_block: %d usable CpG(s) are not columns of this block. ",
+          "This is a package bug -- please report it."
+        ),
+        sum(is.na(usable_idx))
+      ),
+      call. = FALSE
+    )
+  }
+
+  block <- list(
+    DNAm = DNAm,
     DNAm_full = DNAm,
-    partial_cache = build_partial_cache(narrowed, facts[["partial_fill"]]),
     pheno = block_pheno(DNAm, facts),
     packs = spec[["packs"]],
-    usable = facts[["usable_cols"]],
+    usable = usable,
+    usable_idx = usable_idx,
     sample_id = rownames(DNAm),
     # write-only collector for scoring-time failures
     notes = new_notes()
   )
+  fill <- facts[["partial_fill"]]
+  block[["partial_cache"]] <- build_partial_cache(
+    DNAm,
+    block_cols(names(fill), block),
+    fill
+  )
+  block
 }
 
 # score one block: scores, coverage, pending intermediates, notes
@@ -122,7 +268,9 @@ score_cohort <- function(DNAm, spec, facts) {
   # per-sample intermediates for cohort-reducing clocks
   pending <- list()
 
-  is_pack <- vapply(clock_sequence, is_pack_scored, logical(1))
+  # one score_type() per clock, reused by the pack filter and the dispatch
+  types <- vapply(clock_sequence, score_type, character(1))
+  is_pack <- unname(types) %in% PACK_SCORE_TYPES
   if (any(is_pack)) {
     pack_ids <- clock_sequence[is_pack]
     pgroups <- vapply(pack_ids, clock_group_id, character(1))
@@ -135,8 +283,9 @@ score_cohort <- function(DNAm, spec, facts) {
   # branch dispatch: every scorer takes (id, cpgs, block, results)
   for (p in clock_sequence[!is_pack]) {
     cpgs <- cpg_list[["per_clock"]][[p]]
+    ty <- types[[p]]
     out <- switch(
-      score_type(p),
+      ty,
       linear = linear_score(cpgs, block),
       GrimAge = score_GrimAge(p, cpgs, block, results),
       DNAmFitAge = score_DNAmFitAge(p, cpgs, block, results),
@@ -148,11 +297,7 @@ score_cohort <- function(DNAm, spec, facts) {
       Zhang2019 = score_Zhang2019(p, cpgs, block, results),
       sex_routed = score_sex_routed(p, cpgs, block, results),
       stop(
-        sprintf(
-          "No dispatch branch for score_type %s (clock %s).",
-          score_type(p),
-          p
-        ),
+        sprintf("No dispatch branch for score_type %s (clock %s).", ty, p),
         call. = FALSE
       )
     )
@@ -176,15 +321,12 @@ score_cohort <- function(DNAm, spec, facts) {
 # cohort reduction after assembly (no-op when pending is empty)
 finalize_cross_sample <- function(scores, pending) {
   for (p in names(pending)) {
+    ty <- score_type(p)
     scores[[p]] <- switch(
-      score_type(p),
+      ty,
       PhysAge = finalize_PhysAge(p, pending[[p]]),
       stop(
-        sprintf(
-          "No finalize branch for score_type %s (clock %s).",
-          score_type(p),
-          p
-        ),
+        sprintf("No finalize branch for score_type %s (clock %s).", ty, p),
         call. = FALSE
       )
     )
