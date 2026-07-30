@@ -109,9 +109,9 @@ test_that("keyword membership matches the tags column", {
   }
 })
 
-test_that("list_tags returns the registry invisibly", {
-  out <- withVisible(list_tags())
-  expect_false(out$visible)
+test_that("list_clock_tags returns the registry as a value", {
+  out <- withVisible(list_clock_tags())
+  expect_true(out$visible)
   expect_equal(out$value, MC_TAGS)
 })
 

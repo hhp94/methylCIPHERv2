@@ -125,7 +125,7 @@ resolve_clocks <- function(clocks) {
          {.val {bad}}.",
         "i" = "Closest matches:",
         suggestion_bullets(bad),
-        "i" = "See {.fn list_clocks} or {.fn list_tags}
+        "i" = "See {.fn list_clocks} or {.fn list_clock_tags}
                ({.val {names(MC_TAGS)}})."
       ),
       call = NULL

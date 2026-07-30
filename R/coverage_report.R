@@ -49,6 +49,8 @@ clocks_coverage <- function(x) {
 
   out <- data.frame(
     clock_id = ids,
+    # from the catalog, not the record -- a NULL record still has a group
+    group_id = unname(vapply(ids, clock_group_id, character(1L))),
     role = ifelse(ids %in% returned, "returned", "routing_target"),
     policy = unname(vapply(
       per_clock,
@@ -69,6 +71,8 @@ clocks_coverage <- function(x) {
     norm_needed = int_field("norm_needed"),
     norm_present = int_field("norm_present"),
     norm_imputed_partial = int_field("norm_imputed_partial"),
+    norm_imputed_full = int_field("norm_imputed_full"),
+    norm_dropped = int_field("norm_dropped"),
     stringsAsFactors = FALSE,
     row.names = NULL
   )

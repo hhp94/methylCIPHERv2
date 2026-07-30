@@ -193,6 +193,9 @@ test_that("BMIQ drops absent background CpGs rather than filling them", {
   cov <- res$coverage$per_clock$Horvath1
   expect_equal(cov$norm_needed, length(gold))
   expect_equal(cov$norm_present, length(gold) - 2000L)
+  # the record says dropped, not filled
+  expect_equal(cov$norm_dropped, 2000L)
+  expect_equal(cov$norm_imputed_full, 0L)
   expect_false(anyNA(res$scores[, "Horvath1"]))
 
   coef <- clock_coefs("Horvath1")

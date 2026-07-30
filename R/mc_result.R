@@ -76,40 +76,36 @@ construct_mc_result <- function(
   )
 }
 
-# print mc_result with labelled components
+# scores then pheno, in the shared printer grammar (R/print.R)
 #' @export
 print.mc_result <- function(x, n = 6, p = 6, ...) {
   scores <- x[["scores"]]
   pheno <- x[["pheno"]]
-  nr <- nrow(scores)
-  nc <- ncol(scores)
 
-  cat(sprintf("<mc_result> %d sample(s) x %d clock(s)\n", nr, nc))
-
-  cat("\n<$pheno>")
+  cat(
+    fmt_header("mc_result", nrow(scores), "sample", ncol(scores), "clock"),
+    "\n",
+    sep = ""
+  )
+  print_block(
+    "scores",
+    scores,
+    min(n, nrow(scores)),
+    min(p, ncol(scores)),
+    "clock"
+  )
+  # a run with no pheno still has the element
   if (is.null(pheno)) {
-    cat(" NULL\n")
+    cat("\n", fmt_section("pheno", "NULL"), "\n", sep = "")
   } else {
-    pn <- min(n, nrow(pheno))
-    cat(sprintf(" [%d of %d row(s)]\n", pn, nrow(pheno)))
-    print(pheno[seq_len(pn), , drop = FALSE])
-    if (pn < nrow(pheno)) {
-      cat("...\n")
-    }
-  }
-
-  ni <- min(n, nr)
-  pi <- min(p, nc)
-  cat(sprintf(
-    "\n<$scores> [%d of %d row(s), %d of %d clock(s)]\n",
-    ni,
-    nr,
-    pi,
-    nc
-  ))
-  print(scores[seq_len(ni), seq_len(pi), drop = FALSE])
-  if (ni < nr || pi < nc) {
-    cat("...\n")
+    print_block(
+      "pheno",
+      pheno,
+      min(n, nrow(pheno)),
+      ncol(pheno),
+      "column",
+      cut_cols = FALSE
+    )
   }
 
   invisible(x)

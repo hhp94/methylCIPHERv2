@@ -28,19 +28,28 @@ cite_clocks.default <- function(x, ...) {
   )
 }
 
+# header + $bibtex in the shared printer grammar (R/print.R), through
+# cli_verbatim: bibtex is pre-aligned and cli reflows anything else
 #' @export
 print.mc_citation <- function(x, ...) {
   links <- x[["links"]]
   n_clocks <- length(unique(links[["clock_id"]]))
   n_papers <- length(unique(links[["bib_key"]]))
-  cli::cli_text("{n_clocks} clock{?s}, {n_papers} paper{?s}.")
+
+  # cli_verbatim drops an empty string, so blank lines are cat()
+  cli::cli_verbatim(
+    fmt_header("mc_citation", n_clocks, "clock", n_papers, "paper")
+  )
   cat("\n")
-  # bibtex is pre-aligned (cli reflows non-verbatim)
-  cli::cli_verbatim(x[["bibtex"]])
+  cli::cli_verbatim(c(
+    fmt_section("bibtex", plural_count(n_papers, "paper")),
+    x[["bibtex"]]
+  ))
   cat("\n")
   cli::cli_alert_info(
-    "Export the citations with {.code writeLines(toBibtex(x), \"refs.bib\")}.
-     To cite the package itself see {.code citation(\"methylCIPHERv2\")}."
+    "{.code as.data.frame(x)} gives the clock-to-paper table. Export the
+     citations with {.code writeLines(toBibtex(x), \"refs.bib\")}; to cite the
+     package itself see {.code citation(\"methylCIPHERv2\")}."
   )
   invisible(x)
 }

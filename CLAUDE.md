@@ -67,6 +67,11 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   every clock has a score panel; a normalizing clock (only DunedinPACE) also has a norm panel. The
   counts follow the policy uniformly -- `vendor_mean` fills every absent CpG into the predictor
   (`used = present + imputed_full`), anything else drops them (`used = present`, `dropped = absent`).
+  **The norm panel fills or drops on the declared scheme, not on that policy**: quantile
+  normalization needs the whole background panel and takes the target's value for an absent CpG,
+  bmiq calibrates on what is present, so `norm_imputed_full` / `norm_dropped` key on
+  `NORM_SCHEMES_FILL` (DECISIONS 2026-07-29). There is no `norm_used` -- it would be `norm_needed`
+  or `norm_present`, both already reported.
   Routed members are masked to the samples they scored. `coverage_record()` (`R/coverage.R`) owns
   the per-clock record fields --
   including `normalizes` (**the one declared panel fact**; readers must not re-derive it from
@@ -95,6 +100,11 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   `[`, `cbind`, `augment` and `codebook` were listed here for a year without being written, so
   they are **unbuilt ideas, not contracts** -- adding one is a new API decision, and until a human
   makes it there is no behaviour to match (DECISIONS 2026-07-27).
+  **Every `print.mc_*` method shares one grammar, built in `R/print.R`** -- a `<class> A x B` header,
+  a `$component [what is shown]` line per list element, then `... N more <axis>`. The builders return
+  strings, so a cli printer (`print.mc_citation`) and a `cat` printer emit identical text without
+  moving the cli boundary. A new record class reuses the builders; it does not invent a fourth
+  layout (DECISIONS 2026-07-29).
 - **Scores only, and the record remembers its inputs.** `$scores` is scores -- no auto-appended
   phenotype columns. Separately, `$pheno` carries the *aligned* pheno narrowed to the id column
   plus the covariates the run actually required, so a saved record can answer what was fed in.
@@ -320,8 +330,13 @@ output**, not implementation detail (see "Test altitude").
 - **Value goldens (always, no meta dep):** hand-authored engine/machinery unit tests with goldens
   written in-test, one per scoring path (linear sum/mean, sex-split, imputation offset, bundled
   composites). External-pack scoring is smoke-only here; parity owns those goldens.
-- **Cohort-gated parity fixtures** (science gate; only clock-golden source): run against **every
-  registry cohort** -- `data-raw/methylCIPHER-meta/fixtures/{cohort}/beta.duckdb` for
+  **One golden in this tier is a third-party reference implementation, not a re-derivation**: the
+  `DunedinPACE` package (Suggests, `danbelsky/DunedinPACE`) scores the degraded-coverage path that
+  parity's clean fixtures cannot reach. It skips when the reference, `betanorm`, or the reference's
+  own `preprocessCore` is absent, so it never becomes a hard dep (DECISIONS 2026-07-29).
+- **Cohort-gated parity fixtures** (science gate; the only clock-golden source for a clean panel):
+  run against **every registry cohort** --
+  `data-raw/methylCIPHER-meta/fixtures/{cohort}/beta.duckdb` for
   `cohort_EPICv1` and `cohort_450K` -- skipped unless BOTH `MC_PARITY=1` and that cohort is staged
   (`file.exists()`). Upstream ships one `fixtures[]` block per cohort; each (clock, cohort) pair is
   its own test. Run locally via the dev-only `test_parity()` (`R/dev-utils.R`). CRAN skips this
@@ -455,11 +470,12 @@ plain `stop()` / `warning()` / `message()` with `call. = FALSE`.
 
 **Keep `cli` in:**
 - assets lifecycle (`R/mc_data.R`: consent, download, clear, path/`ext_data` validation)
-- discovery printers (`list_tags`, `print.mc_citation`, `list_clocks` unknown-group)
+- discovery printers (`print.mc_citation`, `list_clocks` unknown-group). **`list_clock_tags()` is
+  not one** -- it returns the registry as a value and prints nothing (DECISIONS 2026-07-29)
 - public S3 refusals (`rbind.mc_result`, `cite_clocks.default`)
 - `calc_clocks` front door: `resolve_clocks` token errors (incl. did-you-mean), DNAm/pheno
   structure (`validate_inputs.R`), coverage gates, value gates / dead samples
-  (`missingness.R`), missing pheno in `mc_cohort`, `sim_DNAm` unresolved panels
+  (`missingness.R`), missing pheno in `mc_cohort`, `clock_cpgs` unresolved panels
 
 **Plain `stop()` everywhere else** -- accessors, score branches, pack dispatch, catalog/sync
 bugs, normalize-arg validation, citation internals, soft-dep hints (`require_betanorm`), etc.

@@ -81,6 +81,8 @@ component_named <- function(comps, name, id) {
   comp
 }
 
+# clock specific accessors ----
+
 # row-key column a component declares (no first-column fallback)
 component_row_key <- function(comp) {
   as.character(comp[["row_key"]])
@@ -112,6 +114,10 @@ NORM_SCHEMES_ROUTED <- "bmiq"
 
 # schemes that are part of the clock's definition and cannot be declined
 NORM_CONSTITUTIVE <- "quantile"
+
+# schemes whose branch fills an absent background CpG with the target's value:
+# quantile needs the full panel, bmiq calibrates on what is present
+NORM_SCHEMES_FILL <- "quantile"
 
 # normalization panel for one clock, character(0) unless it normalizes
 clock_norm_cpgs <- function(id, normalize = FALSE) {

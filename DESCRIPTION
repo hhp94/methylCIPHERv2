@@ -27,9 +27,11 @@ Suggests:
     DBI,
     digest,
     duckdb,
+    DunedinPACE,
     testthat (>= 3.0.0),
     withr
 Remotes:
+    danbelsky/DunedinPACE,
     hhp94/betanorm
 biocViews:
 Config/testthat/edition: 3

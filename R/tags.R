@@ -6,21 +6,9 @@ MC_TAGS <- list(
   mortality = c("GrimAge", "ZhangMortality")
 )
 
-# print the keyword registry (returns it invisibly)
+# the keyword registry: tag -> the group/clock tokens it expands to.
+# "all" is a token too, but not a tag -- it is every callable clock
 #' @export
-list_tags <- function() {
-  cli::cli_text("Keywords you can pass to {.arg clocks}:")
-  for (tag in names(MC_TAGS)) {
-    ids <- resolve_clocks(tag)
-    cli::cli_bullets(c(
-      "*" = cli::format_inline(
-        "{.strong {tag}} ({length(ids)} clock{?s}): {.val {MC_TAGS[[tag]]}}"
-      )
-    ))
-  }
-  cli::cli_bullets(c(
-    "i" = "{.code \"all\"} scores every callable clock.
-           {.fn list_clocks} shows them one by one."
-  ))
-  invisible(MC_TAGS)
+list_clock_tags <- function() {
+  MC_TAGS
 }

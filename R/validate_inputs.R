@@ -46,7 +46,12 @@ note_full_panel_clocks <- function(clock_ids) {
     return(invisible(NULL))
   }
   cli::cli_inform(
-    "{.val {full}} {?takes/take} per-sample moments over all, not just a subset of, CpGs."
+    c(
+      "i" = "{.val {full}} score{cli::qty(full)}{?s/} against every column of
+             {.arg DNAm}, not just {cli::qty(full)}{?its/their} own panel.",
+      "i" = "Pass every CpG you measured -- a pre-subset {.arg DNAm} changes
+             {cli::qty(full)}{?this/these} score{?s}."
+    )
   )
   invisible(NULL)
 }

@@ -1,5 +1,4 @@
 # n x length(cpgs) U(0,1) beta matrix over the ambient RNG (unseeded)
-#' @export
 random_betas <- function(cpgs, n = 10L) {
   matrix(
     stats::runif(n * length(cpgs)),
@@ -23,10 +22,7 @@ sim_DNAm <- function(
   checkmate::assert_flag(Female)
   checkmate::assert_int(remove, lower = 0)
 
-  clock_sequence <- resolve_clocks_sequence(resolve_clocks(clocks))
-  normalize <- resolve_normalize(normalize, clock_sequence)
-  packs <- load_mc_assets(pack_groups_needed(clock_sequence), ext_data, ask)
-  cpgs <- clock_cpgs(clock_sequence, packs, normalize)
+  cpgs <- clock_cpgs(clocks, normalize, ext_data, ask)
   if (remove > 0) {
     n_drop <- min(remove, length(cpgs))
     cpgs <- cpgs[-sample.int(length(cpgs), n_drop)]
@@ -49,58 +45,26 @@ sim_DNAm <- function(
   out
 }
 
-# print mc_sim (DNAm + pheno preview)
+# DNAm then pheno, in the shared printer grammar (R/print.R)
 #' @export
 print.mc_sim <- function(x, n = 6, p = 6, ...) {
   DNAm <- x[["DNAm"]]
   pheno <- x[["pheno"]]
-  nr <- nrow(DNAm)
-  nc <- ncol(DNAm)
-  ni <- min(n, nr)
-  pi <- min(p, nc)
 
-  cat(sprintf("<mc_sim> %d sample(s) x %d CpG(s)\n\n", nr, nc))
-  cat(sprintf("DNAm [showing %d x %d]:\n", ni, pi))
-  print(DNAm[seq_len(ni), seq_len(pi), drop = FALSE])
-  if (ni < nr || pi < nc) {
-    cat(sprintf("... %d more row(s), %d more col(s)\n", nr - ni, nc - pi))
-  }
-
-  cat(sprintf(
-    "\npheno [showing %d of %d row(s)]:\n",
+  cat(
+    fmt_header("mc_sim", nrow(DNAm), "sample", ncol(DNAm), "CpG"),
+    "\n",
+    sep = ""
+  )
+  print_block("DNAm", DNAm, min(n, nrow(DNAm)), min(p, ncol(DNAm)), "CpG")
+  print_block(
+    "pheno",
+    pheno,
     min(n, nrow(pheno)),
-    nrow(pheno)
-  ))
-  print(utils::head(pheno, n))
+    ncol(pheno),
+    "column",
+    cut_cols = FALSE
+  )
 
   invisible(x)
-}
-
-# CpG union a request needs -- the same panels the scorer resolves
-clock_cpgs <- function(clock_ids, packs, normalize) {
-  panels <- clock_panels(clock_ids, packs, normalize)
-  score <- panels[["score"]]
-  # an empty scoring panel is fine only for a sex-routed alias (owns no panel)
-  unresolved <- clock_ids[vapply(
-    seq_along(clock_ids),
-    function(i) {
-      !length(score[["uniq"]][[score[["idx"]][[i]]]]) &&
-        !length(clock_depends_on(clock_ids[[i]]))
-    },
-    logical(1)
-  )]
-
-  if (length(unresolved)) {
-    cli::cli_abort(
-      c(
-        "Couldn't resolve any scoring CpGs for {.val {unresolved}}.",
-        "i" = "If these are external clocks, try loading their packs first
-               with {.fn load_mc_assets}."
-      ),
-      call = NULL
-    )
-  }
-
-  cpgs <- panels_union(panels)
-  cpgs[nzchar(cpgs) & !is.na(cpgs)]
 }

@@ -14,6 +14,286 @@ second-guessed; do not restate rules already stated in `CLAUDE.md` or `dev/id-st
 
 ---
 
+## 2026-07-30 -- the duckdb store is mandatory, not scratch; the resident set is the panel, not the file
+
+Sharpens 2026-07-29 rather than reversing it: duckdb stays the access engine, but the **ingest step
+is promoted from a request-scoped `tempdir()` convenience to a required stage**, and the reason is
+stated differently.
+
+**The target this is built for.** A small box -- 2-4 cores, 4-8 GB RAM, i.e. a cheap AWS partition
+or a laptop -- against a tall `.csv.gz` far larger than RAM, with no ETL the user has to run
+themselves. On that box the run is **deflate-bound and serial**: gzip inflate is whole-stream and
+single-threaded, so it is the floor no amount of cores moves. That is the whole reason chunking
+exists here; if the data fits in memory the question is moot.
+
+**Projection is the first lever, and it was missing from the plan.** Only `needed_cpgs x n_samples`
+has to be resident, never the file. Against a 1e6-probe array at n=1e4 (80 GB as doubles) the 101
+bundled panels union to 39,025 probes = 3.1 GB. So a 1e6 x 1e4 file scores on an 8 GB box with
+*nothing* streaming, and what forces chunking is **requesting a PC-scale panel, not cohort size** --
+PCBrainAge's 357,852 probes is 28.6 GB. The sizing table is in the plan (sec 5).
+
+**Why the store is mandatory: gzip is whole-stream, a columnar store is per-page.** A `.csv.gz`
+cannot be seeked, so every pass over it re-inflates and re-parses the entire file regardless of how
+little that pass needs. Since cohort-mean fill makes two passes non-negotiable (plan sec 2), the
+choice is between paying the deflate twice per request or ingesting once. The store is what converts
+one whole-stream deflate into per-page reads.
+
+**A per-request projected spill was considered and rejected.** Writing only the resolved panel,
+partitioned by sample block, during pass 1 is smaller (3.1-28.6 GB against ~80 GB) and free as a
+byproduct of that pass. It loses because the panel depends on the clock request, so it re-deflates
+the source **once per request** -- and the realistic session is a sequence of requests over one file
+(bundled clocks, then a PC clock added, then a re-run after a pheno fix). One deflate ever beats one
+deflate per request, and 80 GB of scratch disk is the cheap side of that trade.
+
+**duckdb, not parquet.** Maintainer's call on two grounds: duckdb handles the wide schema (1e4+
+sample columns) better than parquet's per-column-per-row-group footer metadata, and a `PRIMARY KEY`
+on the CpG id gives a real index plus an ingest-time duplicate-probe check. **This is a decision, not
+a benchmark** -- parquet was not measured at that width, and neither was duckdb (see below).
+
+**Five corrections found while deriving this**, all now in the plan:
+
+1. **The block-width formula was off by ~3x.** Sec 5.3 divided the budget by one copy of the block.
+   Peak is three: the block, `build_partial_cache()`'s slice, and `pack_design()`'s `n x |panel|`
+   copy. The cache is not a sliver -- at any realistic NA rate nearly every column carries at least
+   one NA, so it is a full second copy.
+2. **Projecting first would silently redefine `sample_scale`.** `scan_missing_cpgs()`'s row moments
+   span *every* column of the matrix, and the two Zhang2019 arms z-score each sample over the whole
+   array; substituting the panel union was measured at 1.8e1 absolute / 82% relative. So pass 1's
+   probe filter is on **iff `spec$needs_moments` is FALSE**.
+3. **duckdb's `avg()` does not treat `+/-Inf` as missing; `col_stats()` does.** A SQL route to the
+   per-sample moments therefore disagrees with the kernel on a file carrying an `Inf`, and needs the
+   value gate ordered ahead of it. The kernel gives them in the traversal pass 1 already performs.
+4. **`pheno` is not the id source** -- it is `NULL` for any request with no covariates. Sample ids
+   are the header, which is a real simplification: under the tall orientation id uniqueness and the
+   pheno subset are settled by a header-only read, not by the cross-block accumulation sec 5.4
+   assumed.
+5. **The expression-depth wall is about SQL arithmetic, not about width.** Returning 1e4 columns is
+   fine (measured to 20,000); writing `S1+...+S10000` is not. Pass 1 asks for rows and sums them in
+   `col_stats()`, so the limit never applies. Sec 5.3 said this; it reads as a workaround and is
+   actually a refusal to use SQL for arithmetic at all.
+
+**Recorded, not scheduled: probe-axis accumulation.** A pack-scored clock is a batched weighted sum,
+and a weighted sum is additive over the contracted axis -- so accumulating `n x k` partial scores
+over probe chunks needs ~10 MB resident at n=1e4 instead of a 28.6 GB projected panel, and would
+remove sample-major blocking for exactly the clocks that need it most. The blocker is the branch
+contract, not the arithmetic: "a branch returns only its score" would become "a branch returns a
+partial score plus a merge rule", and every branch in the closed set would need an additivity
+classification. It sits beside sample-blocking rather than replacing it, so it stays an open.
+
+**Nothing here is measured at 1e4 samples.** Every figure above is arithmetic off the 2026-07-29
+baseline (500 samples / 20k columns). Ingest carries ~10 ms per column of fixed overhead and 20,000
+columns took 96.5s at only 5M cells, so a 1e4-column ingest sits in an overhead-dominated regime
+nothing has been measured in. If it is bad, the fix is partitioning the store by sample block, which
+changes the schema -- so that benchmark comes before the build (plan sec 5.8).
+
+## 2026-07-29 -- duckdb is the chunked-access engine; csv.gz is a first-class input; tall is canonical
+
+Reverses `id-streaming-plan.md` sec 5.1's deferral of duckdb and its rejection of a csv path. Both
+were argued from figures that did not survive measurement. Benchmarks on this machine (16 threads),
+reference cohort 50,000 probes x 500 samples tall, 5% NA, methylation-shaped, full precision --
+25M cells, raw doubles 190.7 MB. Scripts were scratch; the surviving numbers are tabulated in the
+plan (sec 5.7) and are the ones to re-measure against, not these paragraphs.
+
+**Storage was the first wrong figure.** The plan claimed duckdb was "1.65x in-memory, i.e. 3.1x
+HDF5", which is why it was deferred. Measured on the wide-tall schema (probe rows, sample columns)
+the duckdb file is **0.99x raw doubles** -- 189.5 MB against csv.gz's 175.9 MB and HDF5's ~160 MB.
+Repeated on a second, more compressible dataset it was 1.14x raw. So duckdb costs about what
+uncompressed doubles cost, always; what varies wildly is *csv.gz* (0.92x raw on realistic data,
+0.27x on synthetic correlated data). The 3.1x ratio was probably measured on a long/tidy schema. The
+honest objection to duckdb is therefore "it does not compress", not "it is 3x HDF5" -- and that
+objection is priced as tempdir scratch, not as a reason to defer.
+
+**The ETL was the second.** The plan said duckdb "needs an ETL -- the user must freeze first, which
+is the expensive full read+write that chunking exists to avoid." Measured: `CREATE TABLE AS SELECT *
+FROM read_csv_auto('beta.csv.gz')` is **7.26s** for the reference cohort, straight off the gzip with
+no extraction step and no temp csv. That is not an ETL the user runs; it is a load.
+
+**The determinism rule is retired.** "SQL owns identity and integers, R owns every float" was
+motivated by ~1e-15 drift in duckdb's threaded aggregates. Measured here: duckdb `sum()` vs R
+`sum(na.rm = TRUE)` agree to **1.04e-15 relative**, and `count()` matches R's non-NA count exactly.
+`PARITY_REL_TOL` is 1e-10 and the outputs are ages in years, so 1e-15 cannot fail a test and cannot
+reach a decimal anyone acts on. The rule bought nothing and cost the whole engine.
+
+**What actually decided it: `fread`'s `skip=` is O(offset).** A csv carries no index, so seeking to
+row N means counting N newlines, which makes any chunked sweep quadratic. Covering all 25M cells:
+
+| sweep | fread | duckdb |
+|---|---|---|
+| 250 chunks of 10,000 rows x 10 cols | 69.0s | **0.58s** |
+| 500 chunks of 100 rows x all cols | 68.4s | **4.33s** |
+
+Offset dependence is directly visible -- fread costs 0.02 / 0.12 / 0.27s at offsets 0 / 25k / 49.9k
+where duckdb costs 0.01 / 0.02 / 0.00s. `fread` remains ~15x faster for **one** full read (0.19s vs
+2.86s), and that is the trap: the fast thing on the wrong access pattern loses by 119x. Since duckdb
+also reads the file, `data.table` does not become a dependency, which is a second reason not to
+build the front end on `fread`.
+
+**Tall (probes x samples) is the canonical accepted orientation**, reversing an assumption that our
+internal samples x probes convention should also be the input convention. Two independent reasons.
+It is what the ecosystem produces -- Horvath server csv, GEO series matrices, Bioconductor assays,
+`writeHDF5Array()` output -- so accepting it removes an ETL from every user. And **csv parse cost
+scales with columns, not cells**: header-only parse is 0.01 / 0.05 / 0.20 / 0.50 / 0.90s at 10k /
+50k / 200k / 500k / 866k columns, and for a wide file header-only ~= a full read, because schema
+construction *is* the cost. At identical cell counts the tall orientation read 25x faster. The
+transpose therefore lands on a small panel-projected block, never on the array.
+
+**The two passes have two different axes, and that is forced by a real limit.** Per-probe statistics
+are a *row-wise* aggregate in a tall table, which in SQL means `sum(S1)+sum(S2)+...` -- an expression
+tree one node deep per sample. It hits duckdb's `Max expression depth limit of 1000` at 2,000 sample
+columns. So pass 1 chunks by **probes** and runs the existing `col_stats()` kernel on the block,
+which is better than a workaround: probe blocks are disjoint in probes, so each probe's mean and
+count are complete within its block and **the CpG axis needs no cross-block accumulator at all**. The
+per-sample axis stays in SQL, where it is one query and scales (1.99s over 20,000 sample columns).
+
+**Rejected on the way, and why it is worth recording:** a canonical qs2 block store. It was proposed
+to dodge the plan's own objection to a hand-rolled npy format -- qs2 is already an Import, carries
+dimnames and checksums, and a block store needs no partial reads. It is unnecessary once duckdb is
+admitted, because duckdb does the projection, the row ranging and the file reading, and it does not
+need the cohort materialized to do any of them. Do not reintroduce a package-owned on-disk format.
+
+**Also corrected:** `resolve_DNAm_extra()` was listed in the plan's data-independent tier and has not
+existed since the `calc_clocks.R` drain; the plan's "dimnames without loading" requirement was
+overstated -- it exists only to size blocks from a budget and to fix `present_needed` before pass 1.
+
+**Both readers mishandle nulls by default, and the assert is ours.** `fread` treats only `NA` and
+empty as missing; duckdb's `read_csv_auto` treats only empty as missing -- so R's own `write.csv`
+output gives duckdb a VARCHAR column. Any of `nan` / `null` / `None` / `#N/A` silently turns the
+column to `character`, which surfaces as `check_DNAm()`'s `mode = "double"` assertion talking about a
+matrix with nothing pointing at the file, the column or the token. With an explicit null-string set
+both readers resolve correctly **and** `inf` / `-inf` / `Inf` / `Infinity` all survive as `+/-Inf`,
+which `any_inf` depends on. Never map `Inf` to `NA` at read time: that converts a named data-bug
+warning into silence. Rownames turned out not to be the fragile part -- a blank leading header field
+reads as `V1` across `write.csv`, pandas `to_csv()`, pandas `index_label=`, polars and GEO `ID_REF`.
+
+**Orientation detection is the coverage check, not a heuristic.** Resolve the panel, read only the
+header, test it as CpG ids; on failure read only column 1 and test that; if neither clears
+`min_clocks_coverage`, throw the ordinary coverage error, which already says what is wrong. No data
+is read to decide, and there is one fewer bespoke message.
+
+**Still unmeasured, and it is the next benchmark:** the long/tidy schema (`probe, sample, value`).
+The wide-tall schema is clean to ~2,000 samples but carries ~10 ms per column of fixed ingest
+overhead (1.95s at 500 columns vs 42.7s at 10,000 for the same cell count), so a 10k-sample table
+has a ~45s ingest floor. Long/tidy has constant width and makes both axes an ordinary `GROUP BY`, at
+~8.5B rows for a 10k-sample EPIC cohort. That measurement decides whether the design has a ceiling
+at a few thousand samples.
+
+## 2026-07-29 -- `clock_cpgs()` is the public panel question; `list_tags()` -> `list_clock_tags()`, a value
+
+Two public-surface calls, both settling names an agent had left ambiguous.
+
+**`clock_cpgs(clocks, normalize, ext_data, ask)` is exported and returns one character vector:**
+every CpG the request needs, scoring panels plus the background panel of any clock that normalizes.
+It resolves **`resolve_clocks_sequence(resolve_clocks(clocks))`**, not the request, which is the
+whole fix -- the version it replaces resolved only the requested ids and so answered **0 CpGs** for
+`DNAmFitAge` (truth 1643) and for `DNAmVO2max` (truth 40), because a composite's panel lives on its
+dependencies. A user subsetting an array from that answer would have measured nothing. It also
+returned `covariates` (coefficients, empty for exactly the clocks whose members hold them, while
+`clock_covariates_required()` says `Female`) and `intercept` (0 by `optional_field()` default, so
+indistinguishable from a declared 0). Both fields are gone: the function answers one question.
+
+`clock_panels_union()` moved next to it and is its only internal, so the guard housekeeping 2e gave
+that helper -- an empty scoring panel with no dependencies is a hard stop, not `character(0)` --
+covers the public path too. `sim_DNAm()` now calls `clock_cpgs()` and its three resolution lines
+collapse to one, so there is again **one** definition of "what CpGs does this request need?" and
+`clock_cpgs` means what DECISIONS 2026-07-29 ("drain calc_clocks.R") and housekeeping 2e already
+say it means. Its 24 tests were deleted rather than repaired: they pinned the empty-panel answer as
+correct (`expect_equal(pure[["DNAmVO2max"]][["score"]], character(0))`), restated the function body
+(`expect_equal(out[["Hannum"]][["score"]], clock_scoring_cpgs("Hannum"))`), and hard-coded panel
+sizes that `assert_declared_n_cpgs()` already guards upstream. `test-sim-smoke.R` exercises the path
+over every bundled clock.
+
+**`list_tags()` -> `list_clock_tags()`, and it no longer prints.** The old name did not say tags of
+*what*, and `clock_tags()` -- the obvious alternative -- would have collided with the
+`clock_<noun>(id)` accessor family in `R/accessors.R`, where every name means "one clock's
+declaration". `list_clock_tags()` keeps the `list_*` enumeration verb that `list_clocks()` /
+`list_mc_assets()` established and states its noun. It now returns `MC_TAGS` **visibly** instead of
+printing cli bullets and returning it invisibly, which makes all three `list_*` functions
+value-returning; **this removes it from the cli keep set** (2026-07-28) -- a one-line registry needs
+no formatter, and `resolve_clocks()`'s did-you-mean error already lists the tag names where a user
+who guessed wrong will actually see them.
+
+## 2026-07-29 -- one printer grammar in `R/print.R`; the cli/base split stays where it was
+
+`print.mc_result`, `print.mc_sim` and `print.mc_citation` had three dialects for the same job:
+`<$pheno> [6 of 10 row(s)]` vs `DNAm [showing 6 x 6]:` vs no header at all, and three truncation
+tails (bare `...`, `... 4 more row(s), 512 more col(s)`, nothing). All three records are lists, so
+they now share one grammar: a `<class> A x B` header, a `$component [what is shown]` line per
+element, the head itself, then `... N more <axis>` for the axes that were cut. `$scores` and `$DNAm`
+print before `$pheno` in both -- payload first.
+
+**The builders return strings and the printers write them.** `fmt_header()` / `fmt_section()` do no
+output, which is what lets `print.mc_citation` stay on cli (`cli_verbatim`, per the front-door keep
+set) while the two data printers stay on `cat` -- same text, no re-litigating the 2026-07-28 split.
+`cli_verbatim` **drops an empty string** rather than emitting a blank line, so vertical spacing in
+that printer is `cat("\n")`; do not "simplify" it back into the verbatim vector.
+
+The `"of"` form is not decoration: `6 of 10 row(s)` marks an axis the printer can cut, plain
+`3 column(s)` an axis it never does (pheno keeps its columns). A reader can tell from the label
+alone whether anything is hidden.
+
+Printers had **no** test coverage before this -- 844 expectations and not one `print()` call, so a
+broken printer surfaced only interactively. `test-print.R` now asserts the class tag and the
+invisible return for all three, and nothing about the counts or layout.
+
+## 2026-07-29 -- the DunedinPACE reference package is a Suggests, and the oracle for the holed-panel path
+
+`danbelsky/DunedinPACE` joins `Suggests` + `Remotes`, and `test-score-dunedin.R` scores one matrix
+through both implementations: 3 of 173 scoring CpGs and 1000 background-only CpGs absent
+**as columns**, plus one NA sample on each of 5 scoring and 5 background CpGs. Agreement is
+**1.3e-15 absolute / 1.3e-14 relative** over 10 samples spanning -0.49 to 1.62.
+
+**Why a third-party oracle at all, when parity is the clock-golden source.** Parity fixtures are
+scored on clean panels, so they exercise neither fill path. The interaction here is the part no
+in-test re-derivation can honestly check: re-deriving it means writing our own fill order down a
+second time and comparing it to itself. The reference is an independent statement of the order --
+append absent background probes at the target's value, cohort-mean the partials, then QN -- and the
+test is sensitive to it: scoring the same matrix with the absent CpGs simply left out of the QN
+panel (the plausible wrong answer) misses by **0.103**, seven orders of magnitude outside
+`expect_equal`'s tolerance.
+
+**It cannot become a hard dep.** The test skips on `DunedinPACE`, `betanorm`, or `preprocessCore`
+(the reference's own Bioconductor QN backend, deliberately *not* added to our `Suggests`), so the
+always-on tier stays runnable with none of them. It is one clock, and it is not a precedent for
+vendoring reference implementations generally -- DunedinPACE earns it because its degraded path has
+two fill sources interacting through a rank-based transform.
+
+**Settles the fill-source question raised the same day.** `coverage_record()` counts a fully-absent
+DunedinPACE scoring CpG as `score_imputed_full` under its declared `vendor_mean` policy, while
+`score_Dunedin()` actually fills it from the QN target rather than `imputation[["ref"]]`. Measured:
+the reference's `model_means` and `gold_standard_means` **agree on all 173 model probes**, and our
+`clock_impute_ref()` equals both. So the two sources coincide by construction upstream and there is
+nothing to fix; the count was already honest about the value that entered the predictor.
+
+## 2026-07-29 -- the norm panel gets its own fill/drop counts, keyed on the declared scheme
+
+`clocks_coverage()` reported `norm_needed` / `norm_present` / `norm_imputed_partial` and stopped
+there, so a fully-absent background CpG was invisible on the norm axis -- and the two normalizing
+branches disagree about it. `score_Dunedin()` fills every absent background CpG with the gold
+target's value because quantile normalization needs the whole panel (`norm[, model]` then scores
+through it), while `bmiq_panel()` calibrates on the present columns only and drops the rest. That
+difference has a passing test (`test-normalize.R`, "BMIQ drops absent background CpGs") but no
+count, so a reader could not tell a 20,000-CpG QN panel scored on 2,000 measured plus 18,000
+vendored from one scored on 20,000 measured.
+
+`coverage_record()` now writes `norm_imputed_full` / `norm_dropped` alongside the partial count.
+The split is keyed on `clock_norm_scheme(id) %in% NORM_SCHEMES_FILL` (`NORM_SCHEMES_FILL <-
+"quantile"`, next to the other scheme constants in `R/accessors.R`) -- **not** on
+`clock_impute()[["policy"]]`, which governs the score panel only. DunedinPACE happens to declare
+`vendor_mean` as well, so keying it off the policy would have looked right today and been wrong for
+the first `omit` clock to declare `quantile`. It is also not `NORM_SCHEMES_ROUTED` inverted: that
+constant says which scheme `score_normalized()` implements, and "reaches the generic branch" is a
+different fact from "fills what is absent" even though the two sets are complements today. Both
+counts stay CpG counts on the probe axis and are block-invariant (`norm_absent` is a cohort fact),
+so the assembly rule in `dev/id-streaming-plan.md` sec 5.4 covers them unchanged.
+
+**No `norm_used`.** `score_used` exists because a vendor-filled score CpG is a term in the linear
+predictor and users needed the denominator that reflects it; on the norm panel the analogous
+quantity is just `norm_needed` for a filling scheme and `norm_present` for a dropping one, both
+already in the frame.
+
+`clocks_coverage()` also gained a `group_id` column beside `clock_id` (read from the catalog, so a
+pure composite's `NULL` record still reports its group).
+
 ## 2026-07-29 -- Welford's division becomes a cached reciprocal; a storage-order rewrite and a two-pass rewrite both measured worse
 
 `col_stats(row_moments = TRUE)` divided once per finite cell (`rmean[i] += delta / n`). `n` is a

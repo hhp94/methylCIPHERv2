@@ -50,11 +50,15 @@ mask_routed_rows <- function(miss, sex_key, rows) {
 # one clock's coverage record (only writer of record fields). every count is a
 # CpG count, partials included. per-sample axis lives in sample_miss, not here
 coverage_record <- function(cpgs, score_partial, norm_partial = 0L) {
-  policy <- clock_impute(cpgs[["clock_id"]])[["policy"]]
+  id <- cpgs[["clock_id"]]
+  policy <- clock_impute(id)[["policy"]]
   fill <- identical(policy, "vendor_mean")
   n_absent <- length(cpgs[["score_absent"]])
+  # the norm panel fills by declared scheme, not by the imputation policy
+  norm_fill <- clock_norm_scheme(id) %in% NORM_SCHEMES_FILL
+  n_norm_absent <- length(cpgs[["norm_absent"]])
   list(
-    clock_id = cpgs[["clock_id"]],
+    clock_id = id,
     policy = policy,
     normalizes = cpgs[["normalizes"]],
     score_needed = length(cpgs[["score_needed"]]),
@@ -66,6 +70,8 @@ coverage_record <- function(cpgs, score_partial, norm_partial = 0L) {
     norm_needed = length(cpgs[["norm_needed"]]),
     norm_present = length(cpgs[["norm_present"]]),
     norm_imputed_partial = norm_partial,
+    norm_imputed_full = if (norm_fill) n_norm_absent else 0L,
+    norm_dropped = if (norm_fill) 0L else n_norm_absent,
     missing_cpgs = cpgs[["score_absent"]]
   )
 }
