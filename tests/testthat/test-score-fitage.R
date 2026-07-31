@@ -59,7 +59,7 @@ test_that("panel coverage lands on the members, never on the alias", {
   pheno <- fitage_pheno(rownames(DNAm), c(1, 1, 0, 0), rep(50, 4))
 
   res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno)
-  cov <- res$coverage$per_clock
+  cov <- res$coverage$per_clock[[1]]
 
   # the two panels differ in size, so no one count is true of every sample.
   expect_null(cov[["DNAmGrip_wAge"]])
@@ -107,7 +107,7 @@ test_that("per-sample QC routes with the score; panel counts do not", {
   )
 
   # the same fill, counted per panel, stays on that member too.
-  cov <- res$coverage$per_clock
+  cov <- res$coverage$per_clock[[1]]
   expect_equal(cov[["DNAmGrip_wAge_Female"]]$score_imputed_partial, 1)
   expect_equal(cov[["DNAmGrip_wAge_Male"]]$score_imputed_partial, 0)
 })
@@ -142,7 +142,7 @@ test_that("absent member CpGs vendor-fill from that sex's medians", {
     tolerance = 1e-9
   )
 
-  cov <- res$coverage$per_clock[[id]]
+  cov <- res$coverage$per_clock[[1]][[id]]
   expect_equal(cov$score_imputed_full, 5L)
   expect_equal(cov$score_dropped, 0L)
 })
@@ -206,7 +206,7 @@ test_that("composites report no coverage; the CpG readers under them do", {
   DNAm2 <- DNAm[, setdiff(colnames(DNAm), drop), drop = FALSE]
 
   res <- calc_clocks(DNAm2, "DNAmFitAge", pheno = pheno)
-  cov <- res$coverage$per_clock
+  cov <- res$coverage$per_clock[[1]]
 
   # the composites read no betas: no record, and no samples_coverage rows
   composites <- c(

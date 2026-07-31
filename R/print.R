@@ -1,11 +1,8 @@
-# one visual grammar for every print.mc_* method. these records are lists, so
-# each prints as a "<class> A x B" header, then one "$component [what is shown]"
-# section per element, then a "... N more" tail on the axes that were cut.
-# builders return strings, so a cli printer emits the same text verbatim.
+# shared print grammar for every print.mc_* method. builders return strings so cli and cat match
 
-# "3 clock(s)" -- one plural form for every count we print
-plural_count <- function(n, noun) {
-  sprintf("%d %s(s)", n, noun)
+# one plural form for every count we print. suffix covers nouns like batch(es)
+plural_count <- function(n, noun, suffix = "s") {
+  sprintf("%d %s(%s)", n, noun, suffix)
 }
 
 # "6 of 10 row(s)" -- the "of" form means the axis can be cut
@@ -36,8 +33,7 @@ fmt_section <- function(name, ...) {
   sprintf("$%s [%s]", name, paste(c(...), collapse = ", "))
 }
 
-# one component: its section line, an ni x pi head, then the axes it cut.
-# cut_cols = FALSE for a component we never narrow (pheno keeps its columns)
+# one component block. cut_cols = false when columns stay whole (pheno)
 print_block <- function(name, x, ni, pi, col_noun, cut_cols = TRUE) {
   nr <- nrow(x)
   nc <- ncol(x)

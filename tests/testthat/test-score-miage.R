@@ -31,7 +31,7 @@ test_that("absent MiAge CpGs drop out of the objective", {
   res <- calc_clocks(DNAm[, kept, drop = FALSE], "MiAge")
   expect_equal(unname(res$scores[, "MiAge"]), divisions, tolerance = 1e-6)
 
-  cov <- res$coverage$per_clock[["MiAge"]]
+  cov <- res$coverage$per_clock[[1]][["MiAge"]]
   expect_equal(cov$score_dropped, 40L)
   expect_equal(cov$score_present, length(kept))
   expect_equal(cov$score_imputed_full, 0L)

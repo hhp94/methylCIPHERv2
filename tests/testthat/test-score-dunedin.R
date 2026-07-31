@@ -7,7 +7,7 @@ test_that("DunedinPoAm38 vendor-fills fully-absent CpGs (score_imputed_full)", {
   DNAm <- random_betas(keep, n = 5L)
   res <- calc_clocks(DNAm, "DunedinPoAm38")
 
-  cov <- res$coverage$per_clock$DunedinPoAm38
+  cov <- res$coverage$per_clock[[1]]$DunedinPoAm38
   expect_equal(cov$score_imputed_full, 2L)
   expect_false(anyNA(res$scores[, "DunedinPoAm38"]))
 
@@ -66,7 +66,7 @@ test_that("DunedinPACE reports score and norm panel miss separately", {
   expect_equal(unname(sm$norm[, "DunedinPACE"]), c(1L, 1L, 0L, 0L))
   expect_equal(unname(sm$score[, "DunedinPACE"]), c(0L, 1L, 0L, 0L))
 
-  cov <- res$coverage$per_clock$DunedinPACE
+  cov <- res$coverage$per_clock[[1]]$DunedinPACE
   expect_true(cov$normalizes)
   # score panel holds one of the two holed CpGs, norm panel both (score is a
   # subset of norm)
@@ -84,7 +84,7 @@ test_that("DunedinPACE counts fully-absent norm CpGs as norm_imputed_full", {
   DNAm <- random_betas(setdiff(norm_panel, norm_only[1:3]), n = 4L)
   res <- calc_clocks(DNAm, "DunedinPACE")
 
-  cov <- res$coverage$per_clock$DunedinPACE
+  cov <- res$coverage$per_clock[[1]]$DunedinPACE
   expect_equal(cov$norm_needed - cov$norm_present, 3L)
   expect_equal(cov$norm_imputed_full, 3L)
   expect_equal(cov$norm_dropped, 0L)
@@ -126,7 +126,7 @@ test_that("DunedinPACE matches danbelsky/DunedinPACE through a holed panel", {
 
   # the record reads the same scenario: absent CpGs filled from the target,
   # present-but-holed ones cohort-mean filled, nothing dropped
-  cov <- got$coverage$per_clock$DunedinPACE
+  cov <- got$coverage$per_clock[[1]]$DunedinPACE
   expect_equal(cov$score_imputed_full, 3L)
   expect_equal(cov$norm_imputed_full, 1003L)
   expect_equal(cov$score_imputed_partial, 5L)

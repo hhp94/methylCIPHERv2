@@ -25,7 +25,7 @@ test_that("absent surrogate CpGs vendor-fill by offset under mean reduction", {
     tolerance = 1e-10
   )
 
-  cov <- res2$coverage$per_clock[["DNAmCRP"]]
+  cov <- res2$coverage$per_clock[[1]][["DNAmCRP"]]
   expect_equal(cov$score_imputed_full, 5L)
   expect_equal(cov$score_dropped, 0L)
 })

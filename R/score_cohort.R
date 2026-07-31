@@ -86,8 +86,7 @@ score_type <- function(p) {
   unroutable(p)
 }
 
-# does this branch read betas, or only other clocks' scores? pure composite
-# owns no coverage record -- every CpG feeding it is already on a descendant
+# true when the branch reads betas. pure composites own no coverage of their own
 clock_reads_cpgs <- function(p) {
   switch(
     score_type(p),
@@ -108,12 +107,10 @@ is_pack_scored <- function(p) {
   score_type(p) %in% PACK_SCORE_TYPES
 }
 
-# external pack groups needed for a compute sequence. keyed on where the weights
-# live, not how the clock is scored -- an external clock may take a named branch
+# external pack groups for a sequence. keyed on where weights live, not the scoring path
 pack_groups_needed <- function(clock_sequence) {
-  unique(unlist(lapply(clock_sequence, function(p) {
-    if (clock_is_external(p)) clock_group_id(p) else NULL
-  })))
+  ext <- clock_sequence[vapply(clock_sequence, clock_is_external, logical(1L))]
+  unique(vapply(ext, clock_group_id, character(1L), USE.NAMES = FALSE))
 }
 
 # data-independent: resolved once, whatever the front end
@@ -258,8 +255,7 @@ collect_notes <- function(notes) {
 # per-block view: DNAm + its usable column index, partial cache, pheno, notes
 mc_block <- function(DNAm, spec, facts) {
   usable <- facts[["usable_cols"]]
-  # CpG name -> column position, resolved once instead of per panel gather
-  # one named vector, not a name/position pair to keep aligned
+  # cpg name -> column position, one named vector resolved once
   usable_idx <- match(usable, colnames(DNAm))
   names(usable_idx) <- usable
   if (anyNA(usable_idx)) {

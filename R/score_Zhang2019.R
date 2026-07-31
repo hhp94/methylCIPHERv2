@@ -1,11 +1,9 @@
-# zhang2019: full-matrix sample z-score, then linear sum over the arm's present
-# CpGs. routes both arms -- EN bundled, BLUP coefs from its pack
+# zhang2019: full-matrix sample z-score, then linear sum. both arms
 score_Zhang2019 <- function(id, cpgs, block, results) {
   coef <- clock_coefs(id, block[["packs"]])
   present <- cpgs[["score_present"]]
 
-  # sample_scale is over the full input matrix, not the panel union -- banked by
-  # mc_cohort(), the one place that still sees every column
+  # sample_scale over the full input matrix, banked by mc_cohort()
   mom <- block[["sample_moments"]]
   m <- mom[["mean"]]
   s <- mom[["sd"]]

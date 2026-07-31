@@ -16,19 +16,30 @@ sim_DNAm <- function(
   remove = 0,
   normalize = NULL,
   ext_data = NULL,
-  ask = TRUE
+  ask = TRUE,
+  suffix = NULL
 ) {
   checkmate::assert_flag(Age)
   checkmate::assert_flag(Female)
   checkmate::assert_int(remove, lower = 0)
+  # opt-in sample-id suffix. a default would silently rename every existing call
+  if (!is.null(suffix)) {
+    checkmate::assert_string(suffix, min.chars = 1L)
+  }
 
   cpgs <- clock_cpgs(clocks, normalize, ext_data, ask)
   if (remove > 0) {
     n_drop <- min(remove, length(cpgs))
     cpgs <- cpgs[-sample.int(length(cpgs), n_drop)]
   }
+  # suffixed ids make two simulated blocks disjoint for rbind's first gate
   ID <- paste0("sample", seq_len(n))
+  if (!is.null(suffix)) {
+    ID <- paste0(ID, "_", suffix)
+  }
   DNAm <- random_betas(cpgs, n = n)
+  # one id source for both, rather than two expressions that happen to agree
+  rownames(DNAm) <- ID
   pheno <- data.frame(ID = ID)
   if (Age) {
     pheno[["Age"]] <- stats::rnorm(n, mean = 45, sd = 5)
@@ -39,7 +50,9 @@ sim_DNAm <- function(
   }
   out <- list(
     DNAm = DNAm,
-    pheno = pheno
+    pheno = pheno,
+    # NULL unless the ids were suffixed -- reported, never fed back in
+    suffix = suffix
   )
   class(out) <- c("mc_sim", "list")
   out
@@ -65,6 +78,10 @@ print.mc_sim <- function(x, n = 6, p = 6, ...) {
     "column",
     cut_cols = FALSE
   )
+  # an unsuffixed sim says nothing here, so the line only appears when asked for
+  if (!is.null(x[["suffix"]])) {
+    cat("\n", fmt_section("suffix", x[["suffix"]]), "\n", sep = "")
+  }
 
   invisible(x)
 }

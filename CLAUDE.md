@@ -62,7 +62,12 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   `pending` is empty. Nothing tests for a clock id or for whether the run was chunked; the routing
   reads `spec$cross_sample` (DECISIONS 2026-07-27, "Phase 3"). Coverage/QC
   depends on no score, so it is computed once upstream of the scoring loop by `compute_coverage()`
-  (`R/coverage.R`), keyed by clock id, and merged in `construct_mc_result()`. Per-sample miss is
+  (`R/coverage.R`), keyed by clock id, and merged in `construct_mc_result()` -- which files it
+  under the run's **batch label**, so the record reads `$coverage$per_clock[[batch]][[id]]` even
+  for a single-pass run. Batch is a real axis for these counts and not a decoration: `rbind` binds
+  records scored in separate `calc_clocks()` calls, and `score_imputed_partial` counts the panel
+  CpGs in *that run's* partial cache, so two batches almost never agree (DECISIONS 2026-07-30,
+  "Phase 4 gates"). Per-sample miss is
   counted **once per distinct panel** (FitAge/GrimAge reuse panels) and kept **per panel role**:
   every clock has a score panel; a normalizing clock (only DunedinPACE) also has a norm panel. The
   counts follow the policy uniformly -- `vendor_mean` fills every absent CpG into the predictor
@@ -91,10 +96,43 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   remain the shared shape helpers (see DECISIONS 2026-07-24).
 - **Result is an S3 record over `list`** (class `mc_result`): `$scores` (n x k double), `$pheno`,
   `$coverage`, `$provenance`. Never a `matrix` subclass (drops class + attrs on first subset).
+  `$provenance` also carries the per-sample `batch` (aligned to `sample_id`) and the retained
+  `pending` intermediates that make an opt-in `refinalize_clocks()` exact.
   **Where a verb exists it is a method**, and the built surface today is exactly `print`,
-  `as.matrix` and `cite_clocks` -- plus `rbind`, which exists in order to **refuse**. Coverage is
+  `as.matrix`, `cite_clocks` and `rbind`. Coverage is
   deliberately not a method: it is the plain `clocks_coverage()` / `samples_coverage()`, **not**
-  `summary()`. Citations dispatch as `cite_clocks()` -- a **package-owned** generic, because both
+  `summary()`. `clocks_coverage()` is one row per **(clock, batch)**; `samples_coverage()` carries
+  each sample's batch alongside its id. In both, `batch` is the **last** column -- it is the key
+  the two frames join on, but it is a hash, so it does not sit in front of `clock_id`.
+  **`rbind` binds and labels; it never reconciles.** Nothing is re-imputed, no denominator is
+  merged, and no cross-sample column is recomputed unless `refinalize_clocks()` is called by hand
+  -- but a multi-batch bind carrying a non-empty `pending` **says so once** (`say_pending()`,
+  an `inform` not a `warn`), naming the columns from `names(pending)`, which is the catalog's
+  declared `cross_sample` set. `refinalize_clocks()` **reads `pending` and never consumes it**, so
+  it composes in any order and a second call is a no-op; never clear `pending` after re-finalizing
+  (`dev/id-streaming-plan.md` sec 8.4).
+  Its gates follow one line -- **record what batching forced, refuse what the caller chose
+  differently** -- so a per-batch fill regime is recorded (that is what the batch axis is for)
+  while overlapping ids, differing score columns, a differing `pheno_id` and a differing
+  `normalize=` all throw. There is no `force =`. **Batch labels are derived, never assigned**:
+  `construct_mc_result()` sets one to `batch_hash(pheno[[pheno_id]])` -- 12 hex of `xxhash64` over
+  the pheno's **id column only** -- and there is no `batch =` argument anywhere. So `rbind` carries
+  no label policy at all: it mints nothing, renames nothing, renumbers nothing, and **drops**
+  argument names (`unname(list(...))`). Do not refuse them instead: `split()` names its result, so
+  refusing kills `do.call(rbind, lapply(split(...), ...))`, which is the blocking idiom the feature
+  exists for. This is what makes re-association exact --
+  `rbind(rbind(r1, r2), r3)` and `rbind(r1, r2, r3)` return `identical()` records. Do not hash the
+  pheno *frame*: covariate values would fold into batch identity (correcting one subject's age
+  renames the batch) and `digest` is storage-type sensitive. Do not restore an assigned label to
+  fix a spelling -- a stored string cannot say whether a human chose it, which is exactly what sank
+  `is_auto_label()` (DECISIONS 2026-07-30, "The batch label is derived"). **Hash the canonical
+  form** -- `sort(..., method = "radix")` + `unname`/`as.character` + `serialize = FALSE` -- or the
+  label follows the id *sequence*, the locale and the R serialization version instead of the id
+  set. Two batches sharing a label then needs a 48-bit collision against id sets gate 1 just made
+  disjoint (1.8e-11 at 100 batches), so there is **no gate on labels** -- do not add one back.
+  `sim_DNAm(suffix =)` is **not** a batch
+  argument -- it suffixes sample ids so two simulated blocks clear gate 1.
+  Citations dispatch as `cite_clocks()` -- a **package-owned** generic, because both
   `utils::citation` and `utils::cite` already exist as plain functions and taking either name
   masks it (DECISIONS 2026-07-23, 2026-07-24, 2026-07-25). Nothing else is promised: `as.data.frame`,
   `[`, `cbind`, `augment` and `codebook` were listed here for a year without being written, so
@@ -108,6 +146,15 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
 - **Scores only, and the record remembers its inputs.** `$scores` is scores -- no auto-appended
   phenotype columns. Separately, `$pheno` carries the *aligned* pheno narrowed to the id column
   plus the covariates the run actually required, so a saved record can answer what was fed in.
+  **It is never `NULL`**: with no `pheno =` supplied, `resolve_pheno()` materializes the id column
+  alone, so `$pheno` is one shape everywhere and the batch label always has a column to hash
+  (DECISIONS 2026-07-30, "The batch label is derived"). Its columns therefore need no `rbind` gate
+  -- they are `unique(c(pheno_id, covariates))`, both already pinned.
+  **And it never carries row names.** `resolve_pheno()` has one exit and resets them there, on both
+  branches, so a supplied pheno's row names never survive the id-join. Row names would be a second
+  identity beside the id column, and the two can silently disagree under subsetting or `rbind`; the
+  id column is the only key. `rbind` adds no reset of its own -- automatic row names stay automatic
+  through `rbind`, so a second one would be guarding what `resolve_pheno()` already guarantees.
   Align pheno by sample id, never row order. If a frame conversion is ever built, it inherits this
   rule: scores plus the id column, and pheno stays off that path so it cannot leak by accident.
 - **Imputation in one place, never crossing sources.** Partial NA on a present probe -> cohort mean

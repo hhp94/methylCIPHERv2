@@ -29,7 +29,10 @@ test_that("an infinite value scores as missing, and warns that it did", {
   expect_equal(length(warnings_of(res <- calc_clocks(inf_only, "Hannum"))), 1L)
   expect_true(all(is.finite(res$scores[, "Hannum"])))
   # imputed exactly like an NA in the same cell would have been
-  expect_equal(res$coverage$per_clock[["Hannum"]]$score_imputed_partial, 1L)
+  expect_equal(
+    res$coverage$per_clock[[1]][["Hannum"]]$score_imputed_partial,
+    1L
+  )
 
   neg <- b$DNAm
   neg[3, b$panel[5]] <- -Inf
@@ -161,7 +164,7 @@ test_that("ordinary betas pass both gates in silence", {
   expect_no_warning(filled <- calc_clocks(with_na, "Hannum"))
   # one CpG, filled in three samples: the record counts CpGs
   expect_equal(
-    filled$coverage$per_clock[["Hannum"]]$score_imputed_partial,
+    filled$coverage$per_clock[[1]][["Hannum"]]$score_imputed_partial,
     1L
   )
 })
@@ -179,7 +182,10 @@ test_that("per-sample fill counts land on the samples that were filled", {
   expect_equal(unname(miss), c(2L, 0L, 0L, 1L, 0L, 0L))
   expect_equal(names(miss), rownames(DNAm))
   # the record counts the other axis: 2 distinct CpGs, not the 3 filled cells
-  expect_equal(res$coverage$per_clock[["Hannum"]]$score_imputed_partial, 2L)
+  expect_equal(
+    res$coverage$per_clock[[1]][["Hannum"]]$score_imputed_partial,
+    2L
+  )
 })
 
 test_that("an all-missing column classifies rather than erroring", {

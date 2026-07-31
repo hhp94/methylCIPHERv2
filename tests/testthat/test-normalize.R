@@ -24,7 +24,7 @@ test_that("Horvath1 defaults to no normalization and scores raw", {
   ))
   expect_equal(as.numeric(res$scores[, "Horvath1"]), golden)
 
-  cov <- res$coverage$per_clock$Horvath1
+  cov <- res$coverage$per_clock[[1]]$Horvath1
   expect_false(cov$normalizes)
   expect_equal(cov$norm_imputed_partial, 0L)
 })
@@ -37,7 +37,7 @@ test_that("a declined clock asks for no normalization panel", {
   # the 21k gold panel never reaches the required CpG set
   DNAm <- random_betas(clock_scoring_cpgs("Knight"), n = 4L)
   res <- calc_clocks(DNAm, "Knight")
-  expect_false(res$coverage$per_clock$Knight$normalizes)
+  expect_false(res$coverage$per_clock[[1]]$Knight$normalizes)
   expect_false("Knight" %in% colnames(res$coverage$sample_miss$norm))
 })
 
@@ -146,7 +146,7 @@ test_that("a normalizing clock gains a norm panel and its coverage column", {
   DNAm <- methylation_betas(gold, n = 4L)
   res <- calc_clocks(DNAm, "Horvath1", normalize = c(Horvath1 = TRUE))
 
-  cov <- res$coverage$per_clock$Horvath1
+  cov <- res$coverage$per_clock[[1]]$Horvath1
   expect_true(cov$normalizes)
   expect_true("Horvath1" %in% colnames(res$coverage$sample_miss$norm))
 })
@@ -168,7 +168,7 @@ test_that("a sample BMIQ cannot fit is on the record, not a bare NA", {
   expect_false(anyNA(got[-2]))
 
   # coverage stays full -- notes is what distinguishes the NA
-  cov <- res$coverage$per_clock$Horvath1
+  cov <- res$coverage$per_clock[[1]]$Horvath1
   expect_equal(cov$score_used, cov$score_needed)
 })
 
@@ -190,7 +190,7 @@ test_that("BMIQ drops absent background CpGs rather than filling them", {
   thin <- full[, setdiff(names(gold), dropped), drop = FALSE]
 
   res <- calc_clocks(thin, "Horvath1", normalize = c(Horvath1 = TRUE))
-  cov <- res$coverage$per_clock$Horvath1
+  cov <- res$coverage$per_clock[[1]]$Horvath1
   expect_equal(cov$norm_needed, length(gold))
   expect_equal(cov$norm_present, length(gold) - 2000L)
   # the record says dropped, not filled

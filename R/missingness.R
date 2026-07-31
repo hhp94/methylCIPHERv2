@@ -59,8 +59,7 @@ check_col_values <- function(scan, cols) {
   invisible(NULL)
 }
 
-# post-score value gate: NaN/Inf in a score. NA is legitimate (sample the
-# branch declined), so only non-finite non-NA values count
+# post-score value gate for nan/inf. na is legitimate (branch declined a sample)
 check_score_values <- function(scores) {
   n_bad <- vapply(
     scores,
@@ -103,8 +102,7 @@ check_score_values <- function(scores) {
   invisible(NULL)
 }
 
-# one col_stats() sweep: columns, means, value gates, row_obs, and for a
-# sample_scale clock the per-sample moments it z-scores by
+# one col_stats() sweep for columns, means, value gates, row_obs, and optional moments
 scan_missing_cpgs <- function(
   DNAm,
   needed_cpgs,
@@ -112,20 +110,15 @@ scan_missing_cpgs <- function(
   row_moments = FALSE
 ) {
   present_needed <- intersect(needed_cpgs, colnames(DNAm))
-  # unique by construction (intersect + match). row_moments needs that or a
-  # repeated index hits the subset pass twice and the complement never
+  # unique by construction. row_moments needs that or a repeated index double-counts
   needed_idx <- match(present_needed, colnames(DNAm))
   nr <- nrow(DNAm)
 
-  # index into DNAm, not a slice. with row_moments the complement is swept only
-  # into row accumulators so sample_scale still sees every column. row_obs stays
-  # the panel count. complement obs go in row_obs_complement
+  # index into dnam, not a slice. with row_moments the complement only feeds row accumulators
   scan <- col_stats(DNAm, needed_idx, row_moments = row_moments)
   check_col_values(scan, present_needed)
 
-  # dead on the scoring panels only -- a norm CpG never scores a sample.
-  # empty panel is the coverage gate's problem, not this one
-  # identical inputs intersect the same colnames identically skip the rescan
+  # dead samples checked on scoring panels only. identical inputs skip the rescan
   present_score <- if (identical(score_cpgs, needed_cpgs)) {
     present_needed
   } else {
@@ -158,8 +151,7 @@ scan_missing_cpgs <- function(
   partial <- present_needed[n_obs > 0 & n_obs < nr]
   i <- match(partial, present_needed)
 
-  # moments span every column, so sd's divisor is panel row_obs plus whatever
-  # the complement pass observed
+  # moments span every column. sd's divisor is panel row_obs plus the complement
   moments <- if (row_moments) {
     n_all <- scan[["row_obs"]] + scan[["row_obs_complement"]]
     list(

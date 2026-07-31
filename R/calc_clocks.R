@@ -37,8 +37,7 @@ calc_clocks <- function(
 
   # per-sample coverage gate (warn only, after scoring)
   check_row_coverage(scored[["coverage"]], min_samples_coverage)
-  # value gate on output columns: column scan cannot cover a clock that reads
-  # outside its panel, so NaN/Inf is caught where it lands
+  # value gate on output columns. nan/inf land here, not in the panel scan
   check_score_values(scores[spec[["output_ids"]]])
 
   construct_mc_result(
@@ -51,6 +50,8 @@ calc_clocks <- function(
     pheno_id = pheno_id,
     covariates_used = spec[["covariates"]],
     normalized = names(spec[["normalize"]])[spec[["normalize"]]],
-    scoring_failures = scored[["notes"]]
+    scoring_failures = scored[["notes"]],
+    # kept, not discarded, so a bound record can re-finalize exactly
+    pending = scored[["pending"]]
   )
 }

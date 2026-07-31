@@ -28,8 +28,7 @@ cite_clocks.default <- function(x, ...) {
   )
 }
 
-# header + $bibtex in the shared printer grammar (R/print.R), through
-# cli_verbatim: bibtex is pre-aligned and cli reflows anything else
+# header + bibtex in the shared printer grammar, via cli_verbatim so alignment holds
 #' @export
 print.mc_citation <- function(x, ...) {
   links <- x[["links"]]

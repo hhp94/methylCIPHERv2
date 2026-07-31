@@ -50,8 +50,7 @@ zscore_raws <- function(id, raws) {
   }
 
   z <- scale(raws)
-  # the divisor scale() actually used, not a second opinion on it. a column of
-  # NaN (no CpG observed) scales by 0, so it lands in the same branch
+  # the divisor scale() actually used. a nan column scales by 0 and hits the same branch
   sds <- attr(z, "scaled:scale")
   flat <- colnames(raws)[!is.finite(sds) | sds == 0]
   if (!length(flat)) {

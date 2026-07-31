@@ -40,7 +40,7 @@ test_that("absent EpiTOC2 CpGs drop out of the mean", {
     tolerance = 1e-10
   )
 
-  cov <- res$coverage$per_clock[["EpiTOC2"]]
+  cov <- res$coverage$per_clock[[1]][["EpiTOC2"]]
   expect_equal(cov$score_dropped, 10L)
   expect_equal(cov$score_imputed_full, 0L)
 })

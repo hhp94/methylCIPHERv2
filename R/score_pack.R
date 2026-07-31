@@ -1,7 +1,6 @@
 # batched scorers for external packs (PCClocks, PCBrainAge, SystemsAge)
 
-# pack CpG panel: subset, present/absent, vendor ref. take the split resolved
-# upstream -- pack cpgs are the clock's declared panel
+# pack cpg panel from the upstream-resolved split (the clock's declared panel)
 pack_design <- function(id, cpgs, block) {
   present <- cpgs[["score_present"]]
   absent <- cpgs[["score_absent"]]

@@ -151,28 +151,32 @@ warn_missing_covariates <- function(
   invisible(NULL)
 }
 
-# align pheno by id-join, keep id column + required covariates
+# align pheno by id-join. with none supplied it is the id column alone
 resolve_pheno <- function(DNAm, pheno, pheno_id, keep) {
-  if (is.null(pheno)) {
-    return(NULL)
-  }
   sample_id <- rownames(DNAm)
-  keep <- unique(c(pheno_id, keep))
-
-  missing <- setdiff(sample_id, pheno[[pheno_id]])
-  if (length(missing)) {
-    cli::cli_abort(
-      c(
-        "{.arg pheno} is missing {length(missing)} sample id{?s} that appear
-         in DNAm:",
-        "x" = "{.val {utils::head(missing, 10L)}}",
-        "i" = "Every DNAm row needs a matching id in the pheno id column."
-      ),
-      call = NULL
-    )
+  out <- if (is.null(pheno)) {
+    stats::setNames(data.frame(sample_id, stringsAsFactors = FALSE), pheno_id)
+  } else {
+    missing <- setdiff(sample_id, pheno[[pheno_id]])
+    if (length(missing)) {
+      cli::cli_abort(
+        c(
+          "{.arg pheno} is missing {length(missing)} sample id{?s} that appear
+           in DNAm:",
+          "x" = "{.val {utils::head(missing, 10L)}}",
+          "i" = "Every DNAm row needs a matching id in the pheno id column."
+        ),
+        call = NULL
+      )
+    }
+    # id column + required covariates only
+    pheno[
+      match(sample_id, pheno[[pheno_id]]),
+      unique(c(pheno_id, keep)),
+      drop = FALSE
+    ]
   }
-  # id column + required covariates only
-  out <- pheno[match(sample_id, pheno[[pheno_id]]), keep, drop = FALSE]
+  # keyed by the id column, never by row names
   rownames(out) <- NULL
   out
 }

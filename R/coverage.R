@@ -3,8 +3,7 @@
 # per-sample observed count over column positions (callers are past the value gate)
 row_observed <- function(DNAm, idx) {
   obs <- col_stats(DNAm, idx)[["row_obs"]]
-  # NULL means the kernel bailed on overflow, which the value gate in
-  # scan_missing_cpgs() already ruled out for these columns
+  # null means the kernel bailed on overflow past the value gate
   if (is.null(obs)) {
     stop(
       "row_observed: col_stats bailed on a non-finite value past the value
@@ -47,8 +46,7 @@ mask_routed_rows <- function(miss, sex_key, rows) {
   miss
 }
 
-# one clock's coverage record (only writer of record fields). every count is a
-# CpG count, partials included. per-sample axis lives in sample_miss, not here
+# one clock coverage record. every count is a cpg count. per-sample axis is sample_miss
 coverage_record <- function(cpgs, score_partial, norm_partial = 0L) {
   id <- cpgs[["clock_id"]]
   policy <- clock_impute(id)[["policy"]]
@@ -85,8 +83,7 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
   seqi <- seq_along(clock_sequence)
   pidx <- cpg_list[["panel_index"]]
 
-  # one cached-column set per distinct panel. "partly filled" for both axes,
-  # so both derive from it and cannot disagree
+  # one cached-column set per distinct panel, shared by both axes
   score_cached <- lapply(
     pidx[["score"]][["parts"]],
     function(p) cached_cols(p[["present"]], block[["partial_cache"]])
@@ -119,8 +116,7 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
   female <- if (is.null(pheno)) NULL else as.numeric(pheno[["Female"]])
   rows <- sex_rows(female, length(sample_id))
 
-  # every beta-reading clock: per-sample miss (masked for routed members on
-  # rows their sex did not score) plus the record on the probe axis
+  # every beta-reading clock: per-sample miss (sex-masked) plus the probe-axis record
   for (i in seqi[reads_cpgs]) {
     id <- clock_sequence[[i]]
     # NA when the clock routes no sex -- masks nothing
@@ -130,8 +126,7 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
       sex_key,
       rows
     )
-    # single bracket + list(): no-norm clock keeps its NULL element.
-    # `[[<-` would delete the name
+    # single bracket + list() keeps a null norm entry. `[[<-` would drop the name
     norm_miss[id] <- list(mask_routed_rows(
       norm_part_miss[[pidx[["norm"]][["idx"]][[i]]]],
       sex_key,

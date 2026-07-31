@@ -14,6 +14,284 @@ second-guessed; do not restate rules already stated in `CLAUDE.md` or `dev/id-st
 
 ---
 
+## 2026-07-30 -- The batch label is derived from the sample ids, and `batch =` is gone
+
+Reverses this same day's "labels are assigned, never derived" and the `CLAUDE.md` line "never hash
+anything to make one". `$pheno` is now always materialized, `calc_clocks(batch =)` is removed, and
+`construct_mc_result()` derives the label as `batch_hash(pheno[[pheno_id]])`.
+
+**What the assigned label cost.** The sticky-vs-auto rule needed `is_auto_label()`, which
+re-derives the caller's *intent* from the label's spelling (`^[0-9]+$`). Nothing in a string can
+carry that, so `batch = "2024"` twice silently renumbered to `2024, 2025` while `"T1"` twice threw
+-- a wave/year label is the obvious thing to pass and the one that misbehaved. The collision error
+also dead-ended: it said "give argument 2 a different name", and doing so hit
+`apply_arg_name()`'s refusal to rename a non-auto label, with no way out but re-scoring. Both are
+symptoms of storing a label without storing whether a human chose it.
+
+**Deriving it removes the policy rather than fixing it.** A label that is a function of the
+record's own ids is stable under re-association by construction: `rbind(rbind(r1, r2), r3)` and
+`rbind(r1, r2, r3)` now return `identical()` records, where before the right-hand side renumbered.
+So `rbind` mints nothing, renames nothing and renumbers nothing -- `DEFAULT_BATCH`,
+`is_auto_label()`, `check_batch_label()`, `next_auto_label()`, `apply_arg_name()`,
+`resolve_labels()` and `batch_maps()` all deleted, and the old "sticky name collides loudly" error
+with them.
+
+**`rbind` argument names are dropped, not refused.** Refusing them was tried first and reverted the
+same session: `split()` names its result by factor level, so
+`do.call(rbind, lapply(split(seq_len(n), g), score))` -- the canonical blocking idiom, the workflow
+this feature exists for -- died on a wall of `"1", "2", ... "50"`. That is the `is_auto_label()`
+mistake again in a new place: a name on `...` no more carries "I meant to label a batch" than a
+digit-shaped string does. Names arrive from `split()`, `setNames()` and `Map()` for reasons that
+have nothing to do with batching, and those cases outnumber a hand-typed `rbind(early = r1)` by far.
+There is no way to tell the two apart -- `do.call` builds a call carrying the names either way --
+so a warning would fire mostly on correct code. `unname(list(...))` and nothing else.
+
+**Why the id column and not `$pheno` whole.** Hashing the pheno frame was the original proposal
+and is wrong twice over. Before this change `resolve_pheno()` returned `NULL` whenever no pheno was
+supplied -- 95 of 120 callable clocks require no covariate -- so *every* such batch hashed
+identically and k batches would have collapsed onto one `per_clock` key, silently merging exactly
+the per-batch fill regimes the batch axis exists to keep apart. Materializing `$pheno` fixes that,
+but hashing the whole frame then folds covariate *values* into batch identity: correcting one
+subject's age renames the batch, and `digest` is sensitive to column storage type, so the same CSV
+read with integer vs double `Age` hashes differently. The id column has neither problem and answers
+the question the label is actually asking -- *which samples were scored together*. In the 95/120
+no-covariate case the two are byte-identical anyway.
+
+**Rejected reasons, revisited.** 2026-07-30 rejected id-set hashing on cost, not soundness (it
+says outright "hashing the id set is the only sound one"): a `digest` dependency, hex in the two
+frames people read, and the `batch_set_id` non-goal. The first is paid (`digest` Suggests ->
+Imports; it was already a Suggests). The second is handled by moving `batch` to the **end** of
+`clocks_coverage()` and `samples_coverage()` -- it is still the key those frames join on, it just
+no longer sits in front of `clock_id` where it reads as noise. The third stands as written and is
+the part being reversed: the ban existed to stop anything *joining* on a content-derived id, and
+`samples_coverage()` already joins on `batch` regardless of how the label is produced, so deriving
+it changes what the label costs to compute and not what it is used for.
+
+**The hashed value is canonicalized, and that is not optional.** `digest(ids)` hashes the id
+*sequence and its R representation*, not the id set: reversing three ids, naming them, or handing
+in a factor each produce a different label, so re-scoring a block after sorting its rows would
+silently relabel it. `batch_hash()` therefore hashes
+`paste0(sort(unname(as.character(ids)), method = "radix"), collapse = "\r")`. Every piece is
+load-bearing -- `sort` makes it a function of the set, `method = "radix"` keeps that
+locale-independent (plain `sort()` collates per-locale, so two machines would disagree),
+`unname`/`as.character` drop attributes, and `serialize = FALSE` hashes the bytes so no R
+serialization version reaches the label. A batch label appears in published
+`clocks_coverage()` output, so it has to survive a change of machine.
+
+Width is 12 hex of `xxhash64` (48 bits). Gate 1 makes the id sets disjoint, so a shared label needs
+a real collision: **1.8e-11 at 100 batches, 1.8e-9 at 1000** (birthday bound; an earlier revision
+of this entry said 1e-13, which was wrong by ~100x). 200k distinct inputs collided zero times when
+measured. Since there is no longer a gate on labels, a collision would be silent -- the trade is
+accepted at these numbers, and the fix if it ever mattered is to widen the truncation, not to
+re-add the gate. `xxhash64` is non-cryptographic, which is fine here because sample ids are not
+adversarial.
+
+**Two unreachable guards were cut rather than kept "just in case."** A `gate_distinct_batches()`
+and a partial-`pending` "package bug" stop were both written and both deleted the same session,
+39 lines between them. Neither can fire: the first needs the 48-bit collision above, the second
+needs two records with equal `$provenance$clocks` and different `spec$cross_sample`, which cannot
+happen because `covariates`/`cross_sample` are functions of the clock sequence that gate 2 pins
+(measured: `GrimAgeV1` vs `c("GrimAgeV1", "DNAmADM")` give identical output columns *and*
+identical pending keys). The rule they now follow is the one that also deleted `gate_same_pheno()`'s
+column check and rejected a `covariates_used` gate: **a guard on something an earlier gate makes
+impossible is deleted, not kept.** Keeping some and cutting others left no statable principle, and
+"which unreachable guards do we keep" is exactly the per-guard re-litigation the "one line decides
+every gate" framing exists to stop. If a cross-sample clock ever becomes a routing target, gate 2
+stops pinning `cross_sample` and the second guard becomes reachable -- add it back then, with a
+test that fires it.
+
+**`$pheno` is always present now.** With none supplied it is the id column alone, which reads
+*closer* to the standing invariant ("the aligned pheno narrowed to the id column plus the
+covariates the run required") than `NULL` did -- `NULL` carries no id column at all. This also
+kills two things: `print.mc_result`'s `is.null(pheno)` branch, and `gate_same_pheno()`'s carried-
+column check. That check is now unreachable -- `names(pheno)` is `unique(c(pheno_id, covariates))`
+and `covariates` is a pure function of the clock sequence, which gate 2 pins -- so it is deleted
+for the same reason the "same id, different covariates" gate was deleted this morning, leaving
+`gate_same_pheno_id()`.
+
+**`sim_DNAm(batch =)` is renamed `suffix =`, not removed.** It never labelled anything: it
+suffixes the sample ids (`sample1_T1`) so two simulated blocks are disjoint by construction and
+clear gate 1. That job is still needed and is now the *only* thing the caller controls about
+batching, so it stops sharing a word with the derived label. `$batch` on the returned `mc_sim`
+becomes `$suffix`.
+
+---
+
+## 2026-07-30 -- Phase 4 gates: refuse what the caller chose, record what batching forced
+
+Settles the `rbind` design, which then shipped in the same session (`R/bind.R`, `test-bind.R`).
+Narrows sec 8's four gates to four different ones and reverses two things sec 8 said.
+
+**The line that decides every gate.** Sec 8 already said "record, never refuse, on differing fill
+regimes", but did not say what that generalizes to, so each new question re-litigated it. It is:
+
+> **Record what batching forces. Refuse what the caller chose differently.**
+
+A per-batch fill regime is *forced* -- cohort means are per-run by construction, so a batched user
+cannot avoid it and refusing would refuse the whole feature. Every other difference between two
+records is a free argument with one obviously right answer across batches, so a difference is a
+mistake and the bind says so. An earlier framing, "refuse on ambiguous identity, record on differing
+method", was rejected: it puts `normalize=` on the record side, and `normalize=` is exactly the
+caller choice that should be refused.
+
+**The gates, and why there are four of them and not sec 8's four.**
+
+1. **Disjoint ids**, checked as `anyDuplicated()` over the concatenated `$provenance$sample_id` --
+   **not** over the pheno id column. `$pheno` is `NULL` whenever the run required no covariates,
+   which is most runs, so a pheno-side check silently checks nothing exactly where the exposure is
+   worst.
+2. **Identical score columns**, reordered to the first record or thrown. This **subsumes sec 8's
+   gate 3** (comparable coverage denominators): `output_ids` is the compute sequence minus routed
+   members and the sequence is a deterministic function of the requested ids, so identical columns
+   implies identical sequence implies identical panels. One gate, not two.
+3. **Identical `pheno_id`.** Sec 8's gate 4 also required "no id appearing twice with different
+   covariates", which is dead as written -- gate 1 forbids an id appearing twice at all.
+4. **Identical `$provenance$normalized`.** New. Two records with the same clocks but different
+   `normalize=` pass gates 1-3 with identical columns and identical *scoring* panels, while
+   `Horvath1` measured 0.114 vs 7.715 absolute against the oracle depending on the setting
+   (2026-07-29). The experimenter comparing normalized against raw is **already refused by gate 1**
+   -- same samples scored twice, so the ids collide -- and wants the two columns side by side
+   anyway, not stacked under a batch label. So the only caller who reaches this gate is one whose
+   loop varied the argument across chunks, which is a bug.
+
+**Refusing on overlapping ids is not over-strict.** A warning does not help: the double-count lands
+in the *mean and sd*, so a z-score or an age-acceleration residual over the bound record is wrong
+for every sample, not just the duplicated ones. After the bind, "one sample scored twice" and "two
+samples sharing a name" are indistinguishable, so there is nothing to record instead. The fix is one
+line user-side (`rownames(DNAm) <- paste0(rownames(DNAm), "_T1")`) and is the same relabelling the
+caller's own downstream analysis needs. No `force =`, and no comparing record *contents* to detect
+that two arguments are literally the same record -- the id sets are the whole test.
+
+**Batch labels: no hash, and no stored counter.**
+
+Hashing was considered in three forms and all three are rejected. Hashing `$pheno` cannot work:
+`resolve_pheno()` narrows it to the id column plus required covariates, so it is `NULL` or exactly
+`data.frame(ID = ids)` for any request with no covariates, and every such batch hashes the same;
+where it *does* differ it folds covariate values into batch identity, so correcting one subject's
+age silently renames a batch. Hashing the **fill regime** (`partial_fill` + `usable_cols`) is
+float-brittle -- 2026-07-24's chunk-invariance measurement already found last-bit drift from
+`dgemm` blocking alone -- and collides on the case that matters, two clean matrices over the same
+CpG set. Hashing the **id set** is the only sound one (gate 1 makes collision impossible), but it
+promotes `digest` from Suggests to Imports for a naming problem, prints hex into the two frames
+people read, and is a `batch_set_id` -- the one thing the plan's non-goals name.
+
+A stored counter field is rejected for a different reason: `$provenance$batch` is already a
+per-sample vector, so the labels present **are** the counter and the next one is
+`max(as.integer(labels)) + 1`. A separate field's only possible behaviour is to drift out of sync
+with the vector it summarizes.
+
+So the label is assigned, not derived:
+
+- a user-supplied name (`calc_clocks(batch = "T1")`, or the `rbind()` argument name, which
+  `do.call(rbind, named_list)` supplies for free) is **sticky** -- never renumbered, and two records
+  claiming the same name throw, because that collision was deliberate;
+- otherwise the next free integer, **renumbered on collision**.
+
+`sim_DNAm(batch =)` is the same word doing a different job and is worth not confusing: it
+**suffixes the sample ids** (`sample1_T1`) so two simulated batches are disjoint by construction,
+and it defaults to `NULL` rather than to an integer, because a default would rename every sample in
+every existing call. Threading it also collapsed a latent bug -- `ID` and the matrix rownames were
+two independent `paste0("sample", seq_len(n))` expressions that happened to agree.
+
+**Renumbering is safe only because the label is not a key.** `rbind(rbind(r1, r2), rbind(r3, r4))`
+brings two sides both carrying batches `{1, 2}`; the right-hand side is renumbered to `{3, 4}`. That
+shifts a name and never a row's group, so the partition is preserved -- which is exactly what the
+"a batch label is not a `batch_set_id`" non-goal buys. The left-to-right folds
+(`Reduce(rbind, ...)`, `do.call(rbind, ...)`, flat `rbind(r1, r2, r3)`) never renumber at all, and
+a user who cares about stable labels names them.
+
+**Two things in sec 8 were wrong and are rewritten, not annotated.**
+
+- "Chunk reassembly labels every row one batch" predates the park. It was true when chunk
+  reassembly meant the Phase 6 front end, which shares one fill regime across blocks. Post-park
+  `rbind` **is** the chunking path, so k records are k batches -- which is precisely why the
+  per-block offset has to be recorded.
+- Sec 8's gates 3 and 4 are subsumed and half-dead respectively, per above.
+
+**Coverage nests by batch.** `$coverage$per_clock` becomes batch -> clock -> record on **every**
+record, single-pass included, and `clocks_coverage()` becomes one row per (clock, batch) with
+`batch` leading. Merging was rejected: `score_imputed_partial` counts the panel CpGs in *that run's*
+partial cache, and two independently-scored batches almost never share an NA pattern, so a merged
+figure would be wrong on nearly every bind rather than in a corner case. The counts stay CpG counts
+on the CpG axis; what changed is that the CpG axis is now indexed by batch. This is also what
+satisfies sec 8's "per-batch imputation summary" without a hash -- two batches with different fill
+regimes are visibly different in `clocks_coverage()` whether or not their labels say so.
+`samples_coverage()` carries a `batch` column too. It is redundant against `id` (gate 1 makes the
+id determine the batch) and exists anyway, because without it the long frame cannot be joined to
+`clocks_coverage()` on the key that frame is now on.
+
+**Not defended against: pack version drift.** Two records scored against different pack payloads
+have identical columns and different coefficients, and it is undetectable -- `payload_hash` is
+maintainer-side and deliberately never reaches a record (2026-07-24). Reversing that to make one
+gate possible is not worth it; a package that moves breaks reproducibility by many other routes.
+
+**Retaining `pending`.** It lands on `$provenance$pending`, keeping the record's four top-level
+elements as `CLAUDE.md` states them. It is built **with** `rbind`, not before: retention only pays
+off at bind time, so landing it early would add a field to the public record with no consumer.
+
+## 2026-07-30 -- Phase 6 is parked; `rbind` covers the realistic case
+
+Reverses the entry below it, which made the store mandatory and Phase 6 next. **Nothing in sec 5 is
+deleted** -- it stays as the record of what was measured -- but the streaming front end is no longer
+scheduled, and Phase 4 takes its place as the next thing built.
+
+**The projection number, measured off the committed catalog.** 87 bundled callable clocks: panels
+sum to 32,228 and union to **20,430** scoring CpGs, or 38,540 including the 21,368-probe BMIQ norm
+panel. Against an 866k array:
+
+| n | full array | projected union | x3 copies |
+|---|---|---|---|
+| 1,000 | 6.45 GB | 0.15 GB | 0.46 GB |
+| 10,000 | 64.5 GB | 1.52 GB | 4.57 GB |
+| 50,000 | 322 GB | 7.61 GB | 22.8 GB |
+
+So a request for **every bundled clock is resident past any cohort that exists** on the 4-8 GB box
+sec 5 targets. The entry below drew the same conclusion and then built for the exception anyway.
+(The PC-scale panel sizes it quotes -- 357,852 for PCBrainAge and so on -- were not re-verified
+here; the catalog does not carry `n_cpgs` and the packs were not staged.)
+
+**The premise that fell is gzip.** The store was mandatory because a `.csv.gz` cannot be seeked, so
+two passes meant two whole-stream deflates. But anyone with a cohort genuinely too big to hold does
+not have a `.csv.gz` -- they have HDF5, Zarr or TileDB, because that is what an append-capable store
+is. On a random-access source two passes are free and the store has no remaining justification, and
+with it go the ingest contract, the lifecycle/consent surface for an 80 GB user-data object with no
+default location, and sec 5.8's blocking benchmark.
+
+**What is actually left, and why it is niche.** One case: a cohort too big to hold *even projected*,
+**carrying NA**. The NA is load-bearing -- cohort-mean fill is the only thing sample-blocking can get
+wrong, so on a complete matrix a user-side loop is already exact. That conjunction (too big to hold
+projected AND missing values AND, in practice, a PC-scale panel) is rare enough not to lead a
+roadmap.
+
+**What covers the rest: Phase 4.** A user with a random-access store can already project
+(`clock_cpgs()` ships), block, and score; the only missing piece is assembly. Two notes carried into
+sec 8:
+
+- Per-batch cohort means are a real difference but second-order as noise (block mean unbiased,
+  SE `sd/sqrt(n_block)`). The mechanism worth naming is a probe all-NA within one block but partial
+  cohort-wide: that block takes the vendored ref while others take the cohort mean, which is a
+  systematic per-block offset, not noise. `rbind` cannot undo it -- the batch label is what makes it
+  honest.
+- **Cross-sample re-finalization can be exact, which sharpens the "do not re-finalize" rule rather
+  than reversing it.** `physage_raws()` is per-sample, so if a record *retains* `pending` instead of
+  discarding it after `finalize_cross_sample()`, a bind-time re-finalize reproduces the single-pass
+  number rather than approximating it. Still opt-in and still never silent, since it rewrites a
+  column the user has already seen, and it keys on `spec$cross_sample` rather than on PhysAge.
+
+Also settled while measuring, and recorded because it outlives this reversal:
+
+- **Bioconductor keeps phenotype out of the HDF5 by design.** `saveHDF5SummarizedExperiment()`
+  writes `assays.h5` (assay datasets only, not even dimnames) plus `se.rds` holding colData,
+  rowData and dimnames. Dimnames are a `writeHDF5Array()` convention -- `.<name>_dimnames/1` and
+  `/2` plus a `DIMENSION_LIST` attribute -- and rhdf5 cannot read that attribute (`VLEN not yet
+  implemented`), so the naming convention is the contract and the attribute is decoration. Any
+  future HDF5 support adopts that layout rather than inventing one, and pheno stays an R argument.
+- **The float32 non-goal is wrong as written.** "No float32 anywhere on the input path" justified by
+  `PARITY_REL_TOL = 1e-10` conflates input storage precision with arithmetic precision; that
+  tolerance bounds our agreement with an oracle given identical inputs. Refusing float32 input
+  declines to score data whose precision was already fixed before we saw it. The rule that does the
+  intended work: promote to float64 on read, never compute or store intermediates in float32.
+
 ## 2026-07-30 -- the duckdb store is mandatory, not scratch; the resident set is the panel, not the file
 
 Sharpens 2026-07-29 rather than reversing it: duckdb stays the access engine, but the **ingest step

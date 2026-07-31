@@ -16,6 +16,7 @@ Depends:
 Imports:
     checkmate,
     cli,
+    digest,
     fs,
     qs2,
     Rcpp,
@@ -25,7 +26,6 @@ Imports:
 Suggests:
     betanorm,
     DBI,
-    digest,
     duckdb,
     DunedinPACE,
     testthat (>= 3.0.0),

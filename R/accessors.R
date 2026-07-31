@@ -115,8 +115,7 @@ NORM_SCHEMES_ROUTED <- "bmiq"
 # schemes that are part of the clock's definition and cannot be declined
 NORM_CONSTITUTIVE <- "quantile"
 
-# schemes whose branch fills an absent background CpG with the target's value:
-# quantile needs the full panel, bmiq calibrates on what is present
+# schemes that fill an absent background cpg with the target value
 NORM_SCHEMES_FILL <- "quantile"
 
 # normalization panel for one clock, character(0) unless it normalizes

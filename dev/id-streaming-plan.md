@@ -11,26 +11,34 @@ the reconciliation in DECISIONS.
 Four DECISIONS entries cite **phase numbers**; see sec 3 before renumbering. Section numbers are
 cited by nothing and may move freely.
 
-**Picking this up cold?** Read sec 3 (phase table), sec 4 (the seam, built), then sec 5 (Phase 6,
-next). Phase 6 adds a front end over an existing seam -- nothing needs re-cutting.
+**Picking this up cold?** Read sec 3 (phase table), sec 4 (the seam, built), then sec 9 (Phase 7,
+next). **Sec 5 is parked -- read it as a measurement record, not as a plan** (see the pin at its
+head).
 
 ## Status
 
-**The seam is cut, the sample axis is classified, and every clock is chunk-safe. No chunk source is
-built, so nothing in sec 5 is reachable from a user session yet** -- `calc_clocks()` behaves exactly
-as it did, and every internal named here is unexported.
+**The seam is cut, the sample axis is classified, every clock is chunk-safe, and `rbind` assembles
+separately-scored blocks. No chunk source is built, so nothing in sec 5 is reachable from a user
+session** -- the supported path for a cohort that does not fit is project with `clock_cpgs()`,
+block, score, bind (sec 8). Phase 4 added `refinalize_clocks()`, a derived batch label and a batch
+axis on `$coverage$per_clock`; every other internal named here is unexported.
 
 | | |
 |---|---|
-| Built | Phase 1 (by other means), **2** (sec 6.1), **3** (sec 6.2), **5** (sec 4), Phase 7's `normalize=` half (sec 9.3); both `src/` kernels (sec 5.5) |
-| Designed, not built | **Phase 6** (sec 5) -- next, Phase 4 (sec 8), the `prep()` record (sec 9) |
+| Built | Phase 1 (by other means), **2** (sec 6.1), **3** (sec 6.2), **4** (sec 8), **5** (sec 4), Phase 7's `normalize=` half (sec 9.3); both `src/` kernels (sec 5.5) |
+| Designed, not built | the `prep()` record (sec 9) -- **next** |
+| **Parked** | **Phase 6** (sec 5) -- the streaming front end (DECISIONS 2026-07-30) |
 | Proven | chunk invariance over **every** clock, always-on tier, `test-chunk-invariance.R` (sec 4.2, 10) |
 | Measured, not built | the access engine and input canonicalization (sec 5.7) |
-| **Not measured, and blocking** | the store at 1e4 sample columns (sec 5.8). Every n=1e4 figure in sec 5 is arithmetic off a 500-sample baseline |
 
 **No live correctness gap.** Phase 3 moved the two PhysAge reductions past assembly, so a chunked
 front end may score the whole callable pool. `spec$cross_sample` names the clocks the scoring loop
 *defers*, not clocks it gets wrong.
+
+**Panel sizes below predate the 2026-07-30 sync**, which took the catalog to 134 clocks (120
+callable, 91 bundled callable). Sec 5 and sec 9.1's measured tables, and sec 4.2's sequence count,
+were taken before it and have not been re-measured -- read them as dated measurements, not as
+current counts.
 
 ---
 
@@ -43,20 +51,28 @@ front end may score the whole callable pool. `spec$cross_sample` names the clock
 | Fill values | **one** cohort mean set, shared by every chunk | **one set per record**, deliberately different |
 | Result | numerically equal to a single-pass run | a labelled union of differently-imputed batches |
 
-Binding is required *by* chunking but is strictly wider than it. The motivating non-chunk case:
-three time points, not nested, imputed per time point on purpose, then bound. Both cases produce
-disjoint id sets and identical clock columns, so **the id gates cannot tell them apart** -- only
-recorded batch provenance can (sec 8).
+The chunking column describes Phase 6, which is parked -- **no built path produces it**, so do not
+read "numerically equal to a single-pass run" as a claim about `rbind`. A user who blocks by hand
+and binds gets the binding column, per-batch fill and all.
+
+The two are still separate problems, and binding is the wider one. Its motivating non-chunk case:
+three time points, not nested, imputed per time point on purpose, then bound. Chunk reassembly and
+that union produce disjoint id sets and identical clock columns alike, so **the id gates cannot
+tell them apart** -- only the recorded batch can, which is why the label exists and why a
+re-finalize is opt-in rather than automatic (sec 8).
 
 ## 1. `calc_clocks()` takes a complete cohort
 
 Cohort-completeness is a **precondition, not a parameter**: no `chunked =` flag, no chunk-awareness
 on the public surface, no scorer asking whether it is seeing everything. Partial-vs-complete
 missingness is only definable against a column's NA count over every sample, so any function that
-classifies missingness needs the cohort. Chunking is a separate front end (sec 5).
+classifies missingness needs the cohort. A cohort that does not fit is blocked by the caller and
+bound (sec 8), not handed to `calc_clocks()` whole.
 
-`calc_clocks()` **hard-errors on a non-matrix array-like** (a `DelayedMatrix`, an on-disk handle)
-and names the chunked front end. `check_DNAm()` grows one branch for it.
+`calc_clocks()` **hard-errors on a non-matrix array-like** (a `DelayedMatrix`, an on-disk handle):
+`check_DNAm()`'s `assert_matrix` already refuses one. What it does not do is say what to do
+instead, and the answer moved with the park -- project with `clock_cpgs()`, block, score, bind. A
+dedicated branch carrying that message is worth having and is **not** scheduled.
 
 ### 1.1 The cohort facts reach the scoring internal as arguments
 
@@ -113,14 +129,15 @@ Phase numbers are **names, not an order.** Four tracked citations refer to them.
 | 1 | sample-id resolution | **done** by other means -- mandatory rownames (DECISIONS 2026-07-24) |
 | 2 | kind-1 / kind-2 split (chunk-safe vs cohort-reducing clocks) | **done** -- `split_cross_sample()` -> `spec$cross_sample` |
 | 3 | every cross-sample op leaves the scoring loop | **done** -- `finalize_cross_sample()` |
-| 4 | `rbind` gates | not started |
+| 4 | `rbind` gates | **done** -- `R/bind.R`, `refinalize_clocks()` (sec 8) |
 | 5 | the seam: both front ends compose the same internals | **done** -- `R/score_cohort.R` |
-| 6 | the streaming front end: input canonicalization + the two passes | **not started -- next** |
-| 7 | `prep()` -- the prepared-input record | not started; its `normalize=` half shipped |
+| 6 | the streaming front end: input canonicalization + the two passes | **parked** (sec 5) |
+| 7 | `prep()` -- the prepared-input record | **not started -- next**; its `normalize=` half shipped |
 
 Phase 6 does not depend on Phase 4: the chunked front end assembles *fragments* and never calls
-`rbind.mc_result`, so `rbind` can go on refusing while chunking ships. Phase 7 is orthogonal to
-chunking but lands on the same seam.
+`rbind.mc_result`, so unparking it changes nothing about how `rbind` behaves. That independence is
+what let Phase 6 park without blocking anything, and it still holds now that Phase 4 has shipped --
+a fragment is not a record. Phase 7 is orthogonal to chunking but lands on the same seam.
 
 ## 4. Phase 5 -- the seam (built)
 
@@ -203,7 +220,29 @@ The drift is not the fill and not the mean: `observed_panel()` returns `identica
 not a fallback, and under real chunking the *means* also move in the last bits because block
 boundaries differ from a single pass.
 
-## 5. Phase 6 -- the streaming front end (not started, next)
+## 5. Phase 6 -- the streaming front end (parked)
+
+> **Pinned 2026-07-30. This section is a measurement record, not a plan** -- read it for the numbers
+> and the kernel contracts (sec 5.5, which describes built code), not as work to pick up. Nothing
+> below is deleted and nothing below is scheduled.
+>
+> **What the front end is worth, stated plainly:** exactly one case survives -- a cohort too big to
+> hold **even projected to the requested panel**, *and* carrying NA. The NA is the load-bearing
+> half. Cohort-mean fill is the only thing sample-blocking can get wrong, so on a complete matrix a
+> user-side loop is already exact and this front end buys nothing but convenience.
+>
+> **Why that is niche.** The projection lever below is stronger than the section assumed: the 87
+> bundled callable clocks union to 20,430 scoring CpGs (38,540 with the BMIQ norm panel), which is
+> 1.5 GB at n=1e4 against 64.5 GB for the whole 866k array. A request for every bundled clock is
+> resident past any cohort that exists. And sec 5.2's store rested on gzip being unseekable --
+> but a cohort genuinely too big to hold is not sitting in a `.csv.gz`, it is in HDF5/Zarr/TileDB,
+> where two passes are free and the store has no justification left.
+>
+> **What covers the rest: Phase 4** (sec 8). `clock_cpgs()` already ships, so a user with a
+> random-access store can project and block today; assembly is the only missing piece.
+>
+> Full reasoning, and the two findings that outlive this park (Bioconductor's HDF5 layout, the
+> float32 non-goal), are in DECISIONS 2026-07-30.
 
 The target: a small box -- **2-4 cores, 4-8 GB RAM** -- against a tall `.csv.gz` far larger than RAM,
 with no ETL the user has to run. On that box the run is **deflate-bound and serial** (gzip inflate is
@@ -558,7 +597,7 @@ This is the measurement behind sec 5.1's tall canonical orientation.
 
 ### 6.1 Phase 2 -- the split, derived
 
-Exactly **2 of 130** catalog clocks are cross-sample: `DNAmPhysAge` and `DNAmPhysAge_years`
+Exactly **2 of 134** catalog clocks are cross-sample: `DNAmPhysAge` and `DNAmPhysAge_years`
 (`cross_sample_at = 11`). The fill does not touch them.
 
 `clock_cross_sample_at()` / `clock_is_cross_sample()` read the declared field,
@@ -604,25 +643,121 @@ user-requested z-scores -- happen in `augment()`, after binding, never in the sc
 `augment()` does not exist and is an **unbuilt idea, not a contract**; adding it is a new API
 decision (CLAUDE.md).
 
-## 8. Phase 4 -- `rbind` (not started)
+## 8. Phase 4 -- `rbind` (built)
 
-`rbind.mc_result` refuses today (`R/mc_result.R`). It can admit records under gates:
+**This is now the front end for a cohort that does not fit.** With sec 5 parked, a user with a
+random-access store projects with `clock_cpgs()`, blocks, scores, and binds -- so `rbind` is not a
+convenience over chunking, it is the supported path. It lives in `R/bind.R`
+(DECISIONS 2026-07-30, "Phase 4 gates").
 
-1. **Disjoint** `sample_id` sets (`cbind` requires equal; this requires disjoint). Collision throws
-   and names the ids -- this also catches lazy per-block `sample1..N` labelling.
-2. Identical clock column sets; reorder to the first record, or throw.
-3. Coverage denominators comparable -- same panels per clock, which follows from one catalog.
-4. pheno consistency: same `pheno_id`, and no id appearing twice with different covariates.
+### 8.1 One line decides every gate
 
-**Record, never refuse, on differing fill regimes.** The time-point user is binding
-differently-imputed batches on purpose. What makes that honest is a per-sample **batch label** plus
-a per-batch imputation summary. Chunk reassembly labels every row one batch; the time-point union
-labels three. Same shape, different scientific object.
+> **Record what batching forces. Refuse what the caller chose differently.**
+
+A per-batch fill regime is *forced*: cohort means are per-run by construction, so a batched user
+cannot avoid it and refusing would refuse the whole feature. Everything else that can differ between
+two records is a free argument with one obviously right answer across batches, so a difference is a
+mistake and the bind says so.
+
+**Per-batch imputation is what gets recorded, and only one of its two effects matters.** As noise it
+is second-order: a block mean is unbiased for the cohort mean with SE `sd/sqrt(n_block)`, so on a
+typical panel the linear predictor moves by ~1e-4. The effect worth naming is a probe **all-NA
+within one block but partial cohort-wide** -- that block takes the vendored ref while the others take
+the cohort mean, so every sample in it shifts by the same amount. That is a systematic per-block
+offset, it is exactly the case `test-chunk-invariance.R` already isolates, and no bind-time
+operation can undo it. The batch label plus the per-batch coverage (sec 8.3) is what makes it honest
+rather than hidden.
+
+### 8.2 The gates
+
+`rbind.mc_result` admits records under exactly four:
+
+1. **Disjoint ids.** `anyDuplicated()` over the concatenated `$provenance$sample_id` -- **never** the
+   pheno id column, which is `NULL` for any run with no covariates. Collision throws, names the ids,
+   and says to prefix them per batch; that also catches lazy per-block `sample1..N` labelling.
+2. **Identical score columns**, reordered to the first record or thrown. `output_ids` is the compute
+   sequence minus routed members and the sequence is a deterministic function of the requested ids,
+   so this **already implies identical panels** -- there is no separate denominator gate.
+3. **Identical `pheno_id`.**
+4. **Identical `$provenance$normalized`.** Same clocks with different `normalize=` give identical
+   columns and identical scoring panels over genuinely different numbers. The experimenter comparing
+   normalized against raw is already refused by gate 1 (same samples, colliding ids) and wants two
+   columns side by side anyway; the only caller who reaches gate 4 is one whose loop varied the
+   argument across chunks.
+
+There is no `force =`, and record *contents* are never compared to detect that two arguments are the
+same record -- the id sets are the whole test. Pack-version drift is undetectable by design
+(`payload_hash` never reaches a record) and is not defended against.
+
+### 8.3 The batch label
+
+`$provenance$batch` is a character vector aligned to `sample_id`, present on **every** record. It
+is **derived, not assigned**: `construct_mc_result()` sets it to `batch_hash(pheno[[pheno_id]])`,
+12 hex of `xxhash64` over the pheno's id column. There is no `batch =` argument on `calc_clocks()`
+and no way to choose a label (DECISIONS 2026-07-30, "The batch label is derived").
+
+`$pheno` is always materialized -- the id column alone when the caller supplied none -- so the hash
+always has a column to read. The id column and **not** the whole frame: hashing covariate values
+would make correcting one subject's age rename the batch.
+
+Because the label is a function of the record's own ids, `rbind` has no label policy. It mints
+nothing, renames nothing, renumbers nothing, and **drops** argument names -- `split()` names its
+result by factor level, so refusing them would kill
+`do.call(rbind, lapply(split(seq_len(n), g), score))`, which is the blocking idiom sec 8 exists to
+support. Re-association is therefore exact, not merely order-preserving:
+`rbind(rbind(r1, r2), rbind(r3, r4))` and `rbind(r1, r2, r3, r4)` return `identical()` records.
+The hashed value is canonicalized first (sorted with `method = "radix"`, unnamed, `serialize =
+FALSE`) so the label follows the id *set* rather than its order, the locale or R's serialization
+version. Gate 1 makes the id sets disjoint, so two batches sharing a label needs a 48-bit collision
+-- 1.8e-11 at 100 batches, 1.8e-9 at 1000. There is no fifth gate on labels, and adding one back
+would guard something gate 1 already forbids.
+
+`sim_DNAm(suffix =)` is **not** a batch argument, which is why it no longer shares the word. It
+**suffixes the sample ids** (`sample1_T1`) so two simulated blocks are disjoint by construction and
+clear gate 1 without the caller relabelling. It defaults to `NULL`: a default would rename every
+sample. It is reported back on `$suffix` and is never fed into `calc_clocks()`.
+
+**Coverage nests by batch, on every record.** `$coverage$per_clock` is batch -> clock -> record, and
+`clocks_coverage()` is one row per (clock, batch) with `batch` **last** -- it is the key the frame
+is on, but a hash reads as noise in front of `clock_id`. Merging is not available:
+`score_imputed_partial` counts the panel CpGs in *that run's* partial cache, and two independently
+scored batches almost never share an NA pattern, so a merged figure would be wrong on nearly every
+bind. Every count stays a CpG count on the CpG axis; the axis is now indexed by batch.
+`$coverage$sample_miss` is already per-sample and simply concatenates.
+
+### 8.4 Cross-sample re-finalization
 
 A finished record's `DNAmPhysAge` is a z-score against **that run's** cohort, so binding three
 time-point records yields three within-batch z-scores in one column. The batch label is the answer
-to that. **Do not re-finalize at bind time** -- it would rewrite numbers the user has already seen
-and standardize across batches that were deliberately imputed differently.
+to that. **Never re-finalize by default** -- it would rewrite numbers the user has already seen and
+standardize across batches that were deliberately imputed differently, which for the time-point user
+destroys the object they built on purpose.
+
+`refinalize_clocks()` is the opt-in form, and it is **exact rather than approximate**:
+`physage_raws()` runs per-sample, so the per-sample intermediates retained on `$provenance$pending`
+reproduce the single-pass number over the bound cohort. Keeping them there leaves the record's four
+top-level elements intact. The chunk-reassembly user is the one who wants the re-finalize and the
+batch label is what tells them apart from the time-point user; the routing keys on
+`spec$cross_sample`, so no clock id is named, and the call is a no-op that says so when a record
+deferred nothing.
+
+**`rbind` says when it matters.** A bind that produces more than one batch *and* carries a
+non-empty `pending` emits one `cli_inform` naming the affected columns and pointing at
+`refinalize_clocks()`. The names come from `names(pending)`, which **is** the catalog's declared
+`cross_sample` set arriving through `spec$cross_sample` -- so the message names clocks without a
+clock list existing anywhere in `R/bind.R`. It stays an `inform`, not a `warn`: a per-batch
+reduction is what batching forces, and for the time-point user it is the intended result. Single-
+batch binds and ordinary clocks are silent. `Reduce(rbind, ...)` emits once per intermediate bind,
+since each intermediate really is in that state; `do.call(rbind, ...)` emits once.
+
+**Re-finalizing early is never wrong, only superseded.** `refinalize_clocks()` reads `pending` and
+never consumes it, so it is a pure function of an accumulating store and composes in any order:
+`refinalize(rbind(r3, refinalize(rbind(r1, r2))))` reproduces the single-pass column over all
+three blocks (measured: 3.6e-15 absolute), `pending` grows 12 -> 18 across the interleaving, and a
+second call on a settled record is a no-op. The mid-flight record between the two calls is a
+genuine mix -- 12 re-finalized rows against 6 within-batch ones -- which is why the outer call is
+still needed and why the message fires on the bind that created it. Do not "optimize" this by
+clearing `pending` after a re-finalize: that is what makes the composition work.
 
 Prerequisite this doc does not own: `[`, `cbind`, `as.data.frame.mc_result` and `augment()` do not
 exist, so batch-label-survives-subset cannot be built or tested until they do.
@@ -743,7 +878,19 @@ names the sample and CpG, each range flag warns on its own, an M-value matrix tr
 returning scores, ordinary betas and all-NA columns pass in silence, and the kernel bails on `Inf`
 with `stats` unset.
 
-Still to write, with Phase 6:
+Landed in `test-bind.R` (Phase 4, sec 8): one test per gate (colliding ids, differing columns,
+differing `pheno_id`, differing `normalized` -- all throw; disjoint records bind); the folds agree
+(`rbind(r1, r2, r3)`, `Reduce` and `do.call` produce the same record); the label is a function of
+the sample ids and nothing else, argument names are refused, and re-association returns an
+`identical()` record with each sample still under the batch it was scored in; a run given no
+`pheno` still carries the id column and binds against one that was given a pheno;
+`clocks_coverage()` is one row per (clock, batch) and `samples_coverage()` carries each
+sample once under its own batch; a probe all-NA in one batch is recorded there rather than merged
+away; and an opt-in `refinalize_clocks()` over retained `pending` reproduces the single-pass
+cross-sample column. That last one is the only numeric test in the file -- it derives its golden
+from a whole-cohort run of the same matrix, so it needs no fixture and no seed.
+
+Parked with Phase 6, listed so the park is reversible:
 
 - **The headline test**: `calc_clocks_chunked(matrix, budget)` equals `calc_clocks(matrix)` over the
   whole record. Needs no Suggests.
@@ -755,7 +902,6 @@ Still to write, with Phase 6:
 - **Reader canonicalization**: the null-spelling set resolves every spelling in sec 5.1's table,
   `Inf` survives, a stray token errors naming column and token, and orientation is detected from the
   header on both a tall and a sample-major file.
-- **`rbind`** (Phase 4): disjoint ids bind; colliding ids throw; batch labels survive.
 
 Skipped when Suggests are absent, per existing practice: the duckdb reader tests, and the
 `DelayedArray` source including one transposed input and one hostile chunk geometry.
@@ -777,6 +923,8 @@ Parity is untouched -- it scores complete cohorts and is not part of "run the te
 - No float32 anywhere on the input path.
 - No `data.table` dependency -- duckdb owns file reading.
 - No hand-rolled on-disk format, and no second one: the store is a duckdb file (sec 5.2).
-- No `rbind` across cohorts *reconciling* anything -- no re-imputation, no re-z-scoring, no merged
-  coverage denominators. It binds and labels.
+- No `rbind` across cohorts *reconciling* anything -- no re-imputation, no merged coverage
+  denominators (they nest, sec 8.3). It binds and labels. Re-z-scoring is the one exception and it
+  is not silent: opt-in only, exact rather than approximate, and keyed on `spec$cross_sample`
+  (sec 8.4).
 - No new identity key. Ids are the identity; a batch **label** is not a `batch_set_id`.

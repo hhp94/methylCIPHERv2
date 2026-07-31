@@ -10,8 +10,7 @@ check_mc_result <- function(x, arg = "x") {
   invisible(x)
 }
 
-# per-sample miss from the finished panel matrix. column is always there by
-# construction, so absence is a bug (panel_ratio would silently return numeric(0))
+# per-sample miss from the finished panel matrix. a missing column is a bug
 miss_vec <- function(x, id, panel = c("score", "norm")) {
   panel <- match.arg(panel)
   m <- x[["coverage"]][["sample_miss"]][[panel]]
@@ -31,12 +30,8 @@ miss_vec <- function(x, id, panel = c("score", "norm")) {
   m[, id]
 }
 
-# one row per clock computed (aliases have NA panels)
-#' @export
-clocks_coverage <- function(x) {
-  check_mc_result(x)
-  per_clock <- x[["coverage"]][["per_clock"]]
-  returned <- x[["provenance"]][["clocks"]]
+# one batch's rows (aliases have NA panels)
+batch_coverage <- function(per_clock, batch, returned) {
   ids <- names(per_clock)
 
   int_field <- function(nm) {
@@ -81,11 +76,29 @@ clocks_coverage <- function(x) {
     per_clock,
     function(r) if (is.null(r)) character(0) else r[["missing_cpgs"]]
   ))
+  # batch last: a hash next to clock_id reads as noise, but it is still the join key
+  out[["batch"]] <- batch
+  out
+}
+
+# one row per (clock, batch). counts are only true of the batch that produced them
+#' @export
+clocks_coverage <- function(x) {
+  check_mc_result(x)
+  batches <- x[["coverage"]][["per_clock"]]
+  returned <- x[["provenance"]][["clocks"]]
+  out <- do.call(
+    rbind,
+    lapply(names(batches), function(b) {
+      batch_coverage(batches[[b]], b, returned)
+    })
+  )
+  rownames(out) <- NULL
   out
 }
 
 # one panel's per-sample rows for a non-alias returned clock
-panel_rows <- function(id, panel, ratio, sample_id) {
+panel_rows <- function(id, panel, batch, ratio, sample_id) {
   data.frame(
     id = sample_id,
     clock_id = id,
@@ -93,41 +106,44 @@ panel_rows <- function(id, panel, ratio, sample_id) {
     n_observed = as.integer(ratio[["n_observed"]]),
     n_needed = as.integer(ratio[["needed"]]),
     coverage = ratio[["cov"]],
+    # last, like clocks_coverage() -- the column the two frames join on
+    batch = batch,
     stringsAsFactors = FALSE,
     row.names = NULL
   )
 }
 
-# score-panel rows, plus a norm-panel row when the clock normalizes
-clock_sample_rows <- function(x, id, sample_id) {
-  rec <- x[["coverage"]][["per_clock"]][[id]]
+# score-panel rows, plus a norm row when the clock normalizes
+clock_sample_rows <- function(x, id, rec, batch, rows) {
+  sample_id <- x[["provenance"]][["sample_id"]][rows]
 
-  rows <- list()
-  rows[["score"]] <- panel_rows(
+  out <- list()
+  out[["score"]] <- panel_rows(
     id,
     "score",
+    batch,
     panel_ratio(
       rec[["score_present"]],
-      miss_vec(x, id, "score"),
+      miss_vec(x, id, "score")[rows],
       rec[["score_needed"]]
     ),
     sample_id
   )
-  # norm panel only when the clock normalizes (same condition as having a
-  # norm column), so the read sits inside the guard
+  # norm panel only when the clock normalizes
   if (rec[["normalizes"]]) {
-    rows[["norm"]] <- panel_rows(
+    out[["norm"]] <- panel_rows(
       id,
       "norm",
+      batch,
       panel_ratio(
         rec[["norm_present"]],
-        miss_vec(x, id, "norm"),
+        miss_vec(x, id, "norm")[rows],
         rec[["norm_needed"]]
       ),
       sample_id
     )
   }
-  do.call(rbind, rows)
+  do.call(rbind, out)
 }
 
 # zero-row frame in samples_coverage() shape -- nothing to report is not an error
@@ -139,6 +155,7 @@ empty_sample_rows <- function() {
     n_observed = integer(0),
     n_needed = integer(0),
     coverage = numeric(0),
+    batch = character(0),
     stringsAsFactors = FALSE
   )
 }
@@ -147,19 +164,26 @@ empty_sample_rows <- function() {
 #' @export
 samples_coverage <- function(x) {
   check_mc_result(x)
-  sample_id <- x[["provenance"]][["sample_id"]]
-  per_clock <- x[["coverage"]][["per_clock"]]
+  batch <- x[["provenance"]][["batch"]]
 
-  # no record means no CpGs of its own. honest per-sample rows are its
-  # descendants' -- routing targets appear here, pure composites do not
-  ids <- names(per_clock)[!vapply(per_clock, is.null, logical(1L))]
-  parts <- lapply(ids, clock_sample_rows, x = x, sample_id = sample_id)
+  parts <- list()
+  for (b in names(x[["coverage"]][["per_clock"]])) {
+    per_clock <- x[["coverage"]][["per_clock"]][[b]]
+    rows <- batch == b
+    # no record means no cpgs of its own. read descendants for pure composites
+    ids <- names(per_clock)[!vapply(per_clock, is.null, logical(1L))]
+    parts <- c(
+      parts,
+      lapply(ids, function(id) {
+        clock_sample_rows(x, id, per_clock[[id]], b, rows)
+      })
+    )
+  }
 
   # seed with the empty frame so a run of pure composites keeps the shape
   out <- do.call(rbind, c(list(empty_sample_rows()), parts))
 
-  # NA coverage is a routed member masked on a row its sex did not score.
-  # drop those rows -- sample was never scored against that panel
+  # drop na coverage rows (routed member on a sex it did not score)
   out <- out[!is.na(out[["coverage"]]), , drop = FALSE]
   rownames(out) <- NULL
   out

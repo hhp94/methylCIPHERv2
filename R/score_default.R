@@ -30,9 +30,7 @@ block_cols <- function(cols, block) {
   unname(idx)
 }
 
-# observed betas for `present`: one subset, then the cohort-mean columns on top.
-# cbind() copies its operand into a fresh matrix even when it has only one, so
-# splitting cached/raw and binding cost a second full-panel copy
+# observed betas for present: one subset, then cohort-mean columns on top
 observed_panel <- function(present, block) {
   cache <- block[["partial_cache"]]
   cached <- cached_cols(present, cache)
@@ -43,8 +41,7 @@ observed_panel <- function(present, block) {
   list(cols = present, values = values)
 }
 
-# resolve present from the clock's declared panel, never the block's usable set.
-# a coef CpG outside the panel would be scored but never counted by coverage
+# present from the clock's declared panel, never the block's usable set
 component_present <- function(coef, cpgs, label) {
   extra <- setdiff(names(coef), cpgs[["score_needed"]])
   if (length(extra)) {
@@ -107,11 +104,19 @@ anti_trafo <- function(x) {
   ifelse(x < 0, (1 + ADULT_AGE) * exp(x) - 1, (1 + ADULT_AGE) * x + ADULT_AGE)
 }
 
+# retroelement pan-mammalian back-transform: trained on log(age + 2)
+LOG_AGE_OFFSET <- 2
+
+log_offset_anti_trafo <- function(x) {
+  exp(x) - LOG_AGE_OFFSET
+}
+
 resolve_output_transform <- function(name) {
   switch(
     name,
     identity = function(x) x,
     anti.trafo = anti_trafo,
+    log_offset_anti_trafo = log_offset_anti_trafo,
     stop(sprintf("Unknown output_transform %s.", name), call. = FALSE)
   )
 }
@@ -192,8 +197,7 @@ linear_score <- function(cpgs, block, observed = NULL) {
   reduction <- clock_reduction(id)
   coef <- clock_coefs(id)
   intercept <- clock_intercept(id)
-  # declared absent set, not setdiff(names(coef), present) -- see
-  # component_linpred() for callers holding only a coef vector
+  # declared absent set, not setdiff(names(coef), present)
   fill <- absent_fill(id, coef, cpgs[["score_absent"]])
 
   lp <- linear_predictor(

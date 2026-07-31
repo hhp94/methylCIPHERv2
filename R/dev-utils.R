@@ -7,23 +7,19 @@ test_parity <- function(filter = "fixtures-parity", ...) {
 }
 
 # accepted extensions, longest first so `.csv.gz` never reads as `.gz`
-WRITE_SIM_EXTS <- c(".csv.gz", ".pq", ".duckdb")
+WRITE_SIM_EXTS <- c(".csv.gz", ".h5")
 
-# Write a sim cohort to disk as a chunked-front-end fixture. Canonical shape is
-# cpgs x samples with the id column `cpg_id`; `transpose` writes samples x cpgs
-# and names it `sample_id`. Format comes from the extension. pheno always lands
-# beside it as <stem>_pheno.csv.
-#
-# Not an S3 generic: this file is build-ignored, so an `S3method()` entry would
-# point at a function the installed package does not have -- and an
-# *unregistered* method is unreachable from UseMethod even under load_all().
+# write an n x p u(0,1) cohort for chunked-front-end benchmarks. format from the path extension. not an s3 method (this file is build-ignored).
 write_sim_DNAm <- function(
-  x,
+  n,
+  p,
   path = file.path(tempdir(), "sim_DNAm.csv.gz"),
   transpose = FALSE,
-  ...
+  chunk_dims = "auto",
+  gzip_level = 4L
 ) {
-  checkmate::assert_class(x, "mc_sim")
+  checkmate::assert_count(n, positive = TRUE)
+  checkmate::assert_count(p, positive = TRUE)
   checkmate::assert_string(path)
   checkmate::assert_flag(transpose)
 
@@ -41,32 +37,57 @@ write_sim_DNAm <- function(
   stem <- substr(path, 1L, nchar(path) - nchar(ext))
   pheno_path <- paste0(stem, "_pheno.csv")
 
-  # DNAm is stored samples x cpgs, so the canonical write is the transposed one
-  mat <- if (transpose) x[["DNAm"]] else t(x[["DNAm"]])
-  out <- cbind(rownames(mat), as.data.frame(mat, check.names = FALSE))
-  names(out)[[1]] <- if (transpose) "sample_id" else "cpg_id"
+  cpg_id <- sprintf("cg%08d", seq_len(n))
+  sample_id <- paste0("sample", seq_len(p))
 
+  # canonical cpgs x samples; the doubles keep `n * p` off integer overflow
+  mat <- matrix(
+    stats::runif(as.numeric(n) * as.numeric(p)),
+    nrow = n,
+    dimnames = list(cpg_id, sample_id)
+  )
+  if (transpose) {
+    mat <- t(mat)
+  }
+
+  # half 1, half 0 (odd `p` leaves the extra sample male), shuffled in one draw
+  n_female <- floor(p / 2)
+  female <- sample(rep(c(1, 0), c(n_female, p - n_female)))
+  pheno <- data.frame(
+    ID = sample_id,
+    Age = stats::rnorm(p, mean = 30, sd = 5),
+    Female = female
+  )
+
+  id_col <- if (transpose) "sample_id" else "cpg_id"
   switch(
     ext,
     ".csv.gz" = {
       require_dev_ns("data.table")
-      data.table::fwrite(out, path)
+      # as.data.table(keep.rownames=) is one copy; cbind(as.data.frame()) is two
+      data.table::fwrite(
+        data.table::as.data.table(mat, keep.rownames = id_col),
+        path
+      )
     },
-    ".pq" = {
-      require_dev_ns("arrow")
-      arrow::write_parquet(out, path)
-    },
-    ".duckdb" = {
-      require_dev_ns("duckdb")
-      require_dev_ns("DBI")
-      con <- DBI::dbConnect(duckdb::duckdb(), dbdir = path)
-      on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-      DBI::dbWriteTable(con, "betas", out, overwrite = TRUE)
+    ".h5" = {
+      require_dev_ns("hdf5r")
+      f <- h5_member(hdf5r::H5File, "new")(path, mode = "w")
+      on.exit(h5_member(f, "close_all")(), add = TRUE)
+      create <- h5_member(f, "create_dataset")
+      create("betas", mat, chunk_dims = chunk_dims, gzip_level = gzip_level)
+      create(id_col, rownames(mat))
+      create(if (transpose) "cpg_id" else "sample_id", colnames(mat))
     }
   )
-  utils::write.csv(x[["pheno"]], pheno_path, row.names = FALSE)
+  utils::write.csv(pheno, pheno_path, row.names = FALSE)
 
   c(DNAm = path, pheno = pheno_path)
+}
+
+# hdf5r overloads `[[`, and `$` is banned in r/. take the r6 binding off the environment
+h5_member <- function(obj, name) {
+  get(name, envir = obj)
 }
 
 require_dev_ns <- function(pkg) {

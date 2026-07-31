@@ -117,7 +117,7 @@ test_that("calc_clocks() scores PCBrainAge end-to-end from an in-memory pack (cl
   expect_equal(nrow(res$scores), 3L)
   expect_false(anyNA(res$scores))
 
-  expect_equal(res$coverage$per_clock$PCBrainAge$score_imputed_full, 0L)
+  expect_equal(res$coverage$per_clock[[1]]$PCBrainAge$score_imputed_full, 0L)
 })
 
 test_that("calc_clocks() vendor-fills absent external CpGs from the pack $impute vector", {
@@ -128,7 +128,7 @@ test_that("calc_clocks() vendor-fills absent external CpGs from the pack $impute
   res <- calc_clocks(DNAm, "PCBrainAge", ext_data = pcba_pack)
   expect_false(anyNA(res$scores))
 
-  expect_equal(res$coverage$per_clock$PCBrainAge$score_imputed_full, 5L)
+  expect_equal(res$coverage$per_clock[[1]]$PCBrainAge$score_imputed_full, 5L)
 })
 
 test_that("calc_clocks() on an external clock errors (closed set) when its pack is absent", {
@@ -199,7 +199,7 @@ test_that("calc_clocks() vendor-fills absent SystemsAge CpGs from the pack $impu
 
   res <- calc_clocks(DNAm, "Age_prediction", ext_data = sa_pack)
   expect_false(anyNA(res$scores))
-  cov <- res$coverage$per_clock$Age_prediction
+  cov <- res$coverage$per_clock[[1]]$Age_prediction
   expect_equal(cov$score_imputed_full, 4L)
 })
 
