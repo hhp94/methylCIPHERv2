@@ -89,3 +89,9 @@ grimage_rescale_params <- function(id) {
 grimage_stack_roles <- function(id, order) {
   stack_roles(stack_step(id))[order]
 }
+
+# V1 takes every surrogate as a score. V2 recomputes its own from betas
+grimage_reads_cpgs <- function(id) {
+  roles <- grimage_stack_roles(id, names(grimage_cox_coef(id)))
+  any(unlist(roles) == "internal")
+}

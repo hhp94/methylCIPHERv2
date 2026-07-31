@@ -171,7 +171,7 @@ samples_coverage <- function(x) {
     per_clock <- x[["coverage"]][["per_clock"]][[b]]
     rows <- batch == b
     # no record means no cpgs of its own. read descendants for pure composites
-    ids <- names(per_clock)[!vapply(per_clock, is.null, logical(1L))]
+    ids <- covered_ids(per_clock)
     parts <- c(
       parts,
       lapply(ids, function(id) {

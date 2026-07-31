@@ -74,6 +74,12 @@ coverage_record <- function(cpgs, score_partial, norm_partial = 0L) {
   )
 }
 
+# the clocks a per_clock map holds a record for. a NULL entry read no cpgs,
+# so it spans neither sample_miss nor samples_coverage()
+covered_ids <- function(per_clock) {
+  names(per_clock)[!vapply(per_clock, is.null, logical(1L))]
+}
+
 # full coverage for the compute sequence (per_clock records + per-panel sample_miss)
 compute_coverage <- function(clock_sequence, cpg_list, block) {
   sample_id <- block[["sample_id"]]

@@ -39,11 +39,12 @@ check_DNAm <- function(DNAm) {
   invisible(NULL)
 }
 
-# note when a clock scores against the whole matrix, not its panel
+# note when a clock scores against the whole matrix, not its panel.
+# returns the full-panel ids so callers need not re-sweep the sequence
 note_full_panel_clocks <- function(clock_ids) {
   full <- clock_ids[vapply(clock_ids, clock_needs_full_panel, logical(1))]
   if (!length(full)) {
-    return(invisible(NULL))
+    return(invisible(full))
   }
   cli::cli_inform(
     c(
@@ -53,7 +54,7 @@ note_full_panel_clocks <- function(clock_ids) {
              {cli::qty(full)}{?this/these} score{?s}."
     )
   )
-  invisible(NULL)
+  invisible(full)
 }
 
 # pheno structure checks

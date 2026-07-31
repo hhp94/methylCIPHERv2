@@ -2,20 +2,16 @@
 
 # stop for an unroutable catalog entry (names all four routing facts)
 unroutable <- function(p) {
-  stop(
-    sprintf(
-      paste0(
-        "No scoring path for clock %s ",
-        "(group %s, weights_format %s, computation_type %s, ",
-        "normalization %s). This is a package bug -- please report it."
-      ),
-      p,
-      clock_group_id(p),
-      clock_weights_format(p),
-      clock_type(p),
-      clock_norm_scheme(p)
+  catalog_bug(
+    paste0(
+      "No scoring path for clock %s ",
+      "(group %s, weights_format %s, computation_type %s, normalization %s)."
     ),
-    call. = FALSE
+    p,
+    clock_group_id(p),
+    clock_weights_format(p),
+    clock_type(p),
+    clock_norm_scheme(p)
   )
 }
 
@@ -29,16 +25,22 @@ score_type <- function(p) {
   ct <- clock_type(p)
   wf <- clock_weights_format(p)
   gid <- clock_group_id(p)
+  # the plain weighted-sum pair, read by both the external and bundled arms
+  plain_linear <- wf == "cpg_coefficient" &&
+    ct %in% c("linear", "linear_transformed")
 
   if (clock_is_external(p)) {
     # groups whose arithmetic is not a plain weighted sum keep their own branch
-    if (identical(gid, "SystemsAge")) {
-      return("pack_systemsage")
+    etag <- switch(
+      gid,
+      SystemsAge = "pack_systemsage",
+      Zhang2019 = "Zhang2019",
+      NULL
+    )
+    if (!is.null(etag)) {
+      return(etag)
     }
-    if (identical(gid, "Zhang2019")) {
-      return("Zhang2019")
-    }
-    if (wf == "cpg_coefficient" && ct %in% c("linear", "linear_transformed")) {
+    if (plain_linear) {
       return("pack_linear")
     }
     unroutable(p)
@@ -73,14 +75,14 @@ score_type <- function(p) {
 
   # declared scheme (except Dunedin) -> normalize-then-linear (else stop)
   scheme <- clock_norm_scheme(p)
-  if (scheme %in% NORM_SCHEMES) {
-    if (!scheme %in% NORM_SCHEMES_ROUTED) {
-      unroutable(p)
-    }
+  if (scheme %in% NORM_SCHEMES_ROUTED) {
     return("normalized")
   }
+  if (scheme %in% NORM_SCHEMES) {
+    unroutable(p)
+  }
 
-  if (wf == "cpg_coefficient" && ct %in% c("linear", "linear_transformed")) {
+  if (plain_linear) {
     return("linear")
   }
   unroutable(p)
@@ -92,10 +94,8 @@ clock_reads_cpgs <- function(p) {
     score_type(p),
     sex_routed = FALSE,
     DNAmFitAge = FALSE,
-    # V1 takes every surrogate as a score. V2 recomputes its own from betas
-    GrimAge = any(
-      unlist(grimage_stack_roles(p, names(grimage_cox_coef(p)))) == "internal"
-    ),
+    # the family owns the derivation -- see R/score_GrimAge.R
+    GrimAge = grimage_reads_cpgs(p),
     TRUE
   )
 }
@@ -130,18 +130,17 @@ mc_spec <- function(
     clock_ids,
     setdiff(clock_sequence, clock_ids)
   ))
-  note_full_panel_clocks(clock_sequence)
+  # the clocks that read every column, not just their panel
+  full_panel <- note_full_panel_clocks(clock_sequence)
 
   # covariate union for pheno check, carried pheno, and provenance
   covariates <- unique(unlist(lapply(
     clock_sequence,
     clock_covariates_required
-  )))
-  if (is.null(covariates)) {
-    covariates <- character(0)
-  }
+  ))) %||% character(0)
 
   packs <- load_mc_assets(pack_groups_needed(clock_sequence), ext_data, ask)
+  panels <- clock_panels(clock_sequence, packs, normalize)
 
   list(
     clock_ids = clock_ids,
@@ -151,15 +150,14 @@ mc_spec <- function(
     covariates = covariates,
     pheno_id = pheno_id,
     packs = packs,
-    panels = clock_panels(clock_sequence, packs, normalize),
+    panels = panels,
+    # panel unions are functions of `panels` alone -- resolved here, not per block
+    needed_union = panels_union(panels),
+    score_union = panels_union(panels, "score"),
     # clocks whose reduction is still inside the branch (catalog-declared)
     cross_sample = split_cross_sample(clock_sequence)[["cross_sample"]],
     # any sample_scale clock -> mc_cohort banks per-sample moments (catalog-declared)
-    needs_moments = any(vapply(
-      clock_sequence,
-      clock_needs_full_panel,
-      logical(1)
-    ))
+    needs_moments = length(full_panel) > 0L
   )
 }
 
@@ -191,8 +189,8 @@ mc_cohort <- function(DNAm, spec, pheno = NULL, min_clocks_coverage = 0.75) {
 
   mna <- scan_missing_cpgs(
     DNAm,
-    panels_union(spec[["panels"]]),
-    panels_union(spec[["panels"]], "score"),
+    spec[["needed_union"]],
+    spec[["score_union"]],
     row_moments = isTRUE(spec[["needs_moments"]])
   )
   cpg_list <- resolve_cpgs(mna[["usable_cols"]], spec[["panels"]])
@@ -210,21 +208,22 @@ mc_cohort <- function(DNAm, spec, pheno = NULL, min_clocks_coverage = 0.75) {
   )
 }
 
-# pheno rows follow facts$sample_id, narrowed to the rows in hand
-block_pheno <- function(DNAm, facts) {
-  if (is.null(facts[["pheno"]])) {
-    return(NULL)
-  }
-  facts[["pheno"]][match(rownames(DNAm), facts[["sample_id"]]), , drop = FALSE]
+# cohort-wide per-sample facts are narrowed to the rows in hand by this index
+block_rows <- function(DNAm, facts) {
+  match(rownames(DNAm), facts[["sample_id"]])
 }
 
-# moments follow facts$sample_id, narrowed to the rows in hand (like block_pheno)
-block_moments <- function(DNAm, facts) {
+# pheno follows facts$sample_id. never NULL -- see resolve_pheno()
+block_pheno <- function(facts, rows) {
+  facts[["pheno"]][rows, , drop = FALSE]
+}
+
+# moments follow facts$sample_id too. NULL unless the sweep banked them
+block_moments <- function(facts, rows) {
   mom <- facts[["sample_moments"]]
   if (is.null(mom)) {
     return(NULL)
   }
-  rows <- match(rownames(DNAm), facts[["sample_id"]])
   list(mean = mom[["mean"]][rows], sd = mom[["sd"]][rows])
 }
 
@@ -271,11 +270,13 @@ mc_block <- function(DNAm, spec, facts) {
     )
   }
 
+  # one cohort-row index, shared by every per-sample fact narrowed below
+  rows <- block_rows(DNAm, facts)
   block <- list(
     DNAm = DNAm,
-    pheno = block_pheno(DNAm, facts),
+    pheno = block_pheno(facts, rows),
     # banked upstream: the block never needs the matrix at its full width
-    sample_moments = block_moments(DNAm, facts),
+    sample_moments = block_moments(facts, rows),
     packs = spec[["packs"]],
     usable_idx = usable_idx,
     sample_id = rownames(DNAm),
@@ -305,18 +306,17 @@ score_cohort <- function(DNAm, spec, facts) {
   # per-sample intermediates for cohort-reducing clocks
   pending <- list()
 
-  # one score_type() per clock, reused by the pack filter and the dispatch
+  # resolved once here, shared by the pack filter and the dispatch below
   types <- vapply(clock_sequence, score_type, character(1))
-  is_pack <- unname(types) %in% PACK_SCORE_TYPES
-  if (any(is_pack)) {
-    pack_ids <- clock_sequence[is_pack]
-    pgroups <- vapply(pack_ids, clock_group_id, character(1))
-    for (g in unique(pgroups)) {
-      gids <- pack_ids[pgroups == g]
-      # the group shares one declared panel -- resolve it once, from the pool
-      grp <- score_pack_group(gids, cpg_list[["per_clock"]][[gids[[1]]]], block)
-      results[names(grp)] <- grp
-    }
+  is_pack <- types %in% PACK_SCORE_TYPES
+
+  pack_ids <- clock_sequence[is_pack]
+  pgroups <- vapply(pack_ids, clock_group_id, character(1), USE.NAMES = FALSE)
+  # empty when nothing is pack-scored. each group shares one declared panel,
+  # so the pool resolves it once
+  for (gids in split(pack_ids, pgroups)) {
+    grp <- score_pack_group(gids, cpg_list[["per_clock"]][[gids[[1]]]], block)
+    results[names(grp)] <- grp
   }
 
   # branch dispatch: every scorer takes (id, cpgs, block, results)

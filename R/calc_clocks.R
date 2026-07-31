@@ -32,7 +32,7 @@ calc_clocks <- function(
   spec <- mc_spec(clocks, pheno_id, normalize, ext_data, ask)
   facts <- mc_cohort(DNAm, spec, pheno, min_clocks_coverage)
   scored <- score_cohort(DNAm, spec, facts)
-  # single-pass: finalize still runs here so both front ends share it
+  # shared with refinalize_clocks() -- a no-op when pending is empty
   scores <- finalize_cross_sample(scored[["scores"]], scored[["pending"]])
 
   # per-sample coverage gate (warn only, after scoring)
@@ -47,7 +47,7 @@ calc_clocks <- function(
     spec[["clock_ids"]],
     facts[["sample_id"]],
     pheno = facts[["pheno"]],
-    pheno_id = pheno_id,
+    pheno_id = spec[["pheno_id"]],
     covariates_used = spec[["covariates"]],
     normalized = names(spec[["normalize"]])[spec[["normalize"]]],
     scoring_failures = scored[["notes"]],

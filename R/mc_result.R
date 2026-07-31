@@ -49,9 +49,7 @@ construct_mc_result <- function(
 
   # coverage spans clocks that read cpgs. pure composites are in none of them
   per_clock <- coverage[["per_clock"]]
-  record_ids <- names(per_clock)[
-    !vapply(per_clock, is.null, logical(1L))
-  ]
+  record_ids <- covered_ids(per_clock)
   # normalizers from the record's normalizes flag
   norm_ids <- record_ids[vapply(
     record_ids,
