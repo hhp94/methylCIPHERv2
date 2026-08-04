@@ -1,0 +1,80 @@
+---
+title: "The Clock Catalog"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r setup}
+library(methylCIPHERv2)
+```
+
+```{r, echo = FALSE}
+catalog <- list_clocks()
+
+# a sex-routed family is scored through its own name, so its internal members
+# are dropped here. They are the rows whose request_as points elsewhere.
+catalog <- catalog[catalog[["clock_id"]] == catalog[["request_as"]], ]
+
+reactable::reactable(
+  catalog[c("clock_id", "group_id", "covariates")],
+  searchable = TRUE,
+  filterable = TRUE,
+  striped = TRUE,
+  highlight = TRUE,
+  compact = TRUE,
+  defaultPageSize = 25,
+  showPageSizeOptions = TRUE,
+  pageSizeOptions = c(25, 50, 100),
+  defaultSorted = "group_id",
+  columns = list(
+    clock_id = reactable::colDef(name = "Clock", minWidth = 150),
+    group_id = reactable::colDef(name = "Group", minWidth = 130),
+    covariates = reactable::colDef(name = "Covariates", minWidth = 130)
+  )
+)
+```
+
+## What the columns mean
+
+**Clock** is the identifier for a single scored clock, and the name to pass to `calc_clocks()`. **Group** is the family it belongs to, and a group name can be requested on its own to score every member.
+
+**Covariates** lists the columns that `pheno` must carry for that clock. An empty cell means the clock reads methylation values alone.
+
+## Scoring from the catalog
+
+Any value in the **Clock** column works as the `clocks` argument.
+
+```{r, eval = FALSE}
+res <- calc_clocks(DNAm, clocks = "Horvath1", pheno = pheno)
+```
+
+A group name scores every member of that family.
+
+```{r, eval = FALSE}
+res <- calc_clocks(DNAm, clocks = "GrimAge", pheno = pheno)
+```
+
+A tag scores every clock that carries it. `list_clock_tags()` returns the tags with their members.
+
+```{r}
+names(list_clock_tags())
+```
+
+## Filtering the catalog in code
+
+`list_clocks()` returns the table above as a data frame, so the catalog is available in a script as well as on this page. It takes a tag directly.
+
+```{r}
+mitotic <- list_clocks(tag = "mitotic")
+mitotic[["clock_id"]]
+```
+
+The result is an ordinary data frame, so the other columns filter with base R.
+
+```{r}
+catalog <- list_clocks()
+bundled <- catalog[!catalog[["external"]], ]
+nrow(bundled)
+```

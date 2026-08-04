@@ -92,41 +92,7 @@ test_that("DunedinPACE counts fully-absent norm CpGs as norm_imputed_full", {
   expect_false(anyNA(res$scores[, "DunedinPACE"]))
 })
 
-# degraded coverage vs the reference package. parity owns the full-coverage golden
-test_that("DunedinPACE matches danbelsky/DunedinPACE through a holed panel", {
-  skip_if_not_installed("betanorm")
-  skip_if_not_installed("DunedinPACE")
-  skip_if_not_installed("preprocessCore") # paceProjector's qn backend
-
-  norm_panel <- names(clock_norm_target("DunedinPACE"))
-  score_panel <- clock_scoring_cpgs("DunedinPACE")
-  norm_only <- setdiff(norm_panel, score_panel)
-
-  # complete miss: 3 of 173 scoring CpGs and 1000 background-only ones
-  absent <- c(score_panel[1:3], norm_only[1:1000])
-  DNAm <- random_betas(setdiff(norm_panel, absent), n = 10L)
-
-  # partial miss on both panels. reference vendor-fills rare probes, we never do
-  holed_score <- score_panel[4:8]
-  holed_norm <- norm_only[1001:1005]
-  for (j in seq_along(holed_score)) {
-    DNAm[j, holed_score[[j]]] <- NA_real_
-    DNAm[j, holed_norm[[j]]] <- NA_real_
-  }
-
-  got <- calc_clocks(DNAm, "DunedinPACE")
-  ref <- DunedinPACE::PACEProjector(t(DNAm))[["DunedinPACE"]]
-  expect_false(anyNA(ref))
-  expect_equal(got$scores[, "DunedinPACE"], ref[rownames(DNAm)])
-
-  # absent cpgs filled from the target. present-but-holed ones cohort-mean filled.
-  cov <- got$coverage$per_clock[[1]]$DunedinPACE
-  expect_equal(cov$score_imputed_full, 3L)
-  expect_equal(cov$norm_imputed_full, 1003L)
-  expect_equal(cov$score_imputed_partial, 5L)
-  expect_equal(cov$norm_imputed_partial, 10L)
-  expect_equal(cov$score_dropped, 0L)
-  expect_equal(cov$norm_dropped, 0L)
-})
+# the reference-implementation golden (degraded coverage) lives in
+# test-fixtures-parity.R: DunedinPACE is undeclared and maintainer-only.
 
 # coverage floors live in test-coverage-gate.R for all clocks

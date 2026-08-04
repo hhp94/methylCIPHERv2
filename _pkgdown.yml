@@ -1,0 +1,79 @@
+url: https://hhp94.github.io/methylCIPHERv2/
+
+template:
+  bootstrap: 5
+  theme: arrow-light
+  bslib:
+    bg: "#fdfdfb"
+    fg: "#22262b"
+    primary: "#1a6aa8"
+    font-size-base: "1.05rem"
+    line-height-base: 1.65
+    headings-font-weight: 600
+
+reference:
+- title: Scoring
+  desc: >
+    Score a beta matrix.
+  contents:
+  - calc_clocks
+  - predict_sex
+
+- title: Discovery
+  desc: >
+    Read the clock catalog before a run.
+  contents:
+  - list_clocks
+  - list_clock_tags
+  - clock_cpgs
+
+- title: Coverage
+  desc: >
+    Report the panel coverage for each clock and for each sample.
+  contents:
+  - clocks_coverage
+  - samples_coverage
+
+- title: Working with an mc_result
+  desc: >
+    Convert, combine and print the value that `calc_clocks()` returns.
+  contents:
+  - as.data.frame.mc_result
+  - as.matrix.mc_result
+  - rbind.mc_result
+  - refinalize_clocks
+  - print.mc_result
+
+- title: Analysis
+  desc: >
+    Fit age acceleration and test associations.
+  contents:
+  - calc_accel
+  - score_associations
+
+- title: Assets
+  desc: >
+    Manage the downloadable weights that some clock groups need.
+  contents:
+  - list_mc_assets
+  - get_mc_assets_dir
+  - set_mc_assets_dir
+  - download_mc_assets
+  - load_mc_assets
+  - clear_mc_assets
+
+- title: Citations
+  desc: >
+    Collect the references for the clocks that a run scored.
+  contents:
+  - cite_clocks
+  - as.data.frame.mc_citation
+  - toBibtex.mc_citation
+  - print.mc_citation
+
+- title: Simulation
+  desc: >
+    Generate a beta matrix for an example or a test.
+  contents:
+  - sim_DNAm
+  - print.mc_sim

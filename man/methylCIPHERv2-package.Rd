@@ -4,9 +4,18 @@
 \name{methylCIPHERv2-package}
 \alias{methylCIPHERv2}
 \alias{methylCIPHERv2-package}
-\title{methylCIPHERv2: A Methylation Clock Investigational Package for Hypothesis-Driven Evaluation & Research}
+\title{methylCIPHERv2: Calculate Epigenetic Clocks}
 \description{
-Code to easily calculate nearly all of the CpG-based epigenetic clocks currently in circulation locally, in just one place.
+Calculates scores for CpG-based epigenetic clocks to support hypothesis-driven evaluation and research. A single function scores every supported clock from a beta matrix of DNA methylation values. Scoring runs on the local machine, and most clock weights are bundled with the package. The larger weight sets are downloaded on request.
+}
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/hhp94/methylCIPHERv2}
+  \item \url{https://hhp94.github.io/methylCIPHERv2/}
+  \item Report bugs at \url{https://github.com/hhp94/methylCIPHERv2/issues}
+}
+
 }
 \author{
 \strong{Maintainer}: Hung Pham \email{amser.hoanghung@gmail.com} (\href{https://orcid.org/0000-0002-8271-9355}{ORCID})

@@ -35,6 +35,9 @@ library(methylCIPHERv2)
 ### Browse the clocks
 
 `list_clocks()` returns a data.frame showing all the supported clocks.
+The [clock
+catalog](https://hhp94.github.io/methylCIPHERv2/articles/clocks.html)
+article provides a searchable table.
 
 ``` r
 head(list_clocks(), n = 3)
@@ -251,7 +254,7 @@ score_associations(res, age = sim[["pheno"]][["Age"]])
 #> 1 Horvath1 6    -0.124     0.827  0.226  0.972    TRUE       TRUE
 ```
 
-### Cite the clocks
+### Bibliography
 
 `cite_clocks()` returns the reference for every clock in a result.
 

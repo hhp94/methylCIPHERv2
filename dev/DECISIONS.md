@@ -14,6 +14,60 @@ Older dated citations in `CLAUDE.md` resolve there. Do not restate that history 
 
 ---
 
+## 2026-08-04 -- `duckdb` and `DunedinPACE` leave Suggests: a dep is declared for code, not for tests
+
+Both were in `Suggests`, and `DunedinPACE` also needed `danbelsky/DunedinPACE` in `Remotes:`. Both
+are gone; `Remotes:` now carries `hhp94/betanorm` alone.
+
+**The line is where the *package* reads the dependency, not whether a test does.** `betanorm`
+appears in `R/`: `require_betanorm()` in `R/score_normalized.R` gates every normalizing branch, so a
+user who passes `normalize =` needs it at runtime, and it stays declared with its `Remotes:` entry.
+Neither `duckdb` nor `DunedinPACE` appears anywhere in `R/`. They are read only by
+`tests/testthat/test-fixtures-parity.R` and `tests/testthat/test-score-dunedin.R`, and both tiers
+are already gated for other reasons -- parity needs `MC_PARITY=1` plus a staged duckdb cohort no
+user has, and the Dunedin golden needs a GitHub-only package. Declaring them made every installing
+user resolve a dependency for a tier they cannot run, and in `DunedinPACE`'s case made a CRAN
+submission carry a `Remotes:` entry for a package CRAN does not have.
+
+**So the reference golden moved to the tier that matches it.** The degraded-coverage test against
+`DunedinPACE::PACEProjector()` was the only third-party-dependent test in the always-on value-golden
+tier, where an undeclared dep means it skips silently on every machine forever. It now lives in
+`tests/testthat/test-fixtures-parity.R`, behind the tier flag and **with no
+`skip_if_not_installed()` on the reference at all**. That is the point: parity only ever runs on a
+maintainer machine, which has both `duckdb` and `DunedinPACE`, so a skip there cannot protect
+anybody and can only hide a silent non-run. If the reference is missing the test errors, which is
+the correct signal on the one machine that runs it. It needs no duckdb and no staged cohort -- it
+builds its own holed panel -- so the file's guards split: `skip_if_parity_off()` is the flag alone,
+and `skip_if_no_cohort()` calls it and then demands a connection.
+
+The other four tests in `test-score-dunedin.R` are in-package goldens with no third-party dep and
+stay in the always-on tier. Measured after the move: always-on 1271 pass / 0 fail, parity 264 blocks
+/ 707 pass / 32 skip / 0 fail (was 263 / 699 / 32 / 0 -- one block and eight expectations, which is
+exactly the moved test).
+
+**What this costs, stated plainly.** The degraded-coverage path is now checked only when a
+maintainer runs parity, and no CI job gets it from DESCRIPTION. Accepted: the alternative is a
+CRAN-facing DESCRIPTION advertising deps for tiers CRAN never runs. **A CI job that means to run
+that tier must install `duckdb` and `DunedinPACE` itself.**
+
+## 2026-08-04 -- `payload_hash_of()` stops hashing the serialize header, re-addressing every pack once
+
+`payload_hash_of()` hashed `serialize(payload, version = 2L, xdr = TRUE)` as a raw stream.
+`serialize()` writes a 14 byte header whose bytes 7 to 10 carry the **writer's R version**, so the
+content-address moved on an R upgrade with not one coefficient changed. That is the one thing the
+identity key exists to prevent: `payload_hash` sets the pack filename and the release tag, and its
+whole job is to make re-upload of unchanged weights a no-op. It is now
+`digest::digest(payload, algo = "sha256", serializeVersion = 2L)`, whose `skip = "auto"` drops that
+header.
+
+**The fix is not free: it re-addressed all four packs once.** `pcbrainage`, `pcclocks`, `systemsage`
+and `zhang2019` each have a new hash, so `R/sysdata.rda` declares four filenames and four release
+tags that did not exist before. The assets were re-uploaded under the new tags before this landed,
+so no download breaks. Every existing user's cached packs become **superseded** on upgrade, exactly
+as any `payload_hash` move does -- `list_mc_assets()` reports them and `clear_mc_assets()` reclaims
+them, which is designed behaviour and not a special case. A one-time cost, paid to stop paying it on
+every R release.
+
 ## 2026-08-04 -- The prose files split from one rule set into two, and stop being hard-wrapped
 
 `dev/WRITING.md` section 10 governed `vignettes/*.Rmd` and `README` with a single rule set. Writing

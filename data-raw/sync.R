@@ -2282,13 +2282,11 @@ stable_external_payload <- function(bundle) {
   out[!vapply(out, is.null, logical(1L))]
 }
 
-# stable serialize (version=2L, xdr=TRUE).
+# Stable across R versions. serialize() writes a 14 byte header whose bytes
+# 7 to 10 carry the writer's R version, so hashing the raw stream re-addressed
+# every pack on an R upgrade. digest's skip = "auto" drops that header.
 payload_hash_of <- function(payload) {
-  digest::digest(
-    serialize(payload, connection = NULL, version = 2L, xdr = TRUE),
-    algo = "sha256",
-    serialize = FALSE
-  )
+  digest::digest(payload, algo = "sha256", serializeVersion = 2L)
 }
 
 # gitHub release target
