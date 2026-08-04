@@ -2,20 +2,51 @@
 % Please edit documentation in R/predict_sex.R
 \name{predict_sex}
 \alias{predict_sex}
-\title{Stub}
+\title{Predicted Sex Karyotype}
 \usage{
 predict_sex(DNAm, pheno = NULL, ...)
 }
 \arguments{
-\item{DNAm}{x}
+\item{DNAm}{A numeric matrix. The methylation beta values, with samples in
+the rows and CpGs in the columns.}
 
-\item{pheno}{x}
+\item{pheno}{A data.frame. The sample metadata, with one row for each
+sample. Default is \code{NULL}.}
 
-\item{...}{x}
+\item{...}{Passed to \code{\link[=calc_clocks]{calc_clocks()}}.}
 }
 \value{
-x
+A data.frame. One row for each sample, with the two
+\code{DNAmSex_Wang} scores, \code{predicted_sex}, and, when \code{pheno} has a
+\code{Female} column, \code{recorded_sex} and \code{sex_mismatch}.
 }
 \description{
-Rcpp needs some roxygen2 stub
+Predicts sex and identifies sex chromosome aneuploidy.
+}
+\details{
+This is a re-implementation of the sex prediction algorithm of the
+wateRmelon package.
+
+The returned data.frame has one row for each sample, with the two
+\code{DNAmSex_Wang} scores and a \code{predicted_sex} column. \code{predicted_sex} is
+one of \code{"Male"}, \code{"Female"}, \code{"47,XXY"}, or \code{"45,XO"}. A sample missing
+either score gets \code{NA}, not a default call.
+
+When \code{pheno} has a \code{Female} column, coded \code{0} or \code{1}, the result also
+carries \code{recorded_sex} and \code{sex_mismatch}. \code{sex_mismatch} is \code{TRUE} only
+where \code{predicted_sex} disagrees with a binary \code{recorded_sex}. A
+\code{"47,XXY"} or \code{"45,XO"} call is never flagged, because a binary \code{Female}
+column cannot record it.
+}
+\examples{
+ids <- c("DNAmSex_Wang_ChrX", "DNAmSex_Wang_ChrY")
+sim <- sim_DNAm(ids, n = 6, Female = TRUE)
+predict_sex(sim[["DNAm"]], sim[["pheno"]])
+
+}
+\references{
+Wang Y, Hannon E, Grant OA, Gorrie-Stone TJ, Kumari M, Mill J, Zhai X,
+McDonald-Maier KD, Schalkwyk LC (2021). DNA methylation-based sex
+classifier to predict sex and identify sex chromosome aneuploidy.
+\emph{BMC Genomics}, 22(1), 484. \doi{10.1186/s12864-021-07675-2}
 }

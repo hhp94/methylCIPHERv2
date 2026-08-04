@@ -1,5 +1,41 @@
 # formatters over a finished record's $coverage (no re-touch of beta)
 
+# the norm block, named rather than matched on a "^norm_" prefix: the column
+# set is declared here so a new count cannot join it by being spelled right.
+# normalizes travels with it -- it is the declared fact the block reports on,
+# so where the block says nothing it says nothing either.
+CC_NORM_COLS <- c(
+  "normalizes",
+  "norm_needed",
+  "norm_present",
+  "norm_imputed_partial",
+  "norm_imputed_full",
+  "norm_dropped"
+)
+
+# columns keyed on a record fact, dropped when the record does not carry it.
+# built on every part and dropped once at the exit: the parts rbind together,
+# so a column cannot be skipped per batch.
+trim_clock_cols <- function(out, all_columns) {
+  if (all_columns) {
+    return(out)
+  }
+  drop <- character(0)
+  # every row returned means the reader has no routing target to tell apart
+  if (!any(out[["role"]] == "routing_target")) {
+    drop <- c(drop, "role")
+  }
+  # aliases carry NA here, so na.rm: a real TRUE is what keeps the block
+  if (!any(out[["normalizes"]], na.rm = TRUE)) {
+    drop <- c(drop, CC_NORM_COLS)
+  }
+  # a list column costs more than its width, and an empty one says nothing
+  if (!any(lengths(out[["missing_cpgs"]]) > 0L)) {
+    drop <- c(drop, "missing_cpgs")
+  }
+  out[, setdiff(names(out), drop), drop = FALSE]
+}
+
 # every caller is an exported verb taking a user-supplied record, so this is a
 # front-door refusal and reads as cli, not as a developer stop().
 check_mc_result <- function(x, arg = "x") {
@@ -90,14 +126,62 @@ batch_coverage <- function(per_clock, batch, returned) {
 }
 
 # one row per (clock, batch).
+#' Clock Coverage Counts
+#'
+#' Reports the CpG counts behind each clock's score in `x`, one row for
+#' each clock and batch.
+#'
+#' @inheritParams mc-params
+#'
+#' @details
+#' Every row gives the clock's `group_id`, its `policy`, and the six
+#' `score_*` counts for the CpGs in its own scoring panel.
+#'
+#' A clock assembled only from other clocks' scores reads no CpGs of its
+#' own, and gets a row of `NA` counts. Read the coverage of the clocks it
+#' depends on instead.
+#'
+#' Four more columns appear only where they say something about `x`.
+#'
+#' - `role` appears when `x` holds a clock that scores as part of another
+#'   clock.
+#' - `normalizes`, and the five `norm_*` counts for the normalizing panel,
+#'   appear when a clock in `x` normalizes. There is no `norm_used`.
+#' - `missing_cpgs` lists the CpGs absent from a clock's panel, and appears
+#'   when a CpG is absent.
+#' - `mc_batch_id` appears when `x` holds more than one batch. A batch is
+#'   the set of samples from one [calc_clocks()] call, and [rbind()]
+#'   combines batches.
+#'
+#' Pass `all_columns = TRUE` to keep `role`, `normalizes`, the `norm_*`
+#' counts, and `missing_cpgs` in every frame. Use it where the code that
+#' reads the frame names a column directly. `mc_batch_id` is the one
+#' exception, and still appears only when `x` holds more than one batch.
+#'
+#' @returns A data.frame. One row for each clock and batch, with the CpG
+#'   counts of its scoring panel, and the columns above that apply to `x`.
+#'
+#' @seealso
+#' [samples_coverage()] for the same panels counted for each sample.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim <- sim_DNAm(clocks, n = 20)
+#' res <- calc_clocks(sim[["DNAm"]], clocks)
+#'
+#' clocks_coverage(res)
+#' clocks_coverage(res, all_columns = TRUE)
+#'
 #' @export
-clocks_coverage <- function(x) {
+clocks_coverage <- function(x, all_columns = FALSE) {
   check_mc_result(x)
+  checkmate::assert_flag(all_columns)
   batches <- x[["coverage"]][["per_clock"]]
   returned <- x[["provenance"]][["clocks"]]
   batch <- x[["provenance"]][[MC_BATCH]]
   # keyed on provenance's per-sample vector, never on per_clock's names.
-  keep <- is_multi_batch(batch)
+  # n_batches() stops first if the two disagree.
+  keep <- n_batches(x) > 1L
   out <- do.call(
     rbind,
     lapply(names(batches), function(b) {
@@ -105,7 +189,7 @@ clocks_coverage <- function(x) {
     })
   )
   rownames(out) <- NULL
-  drop_single_batch(out, batch)
+  trim_clock_cols(drop_single_batch(out, batch), all_columns)
 }
 
 # one panel's per-sample rows for a non-alias returned clock
@@ -209,12 +293,49 @@ say_low_samples <- function(out, threshold) {
 }
 
 # one row per (sample, returned clock, panel)
+#' Sample Coverage Counts
+#'
+#' Reports each sample's CpG coverage for every clock in `x`, one row for
+#' each sample, clock, and panel.
+#'
+#' @inheritParams mc-params
+#'
+#' @details
+#' Only the clocks in the returned scores of `x` get a row. A clock that
+#' scores as part of another clock gets none. A clock assembled only from
+#' other clocks' scores gets none. A
+#' clock scored separately for each sex has no row for a sample outside
+#' the sex it scored.
+#'
+#' A clock that normalizes has a second row for each sample, under
+#' `panel = "norm"`, for the panel used to normalize it.
+#'
+#' `samples_coverage()` warns when a row's `coverage` is under the
+#' strictest `min_samples_coverage` value used to score `x`. The
+#' `mc_batch_id` column appears only when `x` holds more than one batch.
+#'
+#' @returns A data.frame. One row for each sample, clock, and panel, with
+#'   `n_observed`, `n_needed`, `coverage`, and, when `x` holds more than
+#'   one batch, `mc_batch_id`.
+#'
+#' @seealso
+#' [clocks_coverage()] for the same panels counted for each clock.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim <- sim_DNAm(clocks, n = 20)
+#' res <- calc_clocks(sim[["DNAm"]], clocks)
+#'
+#' head(samples_coverage(res))
+#'
 #' @export
 samples_coverage <- function(x) {
   check_mc_result(x)
   batch <- x[["provenance"]][[MC_BATCH]]
-  # one row per (sample, clock, panel). batch masks rows. label withheld when single-batch.
-  keep <- is_multi_batch(batch)
+  # one row per (sample, clock, panel). batch masks rows. label withheld when
+  # single-batch. n_batches() stops first if provenance and per_clock disagree,
+  # which would otherwise drop rows silently in the mask below.
+  keep <- n_batches(x) > 1L
 
   parts <- list()
   for (b in names(x[["coverage"]][["per_clock"]])) {

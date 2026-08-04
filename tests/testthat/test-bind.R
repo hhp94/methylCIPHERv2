@@ -394,3 +394,23 @@ test_that("refinalize composes: it reads pending and never consumes it", {
   })
   expect_equal(flat$scores[by_row, id], out$scores[by_row, id])
 })
+
+test_that("every finalizer agrees, matrix included", {
+  id <- "DNAmPhysAge"
+  DNAm <- random_betas(clock_cpgs(id), n = 12L)
+  whole <- calc_clocks(DNAm, id)
+  parts <- lapply(list(1:6, 7:12), function(i) {
+    calc_clocks(DNAm[i, , drop = FALSE], id)
+  })
+  bound <- do.call(rbind, parts)
+
+  suppressMessages({
+    m <- as.matrix(bound)
+    d <- as.data.frame(bound, long = FALSE)
+  })
+
+  # leaving the mc_result structure resolves pending, whichever exit is used
+  by_row <- rownames(whole$scores)
+  expect_equal(unname(m[by_row, id]), unname(whole$scores[, id]))
+  expect_equal(d[[id]][match(by_row, d[[1L]])], unname(whole$scores[, id]))
+})

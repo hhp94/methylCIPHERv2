@@ -28,8 +28,12 @@ Suggests:
     DBI,
     duckdb,
     DunedinPACE,
+    knitr,
+    rmarkdown,
     testthat (>= 3.0.0),
     withr
+VignetteBuilder:
+    knitr
 Remotes:
     danbelsky/DunedinPACE,
     hhp94/betanorm

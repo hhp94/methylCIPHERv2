@@ -161,11 +161,23 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   declared `cross_sample` set. `refinalize_clocks()` **reads `pending` and never consumes it**, so
   it composes in any order and a second call is a no-op; never clear `pending` after re-finalizing.
   **`rbind` is the only verb that leaves `pending` unresolved. Every finalizer resolves it.**
-  `as.data.frame()` and `calc_accel()` both re-finalize on the way out and say so, under
-  `say_pending()`'s exact guard -- non-empty `pending` **and** more than one batch. `rbind` must
-  not, because `do.call(rbind, ...)` recurses and would re-finalize at every intermediate step; a
-  finalizer is a leaf and hands back a frame the record cannot be recovered from, so it must hand
-  back the right numbers. A single-batch record is skipped because its reduction already spans its
+  **A finalizer is any exit that takes an `mc_result` and returns something that is not one.** The
+  test is mechanical, so the set is derived rather than listed and cannot go stale: it is
+  `as.data.frame()`, `as.matrix()`, `calc_accel()` and `score_associations()` today. All four
+  re-finalize on the way out and say so, under `say_pending()`'s exact guard -- non-empty
+  `pending` **and** more than one batch. The set was enumerated instead of derived until
+  2026-08-03 and drifted twice under it: `as.matrix()` was outside it until then, which meant it
+  and `as.data.frame()` could hand back different numbers for the same multi-batch record, and
+  `score_associations()` was re-finalizing without the enumeration or its own docs saying so
+  (DECISIONS 2026-08-03). `rbind` is **not** a finalizer under the same test -- it returns an
+  `mc_result` -- and must not become one, because `do.call(rbind, ...)` recurses and would
+  re-finalize at every intermediate step; a finalizer is a leaf and hands back a value the record
+  cannot be recovered from, so it must hand back the right numbers.
+  **The two batch counts are cross-checked, not chosen between.** `n_batches()` (`R/mc_result.R`)
+  derives the count from `provenance[[mc_batch_id]]`, the per-sample vector that fills the column,
+  and `stop()`s if `length(per_clock)` disagrees. Every finalizer and both coverage frames route
+  through it, and `finalized()` calls it **before** the `pending` test so `&&` cannot short-circuit
+  past the check on the common path. Do not read either count directly for a batch total. A single-batch record is skipped because its reduction already spans its
   whole cohort -- re-finalizing is a numerical no-op there and the message would be pure noise
   (DECISIONS 2026-07-31, "one name for the batch label"). Wanting the per-batch reductions is
   still possible: finalize each record *before* binding.
@@ -234,6 +246,21 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   only exempt file is the generated `R/RcppExports.R`. `options(warnPartialMatchDollar)` is
   **not** the fix -- a package cannot set a session global for its users and it does not fire
   under `R CMD check`.
+- **Never resolve a name by partial match. `$` is one instance of a general rule.** A token the
+  user supplied is matched **exactly** against its closed set, so `pmatch()`, `charmatch()` and
+  `match.arg()`'s abbreviation handling are all out at the front door. Two reasons, and the second
+  is specific to this package. A partial match resolves silently to something the caller did not
+  name, which is the same failure as `entry$covariates`. And **the closed sets here grow with every
+  sync**: `"Sys"` resolves to `SystemsAge` today, and the sync that adds a second `Sys*` group turns
+  working user code into an ambiguity error. An abbreviation cannot be supported without freezing
+  the catalog.
+  The tool is **`checkmate::assert_subset()`** -- exact, names the offending element **and** the
+  valid set, and takes `empty.ok` as an explicit flag. Precedent: `list_clocks(tag =)` and
+  `mc_resolve_groups()`. **`match.arg(several.ok = TRUE)` is not an alternative**, and was measured
+  before being rejected (DECISIONS 2026-08-03): it returns `choices[1L]` for `NULL` (here, `"all"`
+  -- a silent mass download), it errors only when *every* element fails so a typo beside a valid
+  token is **dropped without a word**, and it does not deduplicate. It bans `character(0)`, which is
+  the one property it has that we wanted, and that is one line to write ourselves.
 - **Never `<<-` in `R/`. Mutable state is an explicit environment.** `<<-` does not name a target:
   it walks the enclosing frames and assigns into the first one that already binds that name,
   **creating a global** if none does. So renaming or deleting a local silently promotes a local
@@ -323,13 +350,16 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   relative, both, taken as a `max` -- so one bad sample fails the test. The same reasoning bans
   `median`/`mean` as the reducer over per-element differences: any statistic that averages away a
   minority of arbitrarily-wrong samples is the same bug wearing a different name.
-- **Roxygen is on only where compiled code forces it; prose docs are still deferred.** The package
-  went Rcpp, and `useDynLib` has no route into `NAMESPACE` except a roxygen tag -- so roxygen is
-  enabled, `NAMESPACE` and `man/*.Rd` are **generated files**, and `devtools::document()` is a
-  normal part of the workflow. That is the whole of the override: keep writing short `#` comments
-  (see "Comments") and do **not** start authoring real `@param` / `@return` prose. `calc_clocks()`
-  carries a placeholder block whose params are literally `x`; leave it that way until a human says
-  otherwise (DECISIONS 2026-07-27).
+- **The exported surface is documented, and `dev/WRITING.md` is how.** Roxygen went on because the
+  package went Rcpp and `useDynLib` has no route into `NAMESPACE` except a tag, so `NAMESPACE` and
+  `man/*.Rd` are **generated files** and `devtools::document()` is a normal part of the workflow.
+  Prose docs were deferred behind that for a year and **shipped 2026-08-03**: all 26 user-facing
+  topics now carry real `@param` / `@details` / `@returns` / `@examples`, the `@seealso` groups are
+  closed, and `cite_clocks` merges its three methods onto one topic with `@rdname`. **Do not write
+  or edit a doc block without reading `dev/WRITING.md` first** -- it holds the tag order, the
+  `DOC_TYPES` param vocabulary, the shared-parameter donor and its footgun, and the closed
+  cross-reference set. `lint_roxygen()` and `lint_seealso()` (`R/dev-utils.R`) must both come back
+  empty; both were empty on 2026-08-03 (DECISIONS 2026-07-27, 2026-08-03).
 - **Never hand-edit `NAMESPACE` or `man/*.Rd` -- own the tags, not the files.** They carry roxygen's
   "do not edit by hand" header and `document()` rewrites them from tags, **silently dropping**
   anything added by hand. This has bitten once: a hand-added
@@ -417,7 +447,7 @@ contribute** (the catalog is committed). `sync()` needs read access to `methylCI
   **and** every superseded one, with no opt-in flag. Filenames are content-addressed, so each sync
   that moves a `payload_hash` orphans the old file; leaving those behind made `clear` fail to
   reclaim and grew the dir without bound. The consent gate is what makes this safe -- the prompt
-  counts the two kinds apart ("3 downloaded packs and 3 superseded packs") and lists the files
+  counts the two kinds apart ("3 downloaded assets and 3 superseded assets") and lists the files
   before anything is deleted -- capped at `MC_MSG_CAP` like every other list, with any remainder
   counted on its own line, because a message that renders an unbounded vector is the one failure
   mode the cap exists for and the counts above it are already exact (DECISIONS 2026-08-03). The
@@ -618,106 +648,50 @@ bug report can be located from the pasted text with no stack trace asked of the 
 constant string -- `check_moment_sets()`'s failing index is real debugging value -- but the fixed
 part leads.
 
-### The English (public-facing text only)
+### How the text itself is written: `dev/WRITING.md`
 
-These bind **every message a user can see**: cli message text today, and roxygen prose when to-do
-2.1 happens. They do **not** bind code comments, dev-facing `stop()` text, `data-raw/`, or `dev/`
-docs, so the ASCII section above is untouched and `--` stays required there. This is an added
-scope, not a reversal (DECISIONS 2026-08-03).
+**`dev/WRITING.md` is the single source, and this file does not restate it.** Read it before you
+write or edit any text a user can see. It is tracked, so it resolves in a fresh clone. It holds:
 
-- **R1. ASD-STE100 Simplified Technical English.** One instruction per sentence. About 20 words
-  for an instruction, 25 for a description. The simple word over the elaborate one. One word for
-  one meaning. Articles present. No noun cluster longer than three words. No ambiguous `-ing`
-  form. `coverage` and `superseded` are accepted exceptions: both are public API names, and
-  vocabulary rules stop where the API starts.
-- **R2. No first person and no "please". No contractions.** Prefer the data or the object as the
-  subject over a bare passive. `{.fn calc_clocks}` **is** allowed as a grammatical subject -- it
-  is the real actor behind four record-verb messages, and making the user the subject there would
-  assert they scored records they may only have been handed. Second person is allowed where the
-  user genuinely is the actor ("You cancelled the download").
-- **R3. No `--` and no `;` in message text.** Period, comma, colon, and a single spaced hyphen.
-  This is an **accessibility requirement**, not a style preference. A `;` is how a long sentence
-  gets smuggled past a period, so prefer a period and a short new sentence: across the 70-site
-  audit every one of the 14 banned characters was a sentence boundary in disguise, and not one
-  rewrite needed the ` - ` allowance.
-- **R4. Describe the problem and give an actionable next step.** Never state that scoring
-  continues, or that nothing was stopped -- a warning already says that, and the space is better
-  spent on an instrument. Name the function to call **next**, never the one currently running
-  (`say_low_samples()` is raised from inside `samples_coverage()`, so it must not name it).
-- **R5. No vector sized by user input reaches cli.** `MC_MSG_CAP` is 10 and lives in `R/utils.R`
-  with `capped_bullets()` / `capped_vals()` / `capped()`. There is **no "... and N more" tail**: a
-  capped head is enough and the true total is already in the lead line. Wrapping a cap around a
-  two-element catalog constant buys nothing. Where the cost is upstream of the render -- the
-  `adist()` in `did_you_mean()` -- cap the **token count**, because a cap at the cli boundary does
-  not reach it.
-- **R6. Every R language object in message prose carries cli markup.** A bare identifier reads as
-  broken English. **Only R language objects**: domain and platform terms (`EPICv2`, `MSA`,
-  "M-value") stay prose, because markup that resolves to a cross-package link breaks when that
-  package is absent.
-- **R7. Keep a marked span short.** Mark the identifier, not the surrounding phrase and not a
-  whole call with long arguments. roxygen2 renders a long backticked span badly and it breaks the
-  PDF manual.
-
-### Mechanics
-
-- **`sprintf` output must never become cli input.** The two do not compose: cli parses every
-  message element and every bullet as a template, so a `{` that arrives inside a built string is
-  read as syntax. This is not theoretical -- `mc_manifest_bullets()` aborted with
-  `Could not evaluate cli {} expression` on a brace in a file name. Build the line with
-  `cli::format_inline()` and hand data in as **interpolated values**; interpolated values are
-  never re-parsed. `sprintf` is still right for a plain `stop()`, for `cli_verbatim()` (which does
-  no interpolation, which is why the aligned manifest keeps it), and for an `askYesNo()` prompt.
-- **Rendered text goes back through cli as a template, so `bullets()` escapes braces.** Building
-  the line with `format_inline()` is not enough on its own: its *output* still contains any brace
-  the data carried. Every bullet path is covered because `bullets()` is the one door.
-- Line builders are **cap first, then format** (`capped_bullets(x, fmt)`), which is what makes
-  per-element markup affordable: at most ten elements are ever formatted.
+- **R1 to R8**, the English rules. They bind **every message a user can see** -- cli message text
+  and roxygen prose alike. They do **not** bind code comments, dev-facing `stop()` text,
+  `data-raw/`, or `dev/` docs, so the ASCII section above is untouched and `--` stays required
+  there (DECISIONS 2026-08-03).
+- **The cli mechanics**: why `sprintf` output must never become cli input, why `bullets()` escapes
+  braces, cap-before-format, `cli::qty()` on every plural marker, `cli_verbatim()` for anything
+  pre-aligned, and never a multi-line `askYesNo()` prompt. Each is a bug that has actually
+  happened here.
+- **The roxygen template**: tag order, the `DOC_TYPES` param vocabulary, the shared-parameter
+  donor and its one footgun, the closed `@seealso` groups, and the example rules.
 - **`say_*` emits to the user; `note_*` records into the block's collector.** Do not use `note_`
   for something that prints.
+- **The audit section**: the known-good exceptions an independent reader will otherwise report as
+  defects, and the three CRAN shape rules the manual currently satisfies.
 
-Rules that still apply:
-
-- **Bind every `{?}` plural marker with an explicit `cli::qty()` unless the quantity is the
-  interpolation immediately before it.** cli resolves a marker against the *last interpolated
-  value earlier in the same string*; with none it scans forward and needs exactly one candidate,
-  and the quantity never carries across elements of a `c()` message vector. Get this wrong and
-  the handler itself throws (`Cannot pluralize without a quantity`, `Multiple quantities for
-  pluralization`) **in place of** the real diagnostic. Safe form:
-  `"Add {cli::qty(need)}{?it/them} to {.arg pheno}."`
-- The silent variant is worse than the crash: in
-  `"{.val {id}} needs pheno column{?s} {.field {need}}"` the marker binds to `id`, so it is
-  always singular no matter how many columns are missing. A marker that follows a styled
-  `{.val {x}}` is bound to `x`, not to the vector you meant.
-- **cli reflows whitespace.** A pre-aligned block (a manifest, a table) collapses onto one line
-  when interpolated into a bullet. Use `cli::cli_verbatim()`, which emits lines as-is
-  (`mc_manifest_lines()`); anywhere reflow is unavoidable -- inside `cli_abort()` / `cli_inform()`
-  bullets -- carry no alignment at all and emit one self-contained bullet per row
-  (`mc_manifest_bullets()`).
-- **Never hand `askYesNo()` a multi-line prompt.** It passes the string straight to `readline()`,
-  whose `prompt` is meant to be one short line; embedded newlines render malformed on Windows.
-  Print the context with cli first, then ask a single-line question -- `mc_ask_yes_no()`
-  (`R/mc_data.R`) is the one place that does this and every consent prompt goes through it. It
-  takes its `header` **pre-formatted** via `cli::format_inline()` in the caller's frame and
-  interpolates it as a value, so pluralization resolves against the caller's variables and the
-  text is never re-parsed for braces.
-- Tests assert *that* a message errors, never its wording -- see "Test altitude".
+Two rules from it are repeated here only because they are enforced by the test suite and the
+workflow rather than by prose: tests assert *that* a message errors and never its wording (see
+"Test altitude"), and `lint_roxygen()` plus `lint_seealso()` must both be empty before a doc
+change is done.
 
 ## Comments
 
-- Plain `#` comments are the only in-source docs right now. Roxygen is enabled but reserved for
-  machinery -- `@export`, `@useDynLib`, `@importFrom` -- not for prose (see invariants).
-- Keep them **short**: 1-2 sentences on *what* the code does, not a rationale essay.
+- **Plain `#` comments are for the code; roxygen is for the manual.** Both are live. The exported
+  surface carries real roxygen prose as of 2026-08-03, written to `dev/WRITING.md`.
+- Keep `#` comments **short**: 1-2 sentences on *what* the code does, not a rationale essay.
 - The *why*, and every decision or reversal, goes only in `dev/DECISIONS.md`.
 
 ## Source-of-truth docs (`dev/`)
 
-The `dev/` folder is local-only **except** these two, which are tracked:
+The `dev/` folder is local-only **except** these three, which are tracked:
 
 - `dev/DECISIONS.md` -- append-only, newest-first, date-stamped log of *why* / reversals
   (2026-07-30 and later). Add an entry when a decision reverses a prior approach or is likely
   second-guessed; do not restate rules already stated here.
 - `dev/DECISIONS.old.md` -- full pre-2026-07-30 decision history. Dated citations earlier than
   that cut resolve here; do not restate that archive in the live log.
+- `dev/WRITING.md` -- the single source for how user-facing text is written: the English rules,
+  the cli mechanics, the roxygen template, the closed `@seealso` groups, and the manual's
+  known-good exceptions. See "CLI messages" above; this file points there and does not restate it.
 
 **There is no live design doc, and that is deliberate.** `migration-plan.md` and `detail-plan.md`
 were retired on 2026-07-28, and `id-streaming-plan.md` -- which held the chunking / binding /

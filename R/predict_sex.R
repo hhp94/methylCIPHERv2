@@ -168,15 +168,43 @@ say_mismatch <- function(out) {
   invisible(NULL)
 }
 
-#' Stub
+#' Predicted Sex Karyotype
 #'
-#' Rcpp needs some roxygen2 stub
+#' Predicts sex and identifies sex chromosome aneuploidy.
 #'
-#' @param DNAm x
-#' @param pheno x
-#' @param ... x
+#' @inheritParams mc-params
+#' @param ... Passed to [calc_clocks()].
 #'
-#' @returns x
+#' @references
+#' Wang Y, Hannon E, Grant OA, Gorrie-Stone TJ, Kumari M, Mill J, Zhai X,
+#' McDonald-Maier KD, Schalkwyk LC (2021). DNA methylation-based sex
+#' classifier to predict sex and identify sex chromosome aneuploidy.
+#' *BMC Genomics*, 22(1), 484. \doi{10.1186/s12864-021-07675-2}
+#'
+#' @details
+#' This is a re-implementation of the sex prediction algorithm of the
+#' wateRmelon package.
+#'
+#' The returned data.frame has one row for each sample, with the two
+#' `DNAmSex_Wang` scores and a `predicted_sex` column. `predicted_sex` is
+#' one of `"Male"`, `"Female"`, `"47,XXY"`, or `"45,XO"`. A sample missing
+#' either score gets `NA`, not a default call.
+#'
+#' When `pheno` has a `Female` column, coded `0` or `1`, the result also
+#' carries `recorded_sex` and `sex_mismatch`. `sex_mismatch` is `TRUE` only
+#' where `predicted_sex` disagrees with a binary `recorded_sex`. A
+#' `"47,XXY"` or `"45,XO"` call is never flagged, because a binary `Female`
+#' column cannot record it.
+#'
+#' @returns A data.frame. One row for each sample, with the two
+#'   `DNAmSex_Wang` scores, `predicted_sex`, and, when `pheno` has a
+#'   `Female` column, `recorded_sex` and `sex_mismatch`.
+#'
+#' @examples
+#' ids <- c("DNAmSex_Wang_ChrX", "DNAmSex_Wang_ChrY")
+#' sim <- sim_DNAm(ids, n = 6, Female = TRUE)
+#' predict_sex(sim[["DNAm"]], sim[["pheno"]])
+#'
 #' @export
 predict_sex <- function(DNAm, pheno = NULL, ...) {
   kc <- karyotype_spec()

@@ -1,20 +1,54 @@
 # public front door
 
-#' Stub
+#' Epigenetic Clock Scores
 #'
-#' Rcpp needs some roxygen2 stub
+#' Scores CpG-based epigenetic clocks on a matrix of methylation beta values.
 #'
-#' @param DNAm x
-#' @param clocks x
-#' @param pheno x
-#' @param pheno_id x
-#' @param min_clocks_coverage x
-#' @param min_samples_coverage x
-#' @param normalize x
-#' @param ext_data x
-#' @param ask x
+#' @inheritParams mc-params
+#' @param normalize A named logical vector. Turns background normalization on
+#'   for the clocks that support it. Default is `NULL`, which leaves the
+#'   optional schemes off.
+#' @param pheno_id A string. The name of the column in `pheno` that holds the
+#'   sample ids. Default is `"ID"`.
+#' @param min_clocks_coverage A number between 0 and 1. The smallest fraction
+#'   of a clock's CpGs that must be present for that clock to score. Default is
+#'   `0.75`.
+#' @param min_samples_coverage A number between 0 and 1. The smallest fraction
+#'   of a clock's CpGs that must be present for a sample to score without a
+#'   warning. Default is `0.75`.
 #'
-#' @returns x
+#' @inheritSection mc-params The assets directory
+#'
+#' @details
+#' `list_clocks(all_columns = TRUE)` names every supported scheme, in its
+#' `normalize` column.
+#' [list_clocks()] and [list_clock_tags()] show every value `clocks` accepts.
+#'
+#' The two coverage arguments differ. `calc_clocks()` stops when a clock has
+#' too few CpGs present, so every clock in the returned scores passed
+#' `min_clocks_coverage`. A sample with too few CpGs present raises a warning
+#' and still scores. Pass the returned value to [clocks_coverage()] or
+#' [samples_coverage()] to see the counts.
+#'
+#' `calc_clocks()` narrows `pheno` before it stores it. The returned value
+#' keeps the id column and the covariates that the clocks need, and drops the
+#' other columns.
+#'
+#' @returns An `mc_result` object. It holds the scores, the narrowed `pheno`,
+#'   the coverage counts, and the provenance of the run.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim <- sim_DNAm(clocks, n = 20)
+#'
+#' res <- calc_clocks(sim[["DNAm"]], clocks)
+#' res
+#'
+#' # pheno is narrowed to the id column and the covariates the clocks need
+#' pheno <- data.frame(ID = rownames(sim[["DNAm"]]), Age = runif(20, 20, 80))
+#' res <- calc_clocks(sim[["DNAm"]], clocks, pheno = pheno)
+#' head(res[["pheno"]])
+#'
 #' @export
 calc_clocks <- function(
   DNAm,

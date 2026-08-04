@@ -36,7 +36,7 @@ assoc_age <- function(x, age) {
     if (!("Age" %in% names(pheno))) {
       cli::cli_abort(
         c(
-          "The record has no {.field Age} column, and {.arg age} is
+          "{.arg x} has no {.field Age} column, and {.arg age} is
            {.code NULL}.",
           "i" = "Pass a numeric vector to {.arg age}.",
           "i" = "Or score with a {.arg pheno} that has an {.field Age}
@@ -50,7 +50,7 @@ assoc_age <- function(x, age) {
   age <- suppressWarnings(as.numeric(age))
   if (length(age) != n) {
     cli::cli_abort(
-      "{.arg age} has {length(age)} value{?s}. The record has {n} sample{?s}.",
+      "{.arg age} has {length(age)} value{?s}. {.arg x} has {n} sample{?s}.",
       call = NULL
     )
   }
@@ -102,17 +102,57 @@ assoc_empty <- function() {
   out[ASSOC_COLS]
 }
 
-#' Stub
+#' Clock Age Associations
 #'
-#' Rcpp needs some roxygen2 stub
+#' Compares each clock's observed correlation with age against a reference
+#' range shipped with the package.
 #'
-#' @param x x
-#' @param age x
-#' @param ref x
+#' @inheritParams mc-params
+#' @param age A numeric vector. The age for each sample, in the same order as
+#'   the samples in `x`. Default is `NULL`, which uses the `Age` column of the
+#'   `pheno` in `x`.
 #'
-#' @returns x
+#' @details
+#' Each row compares a clock's observed score-age correlation with its
+#' reference correlation and expected range. The `outside` column marks a
+#' clock whose observed correlation falls outside that range. The
+#' `wrong_sign` column marks a clock whose observed correlation has the
+#' opposite sign from a reference correlation stronger than 0.3.
+#'
+#' A clock needs at least 5 samples with a finite score and age, and
+#' variation in both, to appear in the result. A clock with no entry in the
+#' shipped reference table is left out.
+#'
+#' This function recalculates any clock that depends on sample-wise
+#' information, such as a z-score, from all the available samples when `x`
+#' holds more than one batch. This is the same calculation as
+#' [refinalize_clocks()].
+#'
+#' Rows are ordered by the gap between the observed and the reference
+#' correlation, most negative first.
+#'
+#' @returns A data.frame. One row for each clock with a reference entry and
+#'   enough samples. Columns are the clock id, the sample count, the
+#'   observed and reference age correlations, the reference range, and the
+#'   two flags described above.
+#'
+#' @seealso
+#' [calc_accel()] for the age acceleration of each sample.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim <- sim_DNAm(clocks, n = 20)
+#' res <- calc_clocks(sim[["DNAm"]], clocks)
+#' score_associations(res, age = runif(20, 20, 80))
+#'
 #' @export
-score_associations <- function(x, age = NULL, ref = mc_clock_reference()) {
+score_associations <- function(x, age = NULL) {
+  # the reference table is package data, not a swappable argument
+  assoc_report(x, age, mc_clock_reference())
+}
+
+# the body, with the reference injectable so a test can control it
+assoc_report <- function(x, age, ref) {
   check_mc_result(x)
   if (is.null(ref)) {
     stop(

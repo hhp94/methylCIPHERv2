@@ -1,5 +1,34 @@
 # every CpG a clocks= request needs measured -- panels plus declared moment refs
 
+#' CpGs Required To Score Clocks
+#'
+#' Lists the CpGs needed to score a set of clocks, including background CpGs
+#' for normalization.
+#'
+#' @inheritParams mc-params
+#'
+#' @inheritSection mc-params The assets directory
+#'
+#' @details
+#' A clock built from other clocks also needs their CpGs. Turning
+#' `normalize` on for a clock adds its background panel to the returned set.
+#'
+#' @returns A character vector. The CpGs needed to score `clocks`, with
+#'   duplicates removed.
+#'
+#' @seealso
+#' - [list_clocks()] for the clocks a `clocks` value accepts.
+#' - [list_clock_tags()] for the tags a `clocks` value accepts.
+#' - [list_mc_assets()] for the assets an external clock needs.
+#'
+#' @examples
+#' cpgs <- clock_cpgs(c("Horvath1", "Hannum"))
+#' length(cpgs)
+#'
+#' # normalizing Horvath1 adds its background panel to the union
+#' norm_cpgs <- clock_cpgs(c("Horvath1", "Hannum"), normalize = c(Horvath1 = TRUE))
+#' length(norm_cpgs)
+#'
 #' @export
 clock_cpgs <- function(
   clocks,
@@ -42,9 +71,9 @@ clock_panels_union <- function(clock_ids, packs, normalize) {
       c(
         "{length(unresolved)} clock{?s} {cli::qty(unresolved)}{?has/have} no
          scoring CpGs: {.val {capped_vals(unresolved)}}.",
-        "i" = "An external clock keeps its CpGs in a pack.",
-        "i" = "Call {.fn load_mc_assets} to load the packs, or
-               {.fn list_mc_assets} to see which packs are on disk."
+        "i" = "An external clock keeps its CpGs in an asset.",
+        "i" = "Call {.fn load_mc_assets} to load the assets, or
+               {.fn list_mc_assets} to see which assets are on disk."
       ),
       call = NULL
     )

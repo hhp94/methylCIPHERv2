@@ -54,7 +54,7 @@ test_that("suggestions never name a clock the user cannot request", {
 })
 
 test_that("every listed callable clock actually resolves", {
-  lc <- list_clocks()
+  lc <- list_clocks(all_columns = TRUE)
   expect_equal(nrow(lc), length(mc_index[["clock_id"]]))
   expect_setequal(lc[["clock_id"]][lc[["callable"]]], resolve_clocks("all"))
   routed <- lc[!lc[["callable"]], ]
@@ -67,7 +67,7 @@ test_that("every listed callable clock actually resolves", {
 })
 
 test_that("group_size is what the group token expands to", {
-  lc <- list_clocks()
+  lc <- list_clocks(all_columns = TRUE)
   for (g in unique(lc[["group_id"]])) {
     expect_equal(
       length(resolve_clocks(g)),
@@ -107,6 +107,25 @@ test_that("keyword membership matches the tags column", {
     )
     expect_setequal(list_clocks(tag = tag)[["clock_id"]], tagged)
   }
+})
+
+test_that("the default menu is narrow, and all_columns adds the rest", {
+  narrow <- list_clocks()
+  wide <- list_clocks(all_columns = TRUE)
+
+  expect_equal(nrow(narrow), nrow(wide))
+  expect_true(all(names(narrow) %in% names(wide)))
+  expect_setequal(
+    setdiff(names(wide), names(narrow)),
+    c("callable", "group_size", "batch_dependent", "normalize")
+  )
+  # a filter does not change which columns come back
+  expect_equal(names(list_clocks(group = "Dunedin")), names(narrow))
+})
+
+test_that("callable is dropped because request_as already carries it", {
+  lc <- list_clocks(all_columns = TRUE)
+  expect_equal(lc[["callable"]], lc[["request_as"]] == lc[["clock_id"]])
 })
 
 test_that("list_clock_tags returns the registry as a value", {

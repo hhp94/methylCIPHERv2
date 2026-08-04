@@ -1,8 +1,12 @@
 MC_ACCEL <- "accel_id"
 
 finalized <- function(x) {
+  # unconditional, and before the pending test: a record whose two batch
+  # counts disagree must not reach an exit, whether or not it has pending
+  # work. `&&` would short-circuit past this on the common path.
+  multi <- n_batches(x) > 1L
   pending <- x[["provenance"]][["pending"]]
-  if (length(pending) && length(x[["coverage"]][["per_clock"]]) > 1L) {
+  if (length(pending) && multi) {
     x <- refinalize_clocks(x)
   }
   x
@@ -41,6 +45,45 @@ shape_scores <- function(m, id_col, value_col, batch, long, label = NULL) {
   drop_single_batch(out, batch)
 }
 
+#' Data Frame Method For An mc_result Object
+#'
+#' Converts the [calc_clocks()] output to a data.frame containing just the
+#' clocks, in long or wide format.
+#'
+#' @inheritParams mc-params
+#' @param row.names A character vector. Not used by this method. Default is
+#'   `NULL`.
+#' @param optional A boolean. Not used by this method. Default is
+#'   `FALSE`.
+#' @param ... Not used.
+#' @param long A boolean. Returns one row for each sample and clock
+#'   when `TRUE`, and one row for each sample, with one column for each
+#'   clock, when `FALSE`. Default is `TRUE`.
+#'
+#' @details
+#' This function recalculates any clock that depends on sample-wise
+#' information, such as a z-score, from all the available samples when `x`
+#' holds more than one batch. This is the same calculation as
+#' [refinalize_clocks()].
+#'
+#' @returns A data.frame. In long form, one row for each sample and clock,
+#'   with the score and, when `x` holds more than one batch, an
+#'   `mc_batch_id` column. In wide form, one row for each sample, with one
+#'   column for each clock.
+#'
+#' @seealso
+#' - [as.matrix.mc_result()] for the scores as a numeric matrix.
+#' - [rbind.mc_result()] for two runs combined into one object.
+#' - [refinalize_clocks()] for a cross-sample score recomputed after a bind.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim <- sim_DNAm(clocks, n = 20)
+#' res <- calc_clocks(sim[["DNAm"]], clocks)
+#'
+#' head(as.data.frame(res))
+#' head(as.data.frame(res, long = FALSE))
+#'
 #' @export
 as.data.frame.mc_result <- function(
   x,
@@ -85,7 +128,7 @@ values_agree <- function(a, b) {
 column_conflict <- function(a, b, nm) {
   if (type_family(a) != type_family(b)) {
     return(cli::format_inline(
-      "{.field {nm}}: {.cls {class(a)[[1L]]}} on the record,
+      "{.field {nm}}: {.cls {class(a)[[1L]]}} in {.arg x},
        {.cls {class(b)[[1L]]}} in {.arg data}"
     ))
   }
@@ -114,7 +157,7 @@ merge_accel_data <- function(pheno, data, pheno_id) {
     cli::cli_abort(
       c(
         "{.arg data} has no {.field {pheno_id}} column.",
-        "i" = "{.arg data} joins on the sample id column of the record."
+        "i" = "{.arg data} joins on the sample id column of {.arg x}."
       ),
       call = NULL
     )
@@ -182,9 +225,13 @@ accel_formula <- function(formula, type) {
     formula <- stats::as.formula("~ Age")
   }
   if (!inherits(formula, "formula") || length(formula) != 2L) {
-    stop(
-      "`formula` must be one-sided, e.g. `~ Age + Female`.",
-      call. = FALSE
+    cli::cli_abort(
+      c(
+        "{.arg formula} must be a formula with no left side.",
+        "i" = "Put the covariates after {.code ~}. For example,
+               {.code ~ Age + Female}."
+      ),
+      call = NULL
     )
   }
   formula
@@ -248,7 +295,8 @@ residualize <- function(resp, ph, vars, formula) {
 
 say_fill_batch <- function(x, rhs_vars) {
   per_clock <- x[["coverage"]][["per_clock"]]
-  if (length(per_clock) < 2L || MC_BATCH %in% rhs_vars) {
+  n_batch <- n_batches(x)
+  if (n_batch < 2L || MC_BATCH %in% rhs_vars) {
     return(invisible(NULL))
   }
   filled <- vapply(
@@ -268,7 +316,7 @@ say_fill_batch <- function(x, rhs_vars) {
     return(invisible(NULL))
   }
   cli::cli_inform(c(
-    "!" = "This record has {length(per_clock)} batch{?es}, and
+    "!" = "The returned value has {n_batch} batch{?es}, and
            {.fn calc_clocks} filled some absent CpGs with a mean taken inside
            each batch.",
     "i" = "A fill of that kind can shift the scores of one batch against
@@ -279,6 +327,68 @@ say_fill_batch <- function(x, rhs_vars) {
   invisible(NULL)
 }
 
+#' Age Acceleration Or Difference
+#'
+#' Computes age acceleration or age difference for every clock in `x`.
+#'
+#' @inheritParams mc-params
+#' @param formula A one-sided formula. The model fit against each clock's
+#'   score. Default is `NULL`, which uses `~ Age`.
+#' @param type One of "accel" or "diff". The quantity to compute for each
+#'   clock. Default is `"accel"`.
+#' @param data A data.frame. Extra sample metadata, joined to the `pheno` in `x`
+#'   by sample id. Default is `NULL`.
+#' @param long A boolean. Returns one row for each sample and clock
+#'   when `TRUE`, and one row for each sample, with one column for each
+#'   clock, when `FALSE`. Default is `TRUE`.
+#'
+#' @details
+#' This function recalculates any clock that depends on sample-wise
+#' information, such as a z-score, from all the available samples when `x`
+#' holds more than one batch. This is the same calculation as
+#' [refinalize_clocks()].
+#'
+#' The default `type = "accel"` calculates the well-known age acceleration.
+#' It regresses each clock in `x` on `Age` and returns the residuals.
+#' `type = "diff"` calculates the raw difference between each clock and
+#' `Age`, and fits no model unless `formula` is given.
+#'
+#' `formula` replaces the default model completely. It does not add to it, so
+#' `~ Plate` regresses each clock on the plate alone, and not on age.
+#'
+#' `data` may carry the covariates the calculation needs, as in
+#' `data.frame(ID, Plate)` passed to `data`, with `formula = ~ Age + Plate`.
+#' It may add a column, and it may repeat a column that scoring already used.
+#' `calc_accel()` stops when a repeated column disagrees with the value
+#' scoring used.
+#'
+#' @returns A data.frame. In long form, one row for each sample and clock,
+#'   with the fitted value, an `accel_id` column that names the model, and,
+#'   when `x` holds more than one batch, `mc_batch_id`. In wide form, one row
+#'   for each sample, with one column for each clock.
+#'
+#' @seealso
+#' [score_associations()] for how each clock tracks age against a reference.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim <- sim_DNAm(clocks, n = 20, Age = TRUE, Female = TRUE)
+#' res <- calc_clocks(sim[["DNAm"]], clocks)
+#'
+#' # accel with no formula regresses each clock's score on ~ Age
+#' head(calc_accel(res, data = sim[["pheno"]]))
+#'
+#' # a formula replaces the default model, so name every term you want
+#' pheno <- sim[["pheno"]]
+#' pheno[["Plate"]] <- sample(c("P1", "P2"), nrow(pheno), replace = TRUE)
+#' head(calc_accel(res, formula = ~ Age + Plate, data = pheno))
+#'
+#' # diff with no formula is the raw difference from age, with no model fit
+#' head(calc_accel(res, type = "diff", data = sim[["pheno"]]))
+#'
+#' # diff with a formula residualizes the difference
+#' head(calc_accel(res, type = "diff", formula = ~ Age, data = sim[["pheno"]]))
+#'
 #' @export
 calc_accel <- function(
   x,
@@ -306,12 +416,14 @@ calc_accel <- function(
   ]
   need <- setdiff(vars, names(pheno))
   if (length(need)) {
-    stop(
-      sprintf(
-        "The record's pheno has no column(s) %s. Pass them via `data`.",
-        paste(need, collapse = ", ")
+    cli::cli_abort(
+      c(
+        "The {.field pheno} of {.arg x} has no {cli::qty(need)}column{?s}
+         {.val {capped_vals(need)}}.",
+        "i" = "Add {cli::qty(need)}{?it/them} to {.arg data}.",
+        "i" = "{.arg data} joins on the sample id column of {.arg x}."
       ),
-      call. = FALSE
+      call = NULL
     )
   }
   check_pheno(pheno, ID = pheno_id, extra_columns = vars, sample_id = sample_id)

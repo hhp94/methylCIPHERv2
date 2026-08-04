@@ -65,8 +65,8 @@ test_that("outside reads off the supplied interval", {
   covered <- assoc_ref("Hannum", obs, obs - 0.2, obs + 0.2)
   missed <- assoc_ref("Hannum", obs, obs + 0.1, obs + 0.3)
 
-  expect_false(score_associations(fx$result, fx$age, covered)$outside)
-  expect_true(score_associations(fx$result, fx$age, missed)$outside)
+  expect_false(assoc_report(fx$result, fx$age, covered)$outside)
+  expect_true(assoc_report(fx$result, fx$age, missed)$outside)
 })
 
 test_that("wrong_sign needs a reference strong enough to have a sign", {
@@ -78,14 +78,14 @@ test_that("wrong_sign needs a reference strong enough to have a sign", {
   # flipped but too weak for the sign to mean anything
   weak <- assoc_ref("Hannum", -sign(obs) * 0.1, NA_real_, NA_real_)
 
-  expect_true(score_associations(fx$result, fx$age, strong)$wrong_sign)
-  expect_false(score_associations(fx$result, fx$age, weak)$wrong_sign)
+  expect_true(assoc_report(fx$result, fx$age, strong)$wrong_sign)
+  expect_false(assoc_report(fx$result, fx$age, weak)$wrong_sign)
 })
 
 test_that("a reference covering nothing keeps the schema", {
   fx <- assoc_fixture()
   full <- score_associations(fx$result, age = fx$age)
-  none <- score_associations(
+  none <- assoc_report(
     fx$result,
     fx$age,
     assoc_ref("NotAClock", 0.5, 0.1, 0.9)

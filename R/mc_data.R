@@ -23,14 +23,20 @@ mc_asset <- function(group_id) {
   row
 }
 
-# "all" or a vector of known group ids
+# "all" or a vector of known group ids, deduplicated.
 mc_resolve_groups <- function(groups) {
-  if (is.null(groups) || identical(groups, "all") || !length(groups)) {
-    return(mc_external_groups())
+  # an empty selection selects nothing. "all" is the only way to say all, so a
+  # filter that came out empty can never trigger a mass download or delete.
+  if (is.null(groups) || !length(groups)) {
+    return(character(0))
   }
-  groups <- unique(as.character(groups))
-  for (g in groups) {
-    mc_asset(g)
+  # exact match, like list_clocks(tag =). no partial matching: the group set
+  # grows with each sync, so an abbreviation that works today could become
+  # ambiguous later and break calling code.
+  checkmate::assert_subset(groups, c("all", mc_external_groups()))
+  groups <- unique(groups)
+  if ("all" %in% groups) {
+    return(mc_external_groups())
   }
   groups
 }
@@ -66,8 +72,8 @@ mc_resolve_assets_dir <- function(ext_data = NULL) {
         c(
           "{.arg ext_data} should be {.code NULL} or a single assets-dir path
            (got {.cls {class(ext_data)[[1L]]}} of length {length(ext_data)}).",
-          "i" = "A loaded pack does not name a directory.",
-          "i" = "Pass a loaded pack to {.fn load_mc_assets} instead."
+          "i" = "A loaded asset does not name a directory.",
+          "i" = "Pass a loaded asset to {.fn load_mc_assets} instead."
         ),
         call = NULL
       )
@@ -86,14 +92,75 @@ mc_resolve_assets_dir <- function(ext_data = NULL) {
 }
 
 # the assets dir in effect for this session
+#' Active Assets Directory
+#'
+#' Returns the directory that this session uses for clock assets.
+#'
+#' @details
+#' The directory comes from the `mc.assets_dir` option, the `MC_ASSETS_DIR`
+#' environment variable, or the default cache directory, in that order. Set
+#' an override with [set_mc_assets_dir()].
+#'
+#' @returns A string. The absolute path to the assets directory in effect
+#'   for this session.
+#'
+#' @seealso
+#' - [set_mc_assets_dir()] to choose another directory.
+#' - [list_mc_assets()] for the assets in the directory.
+#' - [download_mc_assets()] to write the assets to disk.
+#' - [load_mc_assets()] to read the assets into memory.
+#' - [clear_mc_assets()] to delete the assets from disk.
+#'
+#' @examplesIf interactive()
+#' get_mc_assets_dir()
+#'
 #' @export
 get_mc_assets_dir <- function() {
   mc_resolve_assets_dir()
 }
 
 # set the session assets dir (NULL clears). returns previous value invisibly
+#' Assets Directory Override
+#'
+#' Sets or clears the directory this session uses for clock assets.
+#'
+#' @param path A string. The new assets directory. Default is `NULL`, which
+#'   clears the override.
+#'
+#' @details
+#' `set_mc_assets_dir()` creates the directory if it does not exist yet. It
+#' stops if the directory cannot be created or is not writable. Clearing the
+#' override falls back to the `mc.assets_dir` option, the `MC_ASSETS_DIR`
+#' environment variable, or the default cache directory, in that order.
+#'
+#' The return value restores the previous state exactly, in the manner of
+#' [setwd()]. It is the override that was in place, and it is `NULL` when no
+#' override was set. Passing `NULL` back clears the override, rather than
+#' pinning it to the directory that happened to be in effect.
+#'
+#' For the directory in effect, which is always a path, call
+#' [get_mc_assets_dir()].
+#'
+#' @returns A string. The override that was in place, returned invisibly, or
+#'   `NULL` when no override was set.
+#'
+#' @seealso
+#' - [get_mc_assets_dir()] for the directory in effect.
+#' - [list_mc_assets()] for the assets in the directory.
+#' - [download_mc_assets()] to write the assets to disk.
+#' - [load_mc_assets()] to read the assets into memory.
+#' - [clear_mc_assets()] to delete the assets from disk.
+#'
+#' @examplesIf interactive()
+#' old <- set_mc_assets_dir(tempdir())
+#' get_mc_assets_dir()
+#' set_mc_assets_dir(old)
+#'
 #' @export
 set_mc_assets_dir <- function(path = NULL) {
+  # the previous override, not the resolved dir: NULL means "no override was
+  # set", and passing it back restores that state. resolving it here would
+  # pin the option to a path it never held and shadow MC_ASSETS_DIR.
   old <- getOption("mc.assets_dir")
   if (is.null(path)) {
     options(mc.assets_dir = NULL)
@@ -112,9 +179,9 @@ set_mc_assets_dir <- function(path = NULL) {
     error = function(e) {
       cli::cli_abort(
         c(
-          "The assets dir {.path {dir}} cannot be created.
+          "The assets directory {.path {dir}} cannot be created.
            {conditionMessage(e)}.",
-          "i" = "Choose a writable path with {.fn set_mc_assets_dir}."
+          "i" = "Pass a writable path to {.arg path}."
         ),
         call = NULL
       )
@@ -123,9 +190,9 @@ set_mc_assets_dir <- function(path = NULL) {
   if (!isTRUE(unname(fs::file_access(dir, "write")))) {
     cli::cli_abort(
       c(
-        "The assets dir {.path {dir}} is not writable.",
+        "The assets directory {.path {dir}} is not writable.",
         "i" = "Check the permissions on that directory.",
-        "i" = "To use another path, call {.fn set_mc_assets_dir}."
+        "i" = "To use another path, pass it to {.arg path}."
       ),
       call = NULL
     )
@@ -156,7 +223,7 @@ mc_manifest_lines <- function(labels, sizes) {
   out <- sprintf("  %-*s  %s", w, labels[keep], cells[keep])
   n_more <- length(labels) - length(keep)
   if (n_more) {
-    out <- c(out, cli::format_inline("  and {n_more} more pack{?s}"))
+    out <- c(out, cli::format_inline("  and {n_more} more asset{?s}"))
   }
   if (length(labels) > 1L) {
     out <- c(out, sprintf("  %-*s  %s", w, "total", cells[[length(cells)]]))
@@ -212,7 +279,7 @@ mc_fetch <- function(row, dir) {
     error = function(e) {
       cli::cli_abort(
         c(
-          "The pack for {.val {row[['group_id']]}} did not download.
+          "The asset for {.val {row[['group_id']]}} did not download.
            {conditionMessage(e)}.",
           "i" = "URL: {.url {url}}",
           "i" = "Run {.fn download_mc_assets} again to retry.",
@@ -226,7 +293,7 @@ mc_fetch <- function(row, dir) {
   if (!identical(as.integer(status), 0L)) {
     cli::cli_abort(
       c(
-        "The pack for {.val {row[['group_id']]}} did not download
+        "The asset for {.val {row[['group_id']]}} did not download
          (status {status}).",
         "i" = "URL: {.url {url}}",
         "i" = "Run {.fn download_mc_assets} again to retry.",
@@ -252,7 +319,7 @@ mc_consent <- function(rows, dir, ask) {
   if (!interactive()) {
     cli::cli_abort(
       c(
-        "{length(rows)} clock-data pack{?s} cannot be downloaded in a
+        "{length(rows)} clock-data asset{?s} cannot be downloaded in a
          non-interactive session.",
         "i" = "Assets dir: {.path {dir}}",
         mc_manifest_bullets(ids, sizes),
@@ -265,12 +332,12 @@ mc_consent <- function(rows, dir, ask) {
   }
   ok <- mc_ask_yes_no(
     header = cli::format_inline(
-      "Download {length(rows)} clock-data pack{?s}:"
+      "Download {length(rows)} clock-data asset{?s}:"
     ),
     labels = ids,
     sizes = sizes,
     dir = dir,
-    question = sprintf("Download %d pack(s)?", length(rows))
+    question = sprintf("Download %d asset(s)?", length(rows))
   )
   if (!ok) {
     cli::cli_abort(
@@ -279,7 +346,7 @@ mc_consent <- function(rows, dir, ask) {
         "i" = "Run {.fn download_mc_assets} again to answer the prompt a
                second time.",
         "i" = "Or point {.arg ext_data} at a directory that holds the
-               pack{cli::qty(ids)}{?s}."
+               asset{cli::qty(ids)}{?s}."
       ),
       call = NULL
     )
@@ -288,6 +355,33 @@ mc_consent <- function(rows, dir, ask) {
 }
 
 # pre-fetch packs into the assets dir
+#' Clock Asset Downloads
+#'
+#' Downloads the clock assets for one or more groups into the assets
+#' directory.
+#'
+#' @inheritParams mc-params
+#'
+#' @details
+#' Only an asset that is missing from the assets directory is fetched.
+#' `download_mc_assets()` asks for consent before a download, refuses in a
+#' non-interactive session, and treats `ask = FALSE` as consent to proceed
+#' without asking.
+#'
+#' @returns A character vector. The path to each requested asset file, named
+#'   by group id. Returned invisibly.
+#'
+#' @seealso
+#' - [list_mc_assets()] for the assets already on disk.
+#' - [load_mc_assets()] to read the assets into memory.
+#' - [clear_mc_assets()] to delete the assets from disk.
+#' - [get_mc_assets_dir()] for the directory in effect.
+#' - [set_mc_assets_dir()] to choose another directory.
+#'
+#' @examplesIf interactive()
+#' download_mc_assets("SystemsAge")
+#' download_mc_assets("SystemsAge", ask = FALSE)
+#'
 #' @export
 download_mc_assets <- function(groups = "all", ask = TRUE) {
   checkmate::assert_flag(ask)
@@ -364,6 +458,31 @@ mc_stale_labels <- function(stale) {
 }
 
 # browsable table: what exists, how big, what is downloaded, what is reclaimable
+#' Clock Asset Inventory
+#'
+#' Lists the declared clock assets and their status in the assets
+#' directory.
+#'
+#' @inheritParams mc-params
+#'
+#' @returns A data.frame. One row for each requested group, with its clock
+#'   count, CpG count, asset size, download status, and the count and total
+#'   size of its superseded assets.
+#'
+#' @seealso
+#' - [list_clocks()] for the clocks in the catalog.
+#' - [list_clock_tags()] for the tags a `clocks` value accepts.
+#' - [clock_cpgs()] for the CpGs a set of clocks needs.
+#' - [download_mc_assets()] to write the assets to disk.
+#' - [load_mc_assets()] to read the assets into memory.
+#' - [clear_mc_assets()] to delete the assets from disk.
+#' - [get_mc_assets_dir()] for the directory in effect.
+#' - [set_mc_assets_dir()] to choose another directory.
+#'
+#' @examplesIf interactive()
+#' list_mc_assets()
+#' list_mc_assets("SystemsAge")
+#'
 #' @export
 list_mc_assets <- function(groups = "all") {
   groups <- mc_resolve_groups(groups)
@@ -437,20 +556,52 @@ mc_canonicalize_ext_data <- function(ext_data) {
   }
   cli::cli_abort(
     "{.arg ext_data} should be {.code NULL}, an assets-dir path, a loaded
-     pack, or a list of loaded packs.",
+     asset, or a list of loaded assets.",
     call = NULL
   )
 }
 
 # load packs for needed groups into memory
+#' Loaded Clock Assets
+#'
+#' Reads the assets for one or more clock groups into memory.
+#'
+#' @inheritParams mc-params
+#' @param groups A character vector. The asset groups to load. One or more of
+#'   `"PCBrainAge"`, `"PCClocks"`, `"SystemsAge"` and `"Zhang2019"`, or
+#'   `"all"` for every group. Repeated values are ignored, and an empty vector
+#'   loads nothing.
+#'
+#' @inheritSection mc-params The assets directory
+#'
+#' @details
+#' `load_mc_assets()` asks for consent before a download, refuses in a
+#' non-interactive session, and treats `ask = FALSE` as consent to proceed
+#' without asking.
+#'
+#' An asset in `ext_data` for a group that was not requested is not used, and
+#' `load_mc_assets()` warns about it.
+#'
+#' @returns A named list. It holds the loaded asset for each requested group,
+#'   in the order of `groups`.
+#'
+#' @seealso
+#' - [list_mc_assets()] for the assets already on disk.
+#' - [download_mc_assets()] to write the assets to disk.
+#' - [clear_mc_assets()] to delete the assets from disk.
+#' - [get_mc_assets_dir()] for the directory in effect.
+#' - [set_mc_assets_dir()] to choose another directory.
+#'
+#' @examplesIf interactive()
+#' assets <- load_mc_assets("SystemsAge")
+#' names(assets)
+#'
 #' @export
 load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
   checkmate::assert_flag(ask)
-  groups <- unique(as.character(groups))
-  groups <- groups[nzchar(groups)]
-  if (identical(groups, "all")) {
-    groups <- mc_external_groups()
-  }
+  # one reading of `groups` for every verb. an ordinary run asks for no external
+  # group at all, so the empty case is the common one and returns nothing.
+  groups <- mc_resolve_groups(groups)
   if (!length(groups)) {
     return(stats::setNames(list(), character(0)))
   }
@@ -464,10 +615,10 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
       if (is.null(pack)) {
         cli::cli_abort(
           c(
-            "The {.val {g}} pack is not in {.arg ext_data}.",
-            "i" = "A list of packs is a closed set, so no pack is downloaded.",
-            "i" = "Add the {.val {g}} pack to {.arg ext_data}.",
-            "i" = "Or pass an assets dir path, or {.code NULL}, to allow a
+            "The {.val {g}} asset is not in {.arg ext_data}.",
+            "i" = "A list of loaded assets is fixed, so no asset is downloaded.",
+            "i" = "Add the {.val {g}} asset to {.arg ext_data}.",
+            "i" = "Or pass an assets directory path, or {.code NULL}, to allow a
                    download."
           ),
           call = NULL
@@ -479,11 +630,11 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
     if (length(extra)) {
       cli::cli_warn(
         c(
-          "{length(extra)} pack{?s} in {.arg ext_data}
+          "{length(extra)} asset{?s} in {.arg ext_data}
            {cli::qty(extra)}{?is/are} not used:
            {.val {capped_vals(extra)}}.",
           "i" = "{.fn load_mc_assets} reads only the
-                 pack{cli::qty(extra)}{?s} for the groups you asked for.",
+                 asset{cli::qty(extra)}{?s} for the groups you asked for.",
           "i" = "Run {.fn list_mc_assets} to see the declared groups."
         ),
         call = NULL
@@ -504,9 +655,9 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
       gone <- groups[missing]
       cli::cli_abort(
         c(
-          "The {.val {gone}} pack{cli::qty(gone)}{?s}
+          "The {.val {gone}} asset{cli::qty(gone)}{?s}
            {cli::qty(gone)}{?is/are} not in {.path {dir}}.",
-          "i" = "A path in {.arg ext_data} is a closed set, so no pack is
+          "i" = "A path in {.arg ext_data} is fixed, so no asset is
                  downloaded.",
           "i" = "Put the missing file{cli::qty(gone)}{?s} in that directory.",
           "i" = "Or pass {.code ext_data = NULL} to allow a download."
@@ -531,10 +682,10 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
 mc_delete_summary <- function(n_downloaded, n_stale) {
   parts <- character(0)
   if (n_downloaded) {
-    parts <- c(parts, cli::format_inline("{n_downloaded} downloaded pack{?s}"))
+    parts <- c(parts, cli::format_inline("{n_downloaded} downloaded asset{?s}"))
   }
   if (n_stale) {
-    parts <- c(parts, cli::format_inline("{n_stale} superseded pack{?s}"))
+    parts <- c(parts, cli::format_inline("{n_stale} superseded asset{?s}"))
   }
   paste(parts, collapse = " and ")
 }
@@ -567,11 +718,39 @@ mc_consent_delete <- function(files, dir, ask, n_stale = 0L) {
     labels = labels,
     sizes = sizes,
     dir = dir,
-    question = sprintf("Delete %d pack(s)?", length(files))
+    question = sprintf("Delete %d asset(s)?", length(files))
   )
 }
 
 # remove every pack this package put in the assets dir
+#' Clock Asset Removal
+#'
+#' Deletes the clock assets for one or more groups from the assets
+#' directory.
+#'
+#' @inheritParams mc-params
+#'
+#' @details
+#' `clear_mc_assets()` removes both the currently declared assets and every
+#' superseded asset left behind by an earlier sync, for the requested groups.
+#' It asks for consent before deleting, refuses in a non-interactive
+#' session, and treats `ask = FALSE` as consent to proceed without asking.
+#' If the assets directory holds no asset for the requested groups, no file
+#' is removed.
+#'
+#' @returns A character vector. The path to each deleted asset file, returned
+#'   invisibly. Empty when no file was removed.
+#'
+#' @seealso
+#' - [list_mc_assets()] for the assets on disk and their size.
+#' - [download_mc_assets()] to write the assets to disk.
+#' - [load_mc_assets()] to read the assets into memory.
+#' - [get_mc_assets_dir()] for the directory in effect.
+#' - [set_mc_assets_dir()] to choose another directory.
+#'
+#' @examplesIf interactive()
+#' clear_mc_assets("SystemsAge")
+#'
 #' @export
 clear_mc_assets <- function(groups = "all", ask = TRUE) {
   checkmate::assert_flag(ask)
@@ -581,7 +760,7 @@ clear_mc_assets <- function(groups = "all", ask = TRUE) {
   files <- c(downloaded, stats::setNames(stale, mc_stale_labels(stale)))
   if (!length(files)) {
     cli::cli_inform(c(
-      "The assets dir {.path {dir}} holds no clock packs.",
+      "The assets directory {.path {dir}} holds no clock assets.",
       "i" = "To clear a different directory, set it with
              {.fn set_mc_assets_dir} first."
     ))

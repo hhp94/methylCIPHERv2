@@ -85,6 +85,7 @@ test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", 
 
   dir <- withr::local_tempdir()
   old <- set_mc_assets_dir(dir)
+  # the previous override, not the resolved dir: there was none
   expect_null(old)
   expect_equal(get_mc_assets_dir(), as.character(fs::path_expand(dir)))
 
@@ -102,6 +103,21 @@ test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", 
   for (bad in list(5, c("a", "b"), "", NA_character_)) {
     expect_error(set_mc_assets_dir(bad))
   }
+})
+
+test_that("the setter returns what restores the previous state exactly", {
+  # the case that separates the previous override from the resolved dir: with
+  # MC_ASSETS_DIR in charge and no option set, set-then-restore has to hand the
+  # env var back. returning the resolved path would pin the option instead.
+  withr::local_options(mc.assets_dir = NULL)
+  env_dir <- withr::local_tempdir()
+  withr::local_envvar(MC_ASSETS_DIR = env_dir)
+  expect_equal(get_mc_assets_dir(), as.character(fs::path_expand(env_dir)))
+
+  was <- set_mc_assets_dir(withr::local_tempdir())
+  expect_null(was)
+  set_mc_assets_dir(was)
+  expect_equal(get_mc_assets_dir(), as.character(fs::path_expand(env_dir)))
 })
 
 test_that("list_mc_assets() answers what exists, what is staged, what is reclaimable", {
@@ -152,7 +168,22 @@ test_that("registry lookups reject unknown ids and resolve group sets", {
   expect_error(mc_asset("NotAClockGroup"))
   expect_error(mc_resolve_groups(c("PCClocks", "Nope")))
   expect_setequal(mc_resolve_groups("all"), mc_external_groups())
-  expect_setequal(mc_resolve_groups(NULL), mc_external_groups())
+
+  # an empty selection selects nothing, so a filter that came out empty can
+  # never mean "every group" to a verb that downloads or deletes
+  expect_equal(mc_resolve_groups(NULL), character(0))
+  expect_equal(mc_resolve_groups(character(0)), character(0))
+  expect_equal(length(load_mc_assets(character(0))), 0L)
+
+  # several allowed and deduplicated, and "all" absorbs the rest
+  expect_equal(
+    mc_resolve_groups(c("PCClocks", "PCClocks")),
+    "PCClocks"
+  )
+
+  # exact match only: an abbreviation is not a group id
+  expect_error(mc_resolve_groups("Sys"))
+  expect_setequal(mc_resolve_groups(c("PCClocks", "all")), mc_external_groups())
 })
 
 test_that("load_mc_assets() refuses to fetch unprompted in a non-interactive session", {
@@ -310,7 +341,7 @@ test_that("the delete prompt counts downloaded and superseded packs apart", {
   )
 
   # non-interactive refusal is where the clear summary is observable
-  expect_error(clear_mc_assets(), "1 downloaded pack and 1 superseded pack")
+  expect_error(clear_mc_assets(), "1 downloaded asset and 1 superseded asset")
 })
 
 test_that("download -> load -> clear round trips and leaves the assets dir empty", {

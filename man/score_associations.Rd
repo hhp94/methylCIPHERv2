@@ -2,20 +2,53 @@
 % Please edit documentation in R/score_associations.R
 \name{score_associations}
 \alias{score_associations}
-\title{Stub}
+\title{Clock Age Associations}
 \usage{
-score_associations(x, age = NULL, ref = mc_clock_reference())
+score_associations(x, age = NULL)
 }
 \arguments{
-\item{x}{x}
+\item{x}{An \code{mc_result} object. The value returned by \code{\link[=calc_clocks]{calc_clocks()}}.}
 
-\item{age}{x}
-
-\item{ref}{x}
+\item{age}{A numeric vector. The age for each sample, in the same order as
+the samples in \code{x}. Default is \code{NULL}, which uses the \code{Age} column of the
+\code{pheno} in \code{x}.}
 }
 \value{
-x
+A data.frame. One row for each clock with a reference entry and
+enough samples. Columns are the clock id, the sample count, the
+observed and reference age correlations, the reference range, and the
+two flags described above.
 }
 \description{
-Rcpp needs some roxygen2 stub
+Compares each clock's observed correlation with age against a reference
+range shipped with the package.
+}
+\details{
+Each row compares a clock's observed score-age correlation with its
+reference correlation and expected range. The \code{outside} column marks a
+clock whose observed correlation falls outside that range. The
+\code{wrong_sign} column marks a clock whose observed correlation has the
+opposite sign from a reference correlation stronger than 0.3.
+
+A clock needs at least 5 samples with a finite score and age, and
+variation in both, to appear in the result. A clock with no entry in the
+shipped reference table is left out.
+
+This function recalculates any clock that depends on sample-wise
+information, such as a z-score, from all the available samples when \code{x}
+holds more than one batch. This is the same calculation as
+\code{\link[=refinalize_clocks]{refinalize_clocks()}}.
+
+Rows are ordered by the gap between the observed and the reference
+correlation, most negative first.
+}
+\examples{
+clocks <- c("Horvath1", "Hannum")
+sim <- sim_DNAm(clocks, n = 20)
+res <- calc_clocks(sim[["DNAm"]], clocks)
+score_associations(res, age = runif(20, 20, 80))
+
+}
+\seealso{
+\code{\link[=calc_accel]{calc_accel()}} for the age acceleration of each sample.
 }

@@ -7,6 +7,35 @@ random_betas <- function(cpgs, n = 10L) {
   )
 }
 
+#' Simulated Methylation Data
+#'
+#' Builds a random beta matrix and a matching `pheno` data.frame for a set of
+#' clocks.
+#'
+#' @inheritParams mc-params
+#' @param n A single whole number. The number of samples to simulate. Default
+#'   is `10`.
+#' @param Age A boolean. Adds an `Age` column to `pheno`, drawn from a
+#'   normal distribution. Default is `FALSE`.
+#' @param Female A boolean. Adds a `Female` column to `pheno`, with
+#'   about half the samples set to `1`. Default is `FALSE`.
+#' @param remove A single whole number. The number of CpGs to drop at random
+#'   from the simulated panel. Default is `0`.
+#' @param suffix A string. Appended to every sample id, so two simulated
+#'   matrices stay distinct. Default is `NULL`, which leaves the ids as
+#'   given.
+#'
+#' @inheritSection mc-params The assets directory
+#'
+#' @returns An `mc_sim` object. It holds the simulated `DNAm` matrix, the
+#'   matching `pheno` data.frame, the `clocks` argument as given, and the
+#'   `suffix`, which is `NULL` when no suffix was set.
+#'
+#' @examples
+#' sim <- sim_DNAm(c("Horvath1", "Hannum"), n = 10, Age = TRUE, Female = TRUE)
+#' dim(sim[["DNAm"]])
+#' head(sim[["pheno"]])
+#'
 #' @export
 sim_DNAm <- function(
   clocks,
@@ -61,6 +90,24 @@ sim_DNAm <- function(
 }
 
 # dnam then pheno, in the shared printer grammar (R/print.R)
+#' Print Method For An mc_sim Object
+#'
+#' Prints a compact summary of an `mc_sim` object, with a preview of `DNAm`
+#' and `pheno`.
+#'
+#' @param x An `mc_sim` object. The value returned by [sim_DNAm()].
+#' @param n A single whole number. The number of sample rows to preview from
+#'   `DNAm` and `pheno`. Default is `6`.
+#' @param p A single whole number. The number of CpG columns to preview from
+#'   `DNAm`. Default is `6`.
+#' @param ... Not used.
+#'
+#' @returns An `mc_sim` object. Returns `x`, invisibly, after printing it.
+#'
+#' @examples
+#' sim <- sim_DNAm(c("Horvath1", "Hannum"), n = 10)
+#' print(sim)
+#'
 #' @export
 print.mc_sim <- function(x, n = 6, p = 6, ...) {
   DNAm <- x[["DNAm"]]

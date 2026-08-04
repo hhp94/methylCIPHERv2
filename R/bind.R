@@ -30,12 +30,13 @@ gate_disjoint_ids <- function(recs) {
   if (length(dup)) {
     cli::cli_abort(
       c(
-        "{length(dup)} sample id{?s} appear{?s/} in more than one record:",
+        "{length(dup)} sample id{?s} appear{?s/} in more than one
+         {.cls mc_result}:",
         capped_bullets(dup, val_lines),
         "i" = "Give each batch its own sample ids before scoring.",
         "i" = "For example,
                {.code rownames(DNAm) <- paste0(rownames(DNAm), '_T1')}.",
-        "i" = "A bound record must not count one sample twice."
+        "i" = "The returned value must not count one sample twice."
       ),
       call = NULL
     )
@@ -54,7 +55,7 @@ gate_same_set <- function(recs, field, what, hint) {
     diff <- c(setdiff(ref, got), setdiff(got, ref))
     cli::cli_abort(
       c(
-        "Record {i} has different {what} from record 1:",
+        "Argument {i} has different {what} from argument 1:",
         capped_bullets(diff, val_lines),
         "i" = hint
       ),
@@ -132,12 +133,12 @@ bind_by_key <- function(recs, field, combine) {
 # say when a bound record holds one reduction per batch, not one for the cohort
 say_pending <- function(x) {
   ids <- names(x[["provenance"]][["pending"]])
-  n_batch <- length(x[["coverage"]][["per_clock"]])
+  n_batch <- n_batches(x)
   if (!length(ids) || n_batch < 2L) {
     return(invisible(NULL))
   }
   cli::cli_inform(c(
-    "!" = "This record holds {n_batch} separate values for
+    "!" = "The returned value holds {n_batch} separate values for
            {cli::qty(ids)}column{?s} {.val {ids}}, one value per batch.",
     "i" = "{cli::qty(ids)}{?This/These} score{?s} {cli::qty(ids)}{?is/are}
            computed from all the samples together, and {.fn calc_clocks}
@@ -149,6 +150,45 @@ say_pending <- function(x) {
 }
 
 # bind into one labelled union. not a re-run
+#' Combined Batches Of Scores
+#'
+#' Stacks two or more outputs from [calc_clocks()] runs into one object of
+#' multiple batches.
+#'
+#' @param ... Two or more `mc_result` objects.
+#' @param deparse.level A single whole number. Not used by this method.
+#'   Default is `1`.
+#'
+#' @details
+#' Each input must use disjoint sample ids, the same scored clocks, the
+#' same `pheno_id`, and the same `normalize` setting. `rbind()` stops when
+#' any of those differ between inputs.
+#'
+#' The combined value gets one `mc_batch_id` label for each input. A clock
+#' that depends on sample-wise information, such as a z-score, keeps the
+#' value each input calculated on its own samples. Call
+#' [refinalize_clocks()] to calculate it again from every sample in the
+#' combined value.
+#'
+#' @returns An `mc_result` object. It holds the stacked scores, `pheno`, and
+#'   `coverage` of every input, under one `mc_batch_id` label for each.
+#'
+#' @seealso
+#' - [refinalize_clocks()] for a cross-sample score recomputed after a bind.
+#' - [as.data.frame.mc_result()] for the scores as a data.frame.
+#' - [as.matrix.mc_result()] for the scores as a numeric matrix.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim1 <- sim_DNAm(clocks, n = 10)
+#' sim2 <- sim_DNAm(clocks, n = 10, suffix = "b")
+#'
+#' res1 <- calc_clocks(sim1[["DNAm"]], clocks)
+#' res2 <- calc_clocks(sim2[["DNAm"]], clocks)
+#'
+#' combined <- rbind(res1, res2)
+#' combined
+#'
 #' @export
 rbind.mc_result <- function(..., deparse.level = 1) {
   # names are dropped, not read. labels are derived
@@ -226,6 +266,45 @@ rbind.mc_result <- function(..., deparse.level = 1) {
 }
 
 # recompute cohort-reducing clocks over every sample. leaves pending so calls compose.
+#' Scores Recomputed From All Samples
+#'
+#' Recalculates every clock that depends on sample-wise information, such as
+#' a z-score, using the samples now in `x`.
+#'
+#' @inheritParams mc-params
+#'
+#' @details
+#' A clock of that kind is calculated once from every sample in a
+#' `calc_clocks()` call, not one sample at a time. After `rbind()` combines
+#' several such values, each score still holds the value its own input
+#' calculated. `refinalize_clocks()` calculates it again from every sample in
+#' `x`.
+#'
+#' `refinalize_clocks()` changes nothing, and returns `x` unchanged, when
+#' `x` holds no clock of that kind.
+#'
+#' @returns An `mc_result` object. The same as `x`, with any score that is
+#'   computed from all its samples together computed again from every
+#'   sample in `x`.
+#'
+#' @seealso
+#' - [rbind.mc_result()] for two runs combined into one object.
+#' - [as.data.frame.mc_result()] for the scores as a data.frame.
+#' - [as.matrix.mc_result()] for the scores as a numeric matrix.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim1 <- sim_DNAm(clocks, n = 10)
+#' sim2 <- sim_DNAm(clocks, n = 10, suffix = "b")
+#'
+#' res1 <- calc_clocks(sim1[["DNAm"]], clocks)
+#' res2 <- calc_clocks(sim2[["DNAm"]], clocks)
+#' combined <- rbind(res1, res2)
+#'
+#' # a no-op here, because neither Horvath1 nor Hannum is scored from all
+#' # samples together
+#' refinalize_clocks(combined)
+#'
 #' @export
 refinalize_clocks <- function(x) {
   check_mc_result(x)
@@ -234,7 +313,7 @@ refinalize_clocks <- function(x) {
     cli::cli_inform(
       c(
         "i" = "{.fn refinalize_clocks} changes only clocks that are scored
-               from all the samples together. This record has none."
+               from all the samples together. {.arg x} has none."
       )
     )
     return(invisible(x))

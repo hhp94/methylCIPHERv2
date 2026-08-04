@@ -14,10 +14,248 @@ Older dated citations in `CLAUDE.md` resolve there. Do not restate that history 
 
 ---
 
+## 2026-08-03 -- The first vignette, and why almost none of it runs
+
+`vignettes/assets.Rmd` is the package's first vignette. It documents the assets directory, the
+four-source resolution order, and the download / load / clear lifecycle.
+
+**Every block that downloads, deletes, prompts, or prints a per-machine path is `eval = FALSE`,
+with its output written out by hand.** `R CMD check` builds vignettes, and the standing invariant
+is no network at install, build, check or CRAN test. A vignette about downloading is exactly the
+document most likely to break that, so the policy is stated in `dev/WRITING.md` section 10 rather
+than left to the next author to infer. Exactly one block evaluates, a `list_clocks()` call over
+the shipped catalog, which is offline and deterministic.
+
+This is the `@examplesIf interactive()` policy in the other syntax. The two must not drift: an
+example and a vignette chunk that show the same call under different guards would be a contract
+with itself.
+
+**`vignettes/` and `README` join the R1 to R8 scope.** They were outside it only because neither
+existed. Markdown invites a chattier register than a `@details` block, so R2 and R3 are the rules
+that slip there, and section 10 says so explicitly.
+
+`DESCRIPTION` gains `VignetteBuilder: knitr` and `knitr` / `rmarkdown` under Suggests. Both are
+build-time only and neither reaches `Imports`.
+
+---
+
+## 2026-08-03 -- The finalizer set is derived, and the two batch counts are cross-checked
+
+An independent audit found `score_associations()` calling `finalized()` while the `CLAUDE.md`
+invariant named only three finalizers and its own manual said nothing. Three changes came out of
+it, and the first is the one that matters.
+
+**The finalizer set is now derived from a mechanical test, not enumerated.** A finalizer is any
+exit that takes an `mc_result` and returns something that is not one. That is checkable against any
+signature, so the set cannot drift. It drifted twice under the enumeration: `as.matrix()` was
+outside it until earlier the same day, and `score_associations()` was re-finalizing silently. The
+test also settles `rbind` without a special case -- it returns an `mc_result`, so it is not a
+finalizer, which is the same conclusion the old recursion argument reached the long way round.
+
+**The two batch counts are cross-checked rather than chosen between.** `provenance[[mc_batch_id]]`
+and `names(per_clock)` are independent derivations of "how many batches", and four sites read the
+`per_clock` one while the four exit frames read the provenance one. They agree today. `n_batches()`
+(`R/mc_result.R`) now derives the count from provenance -- authoritative, because it is the vector
+that fills the column -- and `stop()`s if `per_clock` disagrees. Every finalizer and both coverage
+frames route through it. **A record whose counts disagree is malformed, so the right behaviour is
+to stop, not to pick one.** Picking one is how a disagreement becomes wrong numbers instead of an
+error.
+
+**`finalized()` calls it before the `pending` test, deliberately.** The obvious form,
+`if (length(pending) && n_batches(x) > 1L)`, short-circuits: a record with no `pending` -- the
+common case -- never evaluates the guard, so `as.data.frame()` and `as.matrix()` accepted a
+malformed record while both coverage frames rejected it. Measured, not reasoned about: the first
+version of the test failed on exactly those two exits. The check is unconditional now.
+
+**`set_mc_assets_dir()` keeps returning the previous override, `NULL` included. The bug was the
+documentation.** The audit flagged `@returns A string.` against a function that returns
+`getOption("mc.assets_dir")`, which is `NULL` in the default state. That was first "fixed" by
+returning the resolved directory instead, and then reversed the same day, because the resolved
+value is the wrong thing for a setter to hand back.
+
+**A setter returns whatever restores the previous state exactly.** `setwd()`, `options()`, `par()`
+and Python's `ContextVar.set()` all work this way, and the property they share is that "was unset"
+survives the round trip as a distinguishable state. Resolving it away conflates *no override,
+falling through to `MC_ASSETS_DIR`* with *pinned to that path*, so restoring the return value
+silently shadows the environment variable. It also duplicates the getter: "which directory is in
+effect" is exactly what `get_mc_assets_dir()` answers, and it is always a string.
+
+So the split is the ordinary one. **The getter returns the effective value, always a path. The
+setter returns the previous override, `NULL` when there was none.** A test now pins the case that
+distinguishes them: with `MC_ASSETS_DIR` set and no option, set-then-restore must leave the
+environment variable back in charge.
+
+---
+
+## 2026-08-03 -- The `@seealso` groups, and why one generic stopped being four topics
+
+`dev/WRITING.md` section 6 banned `@seealso` outright until the groups could be decided once with
+the whole surface in view. That pass is done, and the rule is now "the groups are closed" rather
+than "never write one".
+
+**The mechanism is a set, not a per-topic judgement.** A topic's `@seealso` is the **union of the
+groups it belongs to, minus itself**. Symmetry is then true by construction, including where a
+topic is in two groups, which is the case that would otherwise rot. Five groups, 17 tagged topics,
+58 links. `list_mc_assets` is in both discovery and assets and carries the union at eight links --
+the widest list in the manual, and intended: it genuinely answers both questions.
+
+**`calc_clocks` points nowhere on purpose.** It is the entry point, every relevant topic already
+reaches it through the inherited `x` param text ("The value returned by `[calc_clocks()]`"), and a
+hub that links to everything is a table of contents in the wrong place. `sim_DNAm`, `predict_sex`
+and the three `print` methods are likewise untagged by decision, not by oversight.
+
+**Four `cite_clocks` topics became one, and that replaced a group rather than joining one.**
+`cite_clocks`, `.character`, `.mc_result` and `.default` are all `(x, ...)`, so `@rdname` merges
+them with no param collision, and `?cite_clocks` now shows all four usage lines. Co-location beats
+cross-reference here: the methods of one generic are the same verb, and a reader wants them on one
+page, not linked from four.
+
+**It also closed the footgun `WRITING.md` section 5 calls the one live risk in the donor scheme.**
+The donor's `x` is an `mc_result`, so `cite_clocks.character` had to be kept from inheriting it --
+inheritance matches on name alone and yields confidently wrong text rather than an error. Merged,
+`x` is written once, locally, covering both accepted forms. `lint_roxygen()` went from 6 rows to 0
+as a side effect, because the merge retired `cite_clocks.default`'s untyped `Any object.` /
+`Nothing.` pair and three duplicated `@returns`.
+
+**The `mc_result` methods were deliberately not merged.** `rbind.mc_result` cannot join them: a
+merged topic has one `@param ...` slot, and its `...` means "two or more mc_result objects" while
+the others mean "not used" -- a direct collision with the three fixed `...` sentences in
+`WRITING.md` section 4. `print.mc_sim` cannot merge into `sim_DNAm` either, because `n` is the
+sample count in one and the rows to display in the other. Same name, one slot, two meanings.
+
+**A closed set needs an instrument, so `lint_seealso()` joins `R/dev-utils.R`.** It catches the
+two failures nothing else does: a link whose topic does not exist, which is an `R CMD check`
+WARNING and therefore invisible until the check that is deferred to section 3 of the to-do finally
+runs, and a one-way link, which no tool has ever caught because Rd has no notion of a reciprocal
+link. Both were verified against injected faults, not just against a clean tree.
+
+---
+
+## 2026-08-03 -- A frame column keyed on a record fact, and `all_columns` as the escape hatch
+
+`clocks_coverage()` returned 17 columns and `list_clocks()` returned 10. Both now return a narrow
+default and take `all_columns = FALSE`. The two use **different mechanisms**, and that difference is
+the decision.
+
+**`clocks_coverage()` keys on a declared record fact.** Nine columns are always there --
+`clock_id`, `group_id`, `policy`, and the six `score_*` counts. Four appear only where they say
+something: `role` when the record holds a routing target, `normalizes` plus the five `norm_*`
+counts when a clock normalizes, `missing_cpgs` when a CpG is absent, and `mc_batch_id` under its
+own existing rule. Its own `@examples` block dropped from 17 columns to 9, and the nine it lost
+were all-`FALSE`, all-zero, or empty.
+
+**The norm block is not "usually" empty, it is structurally empty.** Three of 137 catalog clocks
+normalize -- `DunedinPACE` on quantile, two on `bmiq`, which is opt-in and off by default. So six
+columns and a flag were dead weight in nearly every run the package will ever serve.
+
+**The precedent that decides the mechanism is `samples_coverage()`, which was already conditional
+in the row direction.** A `panel = "norm"` row exists only when the clock normalizes. Keying the
+`clocks_coverage()` columns on the same fact makes the two frames agree about when the norm axis
+exists, instead of one frame being conditional and its neighbour always-on. `samples_coverage()`
+itself is untouched and gets no `all_columns`: it has nothing to drop, and a no-op argument for
+symmetry is worse than the asymmetry. Its `panel` column stays even when constant, because
+dropping it would change the row key from (sample, clock, panel) to (sample, clock).
+
+**`normalizes` travels with the block it describes rather than staying always-on.** `CLAUDE.md`
+calls it the one declared panel fact and forbids re-deriving it from `norm_needed`. That still
+holds: the column is present whenever the answer is non-trivial, and where it is absent the fact
+is simply that nothing normalized. No reader is pushed toward the derivation the rule bans.
+
+**`list_clocks()` cannot use the same mechanism, so it gets a fixed set.** Its content depends on
+the user's filter, not on a declared fact, and a generic "drop the constant columns" rule would
+delete `group_id` from `list_clocks(pattern = "^Horvath")`. The default is `clock_id`, `group_id`,
+`request_as`, `covariates`, `external`, `tags`. `callable` goes because it is **exactly**
+`request_as == clock_id` -- measured, both split the same 14 of 137 rows, and there is now a test
+asserting the identity rather than a comment claiming it. `group_size` goes because the frame
+already carries what it counts, `batch_dependent` and `normalize` because they are set on 2 and 3
+of 137 rows.
+
+**The flag does not touch `mc_batch_id`, deliberately.** Folding it in would give one uniform story,
+but `as.data.frame()` and `calc_accel()` have no such flag, so `all_columns = TRUE` on a
+single-batch record would make the coverage frames carry a join key the other two exits do not.
+That reopens the four-exits-together rule of 2026-08-03 to solve a cosmetic problem. The batch
+label keeps its own gate.
+
+**The cost is accepted, not overlooked.** A conditional column means `cov[["norm_needed"]]` returns
+`NULL` rather than erroring, which is the silent-`NULL` hazard this package bans `$` over. This is
+the second and third such axis after `mc_batch_id`. `all_columns = TRUE` exists precisely so code
+that names a column directly has a fixed schema to name it in, and both `@details` sections say so.
+
+---
+
+## 2026-08-03 -- An empty `groups` selects nothing, and `"all"` is the only way to say all
+
+`mc_resolve_groups(NULL)` and `mc_resolve_groups(character(0))` used to return **every** external
+group. They now return `character(0)`, and `load_mc_assets()` routes through the same function
+instead of normalizing `groups` itself.
+
+**The two readings were already in conflict, in one file.** `pack_groups_needed()` returns
+`character(0)` on any run that requests no external clock, which is the ordinary case, so
+`load_mc_assets(character(0))` had to mean "load nothing" and did. `mc_resolve_groups(character(0))`
+meant "every group". The same value meant opposite things eight functions apart, and the obvious
+future cleanup -- route `load_mc_assets()` through `mc_resolve_groups()` -- would have made every
+`calc_clocks("Hannum")` call try to download all four asset groups. That cleanup is now done, and
+it is safe because the semantics were unified first.
+
+**The failure modes are asymmetric, which decides the direction.** These verbs download hundreds of
+megabytes and delete files. `clear_mc_assets(x)` where `x` came out of a filter that matched nothing
+deleted the entire assets directory under the old rule. Empty-means-nothing fails as a no-op that
+the caller notices immediately and harmlessly; empty-means-everything fails expensively and
+silently. Nothing is lost, because the default is already `"all"` -- a caller who wants every group
+omits the argument or spells it.
+
+`NULL` is folded into the same rule rather than kept as "unspecified". With a default of `"all"`,
+`NULL` never arrives from omission, so it is always either an explicit choice or a computed value
+that came out empty, and the computed case is the one worth protecting.
+
+**The validation is `checkmate::assert_subset()`, not `match.arg(several.ok = TRUE)`.** This was
+tried both ways. Measured, `match.arg(several.ok = TRUE)` on these choices:
+
+- `character(0)` errors, which is the one property it has that we wanted;
+- `NULL` returns `choices[1L]` silently, which here is `"all"` -- exactly the mass-download
+  behavior this entry removes, reintroduced through a back door;
+- `c("SystemsAge", "Nope")` returns `"SystemsAge"`. It only errors when **every** element fails,
+  so a typo beside a valid group is dropped without a word;
+- it does not deduplicate.
+
+So it gives one of the four properties and silently breaks two. `assert_subset()` gives exact
+matching, an error naming both the bad element and the valid set, and `empty.ok` as an explicit
+flag, and it is what `list_clocks(tag =)` already uses for the same shape of argument.
+
+Partial matching is dropped with it, deliberately. The group set grows with each sync, so an
+abbreviation that resolves today can become ambiguous later and break calling code that worked.
+That is the same reasoning behind the blanket `$` ban in `CLAUDE.md`: a convenience that resolves
+silently to something the caller did not name.
+
+## 2026-08-03 -- `as.matrix()` is a finalizer, and a finalizer is defined by the exit
+
+`as.matrix.mc_result()` was `x[["scores"]]` and nothing else. It now calls `finalized()` like
+`as.data.frame()` and `calc_accel()` do.
+
+Found while documenting the method, not while testing it: writing the `@details` paragraph meant
+claiming what the function does with `pending`, and the claim was not true of this one.
+
+**The rule was drawn at the wrong place.** The old set was "the two exits that return a frame",
+which is a fact about the return type and has nothing to do with why re-finalizing is necessary.
+The reason is that the caller is leaving the `mc_result` structure: `pending` lives in
+`$provenance`, a bare matrix has nowhere to carry it, and the value cannot be recovered from. That
+is equally true of `as.matrix()`. So the definition is now **any exit that leaves the S3
+structure**, and the frame-vs-matrix distinction is not part of it.
+
+The bug this closes is small but real: on a multi-batch record holding a non-empty `pending`,
+`as.matrix(res)` and `as.data.frame(res)` returned **different numbers** for the same clock, and
+neither said anything. Both now reduce over every sample and both announce it under
+`say_pending()`'s unchanged guard.
+
+`rbind` is still excluded, for its own unchanged reason: it recurses under `do.call()`, and it
+hands back an `mc_result` rather than leaving the structure at all.
+
 ## 2026-08-03 -- The public message surface: audience, not transport, and one English
 
 Four agents audited all 70 user-visible message sites against a proposed rule set. 11 were clean.
-The rules and the per-site evidence are in `dev/cli-audit.md` and `dev/cli-audit/` (local only).
+The rules and the per-site evidence were in `dev/cli-audit.md` and `dev/cli-audit/` (local only).
+`dev/cli-audit.md` was retired on 2026-08-03, once the rules it argued for became `CLAUDE.md`
+invariants and `dev/WRITING.md`. Only the four per-site part files remain.
 `CLAUDE.md` now carries R1 to R7; this entry records the reversals and the things that will be
 second-guessed.
 

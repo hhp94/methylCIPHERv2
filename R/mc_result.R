@@ -20,6 +20,29 @@ is_multi_batch <- function(batch) {
   length(unique(batch)) > 1L
 }
 
+# how many batches the record spans. the per-sample provenance vector is
+# authoritative -- it is the vector that fills mc_batch_id -- and per_clock
+# must agree with it. a disagreement means the record was assembled wrong, so
+# it stops rather than silently picking one of the two counts.
+n_batches <- function(x) {
+  n <- length(unique(x[["provenance"]][[MC_BATCH]]))
+  n_cov <- length(x[["coverage"]][["per_clock"]])
+  if (n != n_cov) {
+    stop(
+      sprintf(
+        paste0(
+          "mc_result batch count disagrees: provenance has %d, coverage has ",
+          "%d. This is a package bug -- please report it."
+        ),
+        n,
+        n_cov
+      ),
+      call. = FALSE
+    )
+  }
+  n
+}
+
 # drop the batch column when it is a single repeated hash.
 drop_single_batch <- function(df, batch) {
   if (is_multi_batch(batch)) {
@@ -121,6 +144,29 @@ construct_mc_result <- function(
 }
 
 # scores then pheno, in the shared printer grammar (R/print.R)
+#' Print Method For An mc_result Object
+#'
+#' Prints the scores and the `pheno` table for an `mc_result` object.
+#'
+#' @inheritParams mc-params
+#' @param n A single whole number. The number of sample rows to print.
+#'   Default is `6`.
+#' @param p A single whole number. The number of clock columns to print for
+#'   the scores table. Default is `6`.
+#' @param ... Not used.
+#'
+#' @details
+#' The output lists batch labels only when `x` spans more than one
+#' `mc_batch_id`.
+#'
+#' @returns An `mc_result` object. Returns `x`, invisibly, after printing it.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim <- sim_DNAm(clocks, n = 20)
+#' res <- calc_clocks(sim[["DNAm"]], clocks)
+#' print(res, n = 3, p = 2)
+#'
 #' @export
 print.mc_result <- function(x, n = 6, p = 6, ...) {
   scores <- x[["scores"]]
@@ -165,7 +211,36 @@ print.mc_result <- function(x, n = 6, p = 6, ...) {
 }
 
 # naked scores (coverage and provenance stay on the record)
+#' Matrix Method For An mc_result Object
+#'
+#' Converts the [calc_clocks()] output to a matrix containing just the clocks.
+#'
+#' @inheritParams mc-params
+#' @param ... Not used.
+#'
+#' @details
+#' This function recalculates any clock that depends on sample-wise
+#' information, such as a z-score, from all the available samples when `x`
+#' holds more than one batch. This is the same calculation as
+#' [refinalize_clocks()].
+#'
+#' @returns A numeric matrix. The scores, with samples in the rows and
+#'   clocks in the columns.
+#'
+#' @seealso
+#' - [as.data.frame.mc_result()] for the scores as a data.frame.
+#' - [rbind.mc_result()] for two runs combined into one object.
+#' - [refinalize_clocks()] for a cross-sample score recomputed after a bind.
+#'
+#' @examples
+#' clocks <- c("Horvath1", "Hannum")
+#' sim <- sim_DNAm(clocks, n = 10)
+#' res <- calc_clocks(sim[["DNAm"]], clocks)
+#' as.matrix(res)
+#'
 #' @export
 as.matrix.mc_result <- function(x, ...) {
-  x[["scores"]]
+  check_mc_result(x)
+  # a finalizer: the matrix cannot carry `pending`, so resolve it on the way out
+  finalized(x)[["scores"]]
 }

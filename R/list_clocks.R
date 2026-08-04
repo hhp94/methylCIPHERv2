@@ -1,15 +1,78 @@
 # browsable catalog menu for the clocks= argument
 
+# the default menu. callable is out because it is exactly
+# request_as != clock_id, group_size because the frame already carries it,
+# batch_dependent and normalize because 2 and 3 of 137 clocks set them.
+LIST_CLOCKS_DEFAULT_COLS <- c(
+  "clock_id",
+  "group_id",
+  "request_as",
+  "covariates",
+  "external",
+  "tags"
+)
+
 # token a user should pass to get this clock (alias for routed members)
 request_token <- function(clock_id, alias) {
   ifelse(clock_id %in% names(alias), alias[clock_id], clock_id)
 }
 
+#' Epigenetic Clock Catalog
+#'
+#' Lists the clocks in the catalog, with the group, tags, and token to
+#' request each one.
+#'
+#' @param group A character vector. Keeps only the clocks in these groups.
+#'   Default is `NULL`, which keeps every group.
+#' @param tag A character vector. Keeps only the clocks that carry one of
+#'   these tags. Default is `NULL`, which applies no tag filter.
+#' @param pattern A string. A regular expression matched against the clock id
+#'   and the group id. Default is `NULL`, which applies no pattern filter.
+#' @inheritParams mc-params
+#'
+#' @details
+#' Valid values for `tag` are the names of [list_clock_tags()].
+#'
+#' `request_as` names the token to pass to `clocks` in [calc_clocks()]. It
+#' differs from `clock_id` for a clock that only another clock can request.
+#' `covariates` names the [calc_clocks()] `pheno` columns a clock needs, and
+#' `external` is `TRUE` for a clock whose weights are a download.
+#'
+#' `all_columns = TRUE` adds four more columns.
+#'
+#' - `callable` is `FALSE` for a clock that only another clock can request.
+#' - `group_size` counts the callable clocks a group token expands to.
+#' - `batch_dependent` is `TRUE` for a clock whose score depends on the other
+#'   samples scored with it.
+#' - `normalize` names the background normalization a clock gets, and is
+#'   empty for a clock that gets none. `"bmiq"` is optional, and you turn it
+#'   on with the `normalize` argument of [calc_clocks()]. `"quantile"` is
+#'   part of the clock's definition and is always applied.
+#'
+#' @returns A data.frame. One row for each clock in the catalog, including a
+#'   clock that scores only as part of another clock.
+#'
+#' @seealso
+#' - [list_clock_tags()] for the tags a `tag` value accepts.
+#' - [clock_cpgs()] for the CpGs a set of clocks needs.
+#' - [list_mc_assets()] for the assets an external clock needs.
+#'
+#' @examples
+#' list_clocks(pattern = "^Horvath")
+#' nrow(list_clocks(tag = "mortality"))
+#' list_clocks(group = "Dunedin", all_columns = TRUE)
+#'
 #' @export
-list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
+list_clocks <- function(
+  group = NULL,
+  tag = NULL,
+  pattern = NULL,
+  all_columns = FALSE
+) {
   checkmate::assert_character(group, null.ok = TRUE, any.missing = FALSE)
   checkmate::assert_subset(tag, names(MC_TAGS), empty.ok = TRUE)
   checkmate::assert_string(pattern, null.ok = TRUE)
+  checkmate::assert_flag(all_columns)
 
   routed <- sex_routed_members()
   idx <- mc_index
@@ -32,6 +95,16 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
     ),
     external = idx[["external_group"]],
     batch_dependent = idx[["batch_dependent"]],
+    # the scheme actually applied, so a declared but inexpressible one reads ""
+    normalize = vapply(
+      idx[["clock_id"]],
+      function(id) {
+        scheme <- clock_norm_scheme(id)
+        if (scheme %in% NORM_SCHEMES) scheme else ""
+      },
+      character(1L),
+      USE.NAMES = FALSE
+    ),
     stringsAsFactors = FALSE,
     row.names = NULL
   )
@@ -93,5 +166,8 @@ list_clocks <- function(group = NULL, tag = NULL, pattern = NULL) {
 
   out <- out[order(out[["group_id"]], out[["clock_id"]]), , drop = FALSE]
   row.names(out) <- NULL
-  out
+  if (all_columns) {
+    return(out)
+  }
+  out[, LIST_CLOCKS_DEFAULT_COLS, drop = FALSE]
 }

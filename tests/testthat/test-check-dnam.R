@@ -37,7 +37,11 @@ test_that("a suffix is found even when few columns carry one", {
 test_that("unsuffixed arrays and underscored non-CpG probes stay quiet", {
   # the Retroelement panels carry ch... ids with underscores that are not
   # replicate addresses
-  ids <- c(cpg_ids(20), "ch.13.39564907R_II_R_O_37491", "ch.2.30415474F_II_F_O_37488")
+  ids <- c(
+    cpg_ids(20),
+    "ch.13.39564907R_II_R_O_37491",
+    "ch.2.30415474F_II_F_O_37488"
+  )
   expect_silent(check_DNAm(random_betas(ids, n = 20)))
 })
 

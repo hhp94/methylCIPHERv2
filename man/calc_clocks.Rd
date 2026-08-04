@@ -2,7 +2,7 @@
 % Please edit documentation in R/calc_clocks.R
 \name{calc_clocks}
 \alias{calc_clocks}
-\title{Stub}
+\title{Epigenetic Clock Scores}
 \usage{
 calc_clocks(
   DNAm,
@@ -17,27 +17,82 @@ calc_clocks(
 )
 }
 \arguments{
-\item{DNAm}{x}
+\item{DNAm}{A numeric matrix. The methylation beta values, with samples in
+the rows and CpGs in the columns.}
 
-\item{clocks}{x}
+\item{clocks}{A character vector. The clocks to score, named by clock id,
+group id, or tag.}
 
-\item{pheno}{x}
+\item{pheno}{A data.frame. The sample metadata, with one row for each
+sample. Default is \code{NULL}.}
 
-\item{pheno_id}{x}
+\item{pheno_id}{A string. The name of the column in \code{pheno} that holds the
+sample ids. Default is \code{"ID"}.}
 
-\item{min_clocks_coverage}{x}
+\item{min_clocks_coverage}{A number between 0 and 1. The smallest fraction
+of a clock's CpGs that must be present for that clock to score. Default is
+\code{0.75}.}
 
-\item{min_samples_coverage}{x}
+\item{min_samples_coverage}{A number between 0 and 1. The smallest fraction
+of a clock's CpGs that must be present for a sample to score without a
+warning. Default is \code{0.75}.}
 
-\item{normalize}{x}
+\item{normalize}{A named logical vector. Turns background normalization on
+for the clocks that support it. Default is \code{NULL}, which leaves the
+optional schemes off.}
 
-\item{ext_data}{x}
+\item{ext_data}{A string. The path to the directory that holds the clock
+assets. Default is \code{NULL}, which uses the assets directory.}
 
-\item{ask}{x}
+\item{ask}{A boolean. Asks for consent before a download or a delete.
+Default is \code{TRUE}. Pass \code{FALSE} to download or delete without asking, in
+a non-interactive session.}
 }
 \value{
-x
+An \code{mc_result} object. It holds the scores, the narrowed \code{pheno},
+the coverage counts, and the provenance of the run.
 }
 \description{
-Rcpp needs some roxygen2 stub
+Scores CpG-based epigenetic clocks on a matrix of methylation beta values.
+}
+\details{
+\code{list_clocks(all_columns = TRUE)} names every supported scheme, in its
+\code{normalize} column.
+\code{\link[=list_clocks]{list_clocks()}} and \code{\link[=list_clock_tags]{list_clock_tags()}} show every value \code{clocks} accepts.
+
+The two coverage arguments differ. \code{calc_clocks()} stops when a clock has
+too few CpGs present, so every clock in the returned scores passed
+\code{min_clocks_coverage}. A sample with too few CpGs present raises a warning
+and still scores. Pass the returned value to \code{\link[=clocks_coverage]{clocks_coverage()}} or
+\code{\link[=samples_coverage]{samples_coverage()}} to see the counts.
+
+\code{calc_clocks()} narrows \code{pheno} before it stores it. The returned value
+keeps the id column and the covariates that the clocks need, and drops the
+other columns.
+}
+\section{The assets directory}{
+
+Four clock groups keep their weights in downloadable assets, outside the
+package. \code{ext_data} says where to read them from, and accepts three forms.
+\itemize{
+\item \code{NULL} reads from the assets directory, and downloads any asset that is
+missing. Use \code{\link[=set_mc_assets_dir]{set_mc_assets_dir()}} to choose that directory.
+\item A path reads only that directory, and never downloads. A missing asset
+is an error.
+\item Assets already in memory from \code{\link[=load_mc_assets]{load_mc_assets()}} are used directly.
+}
+}
+
+\examples{
+clocks <- c("Horvath1", "Hannum")
+sim <- sim_DNAm(clocks, n = 20)
+
+res <- calc_clocks(sim[["DNAm"]], clocks)
+res
+
+# pheno is narrowed to the id column and the covariates the clocks need
+pheno <- data.frame(ID = rownames(sim[["DNAm"]]), Age = runif(20, 20, 80))
+res <- calc_clocks(sim[["DNAm"]], clocks, pheno = pheno)
+head(res[["pheno"]])
+
 }
