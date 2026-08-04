@@ -89,11 +89,11 @@ set_mc_assets_dir(old)
 list_mc_assets()
 ```
 
-The function `clear_mc_assets()` delete the downloaded assets with confirmation. `vignette("assets")` covers the assets directory and the advanced path settings.
+The function `clear_mc_assets()` deletes the downloaded assets, also with confirmation. `vignette("assets")` covers the assets directory and the advanced path settings.
 
 ### Calculate Epigenetic Clocks
 
-We simulate some data with the two kinds of missing data: CpGs that are absent altogether, and CpGs that are present but missing in some samples.
+Start from simulated data, carrying the two kinds of missing data: CpGs that are absent altogether, and CpGs that are present but missing in some samples.
 
 ```{r}
 set.seed(1)
@@ -114,7 +114,7 @@ sum(is.na(sim[["DNAm"]]))
 
 The two kinds of missingness are handled differently. A CpG that is absent altogether is either filled from a reference value that ships with the clock, or dropped. The `policy` column of `clocks_coverage()` says which one a clock uses. A CpG that is present but missing in some samples is imputed from the samples that do have it.
 
-Some clocks need a `Female` covariate, which the `covariates` column of `list_clocks()` marks. `predict_sex()` scores the two `DNAmSex_Wang` scores and returns a predicted sex for every sample. When `pheno` does carry `Female`, `predict_sex()` also returns `recorded_sex` and `sex_mismatch`, and reports how many samples disagree.
+Some clocks need a `Female` covariate, which the `covariates` column of `list_clocks()` marks. `predict_sex()` scores the two `DNAmSex_Wang` clocks and returns a predicted sex for every sample. When `pheno` does carry `Female`, `predict_sex()` also returns `recorded_sex` and `sex_mismatch`, and reports how many samples disagree.
 
 ```{r}
 sex_sim <- sim_DNAm(
@@ -168,7 +168,7 @@ Many factors affect the validity of a calculated clock. The most important is mi
 
 ```{r}
 cov <- clocks_coverage(res, all_columns = TRUE)
-cov[setdiff(names(cov), grepv("missing_cpgs|norm|role", names(cov)))]
+cov[setdiff(names(cov), grep("missing_cpgs|norm|role", names(cov), value = TRUE))]
 ```
 
 `Horvath1` uses the `omit` policy, so the 10 absent CpGs were dropped rather than filled, and the 20 missing values landed on 19 distinct CpGs that were imputed.

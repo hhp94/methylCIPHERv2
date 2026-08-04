@@ -105,15 +105,15 @@ list_mc_assets()
 #> 4  Zhang2019        1 319607  5.02M       TRUE          0               0
 ```
 
-The function `clear_mc_assets()` delete the downloaded assets with
-confirmation. `vignette("assets")` covers the assets directory and the
-advanced path settings.
+The function `clear_mc_assets()` deletes the downloaded assets, also
+with confirmation. `vignette("assets")` covers the assets directory and
+the advanced path settings.
 
 ### Calculate Epigenetic Clocks
 
-We simulate some data with the two kinds of missing data: CpGs that are
-absent altogether, and CpGs that are present but missing in some
-samples.
+Start from simulated data, carrying the two kinds of missing data: CpGs
+that are absent altogether, and CpGs that are present but missing in
+some samples.
 
 ``` r
 set.seed(1)
@@ -161,7 +161,7 @@ samples is imputed from the samples that do have it.
 
 Some clocks need a `Female` covariate, which the `covariates` column of
 `list_clocks()` marks. `predict_sex()` scores the two `DNAmSex_Wang`
-scores and returns a predicted sex for every sample. When `pheno` does
+clocks and returns a predicted sex for every sample. When `pheno` does
 carry `Female`, `predict_sex()` also returns `recorded_sex` and
 `sex_mismatch`, and reports how many samples disagree.
 
@@ -298,7 +298,7 @@ width).
 
 ``` r
 cov <- clocks_coverage(res, all_columns = TRUE)
-cov[setdiff(names(cov), grepv("missing_cpgs|norm|role", names(cov)))]
+cov[setdiff(names(cov), grep("missing_cpgs|norm|role", names(cov), value = TRUE))]
 #>   clock_id group_id policy score_needed score_present score_used
 #> 1 Horvath1 Horvath1   omit          353           343        343
 #>   score_imputed_partial score_imputed_full score_dropped
