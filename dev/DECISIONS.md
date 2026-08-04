@@ -14,6 +14,131 @@ Older dated citations in `CLAUDE.md` resolve there. Do not restate that history 
 
 ---
 
+## 2026-08-04 -- The prose files split from one rule set into two, and stop being hard-wrapped
+
+`dev/WRITING.md` section 10 governed `vignettes/*.Rmd` and `README` with a single rule set. Writing
+the README exposed three things wrong with it. The detail is in that file. What matters here is
+why each changed.
+
+**The build split is the load-bearing correction.** The old section said an evaluated chunk "must
+run offline, with no asset", derived from `R CMD check` building vignettes with no network. That
+premise is true of vignettes and **false of `README.Rmd`, which is `.Rbuildignore`d** and is
+rendered by the maintainer alone. Nothing on CRAN executes it. Applied as written the rule would
+have forbidden the README that now exists, which scores `SystemsAge` against a staged asset and
+shows the coverage record doing real work. The cost is that rendering `README.md` needs the assets
+staged, so a collaborator with an empty assets directory cannot rebuild it. Accepted: the
+alternative is a README that cannot show the package's most interesting output. `README.md` itself
+is **not** ignored and does ship, so what lands in it is still held to the rules.
+
+**Prose is no longer hard-wrapped in those two files.** One paragraph is one source line and the
+editor soft-wraps. A hard-wrapped paragraph reflows on any edit, so changing one word rewrites five
+lines and the real change is lost in the diff. Code blocks stay at 80 columns, because that text is
+read as code and nothing reflows it. Scoped to `README.Rmd` and `vignettes/*.Rmd`. **`dev/` docs,
+including `WRITING.md` itself, stay hard-wrapped.**
+
+**ASCII binds the author, not the run.** The rule was stated as though it covered the whole file,
+which is unachievable: cli emits its own symbols and captured chunk output carries them. Suppressing
+them with `options(cli.unicode = FALSE)` was tried in `README.Rmd` and then removed, because it made
+the rendered output disagree with the reader's own console, which is the one thing pasted output
+exists to demonstrate. So: never hand-write a non-ASCII character, and leave cli's alone. Pandoc is
+the third case and needed a fix rather than a rule, since its `smart` extension manufactures curly
+apostrophes out of ASCII input. `README.Rmd` disables it with `md_extensions: -smart`.
+
+**`CLAUDE.md` gains an invariant making the read mandatory before any user-facing text is edited**,
+widened from the roxygen-only wording it had. The roxygen bullet no longer restates it.
+
+---
+
+## 2026-08-04 -- The assets dir stays `"cache"`, and the CRAN claim that justified it was false
+
+Two separate things, and the first is why this entry exists at all. The rule does not change. Its
+justification was wrong, and it was wrong in the direction that forbids a legal option.
+
+**The policy claim was false.** `CLAUDE.md` said the dir must "never" be `which = "data"`, and
+`DECISIONS.old.md` (2026-07-24, section 5) called such a change "a policy violation". Re-fetched
+from <https://cran.r-project.org/web/packages/policies.html> on 2026-08-04, verbatim and unchanged:
+
+> For R version 4.0 or later (hence a version dependency is required or only conditional use is
+> possible), packages may store user-specific data, configuration and cache files in their
+> respective user directories obtained from `tools::R_user_dir()`, provided that by default sizes
+> are kept as small as possible and the contents are actively managed (including removing outdated
+> material).
+
+All three of data, configuration and cache are permitted. Two consequences. The "actively managed"
+clause attaches to all three equally, so it is **not** evidence for `"cache"` over `"data"` --
+`clear_mc_assets()` is required either way and stays exactly as it is. And "sizes kept as small as
+possible" is satisfied by the consent design, not by the directory: nothing downloads unprompted,
+so the default size is 0 bytes everywhere. Neither condition discriminates. The archive is not
+edited, so this entry is the correction.
+
+**The sizes that framed the question were wrong by roughly 9x.** The corpus is 43.0 MB total
+(SystemsAge 22.5, PCClocks 8.9, PCBrainAge 6.7, Zhang2019 5.0), not the "several hundred megabytes"
+the question was posed against. That figure came from the hand-written example output in
+`vignettes/assets.Rmd`, which shows about 402 MB and does not match what `list_mc_assets()` returns.
+Recorded because it moved the argument: at 43 MB a re-download is cheap, which weakens the
+durability case that was the only case for `"data"`.
+
+**The decision: keep `"cache"`, on platform merits.** Both are legal, so this is a trade-off, and it
+is genuine rather than a clear win.
+
+- Windows is where the hard failure lives. `"data"` is `%APPDATA%`, the roaming half of the profile:
+  under a roaming profile it is copied across the LAN at every logon and logoff, and under Folder
+  Redirection it lives on a network share so every read during scoring is SMB traffic. Roaming
+  quotas around 100 MB are common and 43 MB spends a large slice of one. `"cache"` is
+  `%LOCALAPPDATA%`, which never roams and which Storage Sense and Disk Cleanup do not touch.
+- macOS is where the soft failure lives. `~/Library/Caches` is Apple's discardable location, sits
+  in Time Machine's default exclusions, and is what third-party cleaners target. But there is no
+  scheduled purge, and the cost when it happens is one consented re-download of at most 43 MB.
+- **Severity is asymmetric, and that decides it.** The `"cache"` cost is consented, one-shot and
+  user-initiated. The `"data"` cost on institutional Windows is unconsented, recurring, and paid by
+  users who may never score an external clock again.
+- A re-download is already routine anyway. Filenames are content-addressed, so every sync that moves
+  a `payload_hash` orphans the old pack and every user re-fetches that group. A purge is the same
+  event the normal lifecycle already produces; `"data"` would only make it rarer, not novel.
+
+**Durability is `MC_ASSETS_DIR` / `set_mc_assets_dir()`, and the vignette must sell them on that.**
+It currently sells them on control. This is the third option from the to-do item, taken deliberately:
+the genuinely offline case -- air-gapped node, no-egress cluster -- is already told to use
+`ext_data = <path>`, so it is not on the default dir at all. The default's durability matters least
+exactly where the offline risk is worst.
+
+**Precedent, measured rather than recalled.** On a machine with both installed,
+`BiocFileCache::getBFCOption("CACHE")` and `ExperimentHub::getExperimentHubOption("CACHE")` both
+resolve under `R_user_dir(..., "cache")`, and ExperimentHub was holding 1.9 GB there -- 45x this
+package's whole corpus. Those are the two general-purpose data caches of the Bioconductor stack,
+which is the stack this package's users already run. R's own `R_LIBS_USER` is under `%LOCALAPPDATA%`
+on Windows too.
+
+**`torch` is the one CRAN precedent that does otherwise, and it does not transfer.** `inst_path()`
+reads `TORCH_HOME`, else falls back to `system.file("", package = "torch")` -- it writes into its own
+installed package directory and never calls `R_user_dir`. That is dictated by dynamic linking:
+libtorch is shared libraries the loader must find next to the package's compiled code. Our payload
+is a `qs2` file read at runtime, with no linking and no loader. Copying torch here would put 43 MB
+somewhere `update.packages()` destroys, which is worse durability than the `~/Library/Caches` risk
+that opened the question, and it breaks outright on a read-only system library.
+
+**The migration question is dissolved rather than answered.** It only existed if the directory moved.
+Nothing moves, no user's assets go invisible, and no detection-or-migrate code gets written.
+
+**A platform-conditional default was considered and rejected.** It buys the macOS property at the
+cost of a default path that differs by OS for reasons the user cannot see, plus a branch in code
+that has none, to protect 43 MB that re-downloads on request.
+
+**`piggyback` was evaluated here and is orthogonal.** It says nothing about which directory --
+`pb_download(dest = ".")` writes to the working directory and takes the destination as an argument.
+It is also rejected for the runtime download path in `R/`, on four counts: it adds `gh`, `httr`
+(superseded), `jsonlite`, `glue`, `lubridate` and `memoise` to a package pitched as a closed
+self-contained contract; it replaces an unauthenticated CDN GET with a **GitHub API** call, and the
+anonymous API allows 60 requests/hour **per IP**, which is shared across an institutional NAT or an
+HPC login node; its model is list-the-release-then-find-the-file, a search where `mc_asset_url()`
+resolves a declared `release_tag` + `file` pointer, against the standing accessor rule; and its
+`overwrite = TRUE` / `use_timestamps` defaults are built for mutable filenames, while it offers no
+checksum, so it would cost the staged `.part` download, `validate_checksum` and atomic rename that
+`mc_fetch()` already has. Where it may still pay off is the maintainer-side upload half -- see the
+to-do item.
+
+---
+
 ## 2026-08-03 -- The first vignette, and why almost none of it runs
 
 `vignettes/assets.Rmd` is the package's first vignette. It documents the assets directory, the

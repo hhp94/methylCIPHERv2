@@ -385,22 +385,97 @@ is the one with the most live breaches**, and no linter catches it, so give it t
 
 ## 10. The prose files: vignettes and README
 
-`vignettes/*.Rmd` and `README` are public-facing text. R1 to R8 bind them in full, and so does
-the ASCII rule. Everything below is in addition.
+`vignettes/*.Rmd` and `README.Rmd` are public-facing text. R1 to R8 bind them in full. Everything
+below is in addition.
 
-- **A chunk that needs the network, writes to disk, deletes, prompts, or prints a per-machine
-  path is `eval = FALSE`, with its output written out by hand below the call.** `R CMD check`
-  builds vignettes, and the package builds with no network. This is the same policy as
-  `@examplesIf interactive()` and it is not negotiable.
-- **A chunk that does evaluate must run offline, with no asset and no staged cohort.** Read the
-  shipped catalog, or build inputs with `sim_DNAm()` and bundled clocks only. The same clock list
-  as the examples: `Horvath1` and `Hannum` are safe, the four external groups are not.
-- **Say what the reader does, not what the package does internally.** A vignette is the one place
-  where the pull toward internal vocabulary is strongest, because the mechanism is interesting.
-  R8 still applies: it is an **asset**, never a pack, and there is no "closed set".
-- **Verify a printed output before you paste it.** A hand-written `#>` block is a claim about
-  behaviour and rots exactly like a `@details` sentence. Run the call once, then paste.
-- Knit before committing: `knitr::knit("vignettes/x.Rmd", output = tempfile())` after
-  `devtools::load_all()`. It catches a chunk that should have been `eval = FALSE` by failing.
+### The two files are not built the same way, and that sets most of the rules
 
-Current files: `vignettes/assets.Rmd`. `README` is not written yet.
+This is the distinction to get right before writing a chunk. An earlier draft of this section
+applied one rule set to both and would have forbidden the README that exists (2026-08-04).
+
+- **`vignettes/*.Rmd` is built by `R CMD check` and on CRAN.** It runs on a machine with no
+  network, no assets, and no staged cohort. Every constraint below that mentions offline
+  execution comes from this and only this.
+- **`README.Rmd` is `.Rbuildignore`d and is rendered by the maintainer alone.** Nothing on CRAN
+  executes it, ever. It may therefore evaluate a real scoring run against a staged asset. The
+  rendered `README.md` **is not** `.Rbuildignore`d and does ship in the tarball, so what lands in
+  it still has to be clean.
+
+| | `vignettes/*.Rmd` | `README.Rmd` |
+|---|---|---|
+| built by `R CMD check` and CRAN | yes | **no** |
+| may reach the network | no | no |
+| may read a staged asset | no | **yes** |
+| clocks an evaluated chunk may score | bundled only | any |
+| ships in the tarball | yes | no, but `README.md` does |
+
+**Rendering `README.Rmd` wants the assets staged**, though not because a chunk scores an external
+clock. The scoring example is `Horvath1`, which is bundled. It is the `list_mc_assets()` pair that
+needs them, because the point of that pair is `downloaded` moving from `FALSE` to `TRUE`. With an
+empty assets directory the render still succeeds and the table simply reads `FALSE` twice, so the
+failure is a wrong narrative rather than a broken build. Not worth designing around: the package
+tracks exactly one `README.md`, so whoever regenerates it is by definition the maintainer, and a
+maintainer has the assets.
+
+### Chunks
+
+- **In a vignette, a chunk that needs the network, writes to disk, deletes, prompts, or prints a
+  per-machine path is `eval = FALSE`**, with its output pasted below the call. This is the same
+  policy as `@examplesIf interactive()` and it is not negotiable.
+- **In a vignette, a chunk that does evaluate must run offline with no asset.** Read the shipped
+  catalog, or build inputs with `sim_DNAm()` and bundled clocks only. `Horvath1` and `Hannum` are
+  safe, the four external groups are not.
+- **In `README.Rmd`, prefer a chunk that evaluates.** Real output cannot rot. Reserve
+  `eval = FALSE` for the calls that genuinely must not run during a render, which today is the
+  download itself.
+- **Pasted output is a claim about behaviour and rots exactly like a `@details` sentence.** Run
+  the call, then paste what it actually printed. Never retype it and never adjust it. The
+  vignette's hand-written asset sizes were wrong by about 9x for an unknown period and fed a bad
+  premise into a design decision (DECISIONS 2026-08-04).
+- **Pin anything random.** `set.seed()` at the top of the first chunk that simulates, or the
+  rendered file churns on every build. This is the opposite of the rule for `@examples`
+  (section 8), where nothing checks the numbers and no seed is wanted.
+- **Say what the reader does, not what the package does internally.** These files are where the
+  pull toward internal vocabulary is strongest, because the mechanism is interesting. R8 still
+  applies: it is an **asset**, never a pack, and there is no "closed set".
+
+### Line breaks: do not hard-wrap the prose
+
+**Do not line-break prose outside a code block. One paragraph is one line in the source, and the
+editor soft-wraps it.** A hard-wrapped paragraph produces a diff on every reflow, so a one-word
+edit rewrites five lines and the real change disappears into the noise.
+
+**Inside a code block, wrap at 80 columns**, because that text is read as code and is not
+reflowed by anything.
+
+This is scoped to `README.Rmd` and `vignettes/*.Rmd`. **`dev/` docs, including this file, stay
+hard-wrapped** and are unaffected.
+
+### ASCII
+
+The rule binds what an author types, not what a run prints.
+
+- **Never hand-write a non-ASCII character**, in prose or in a chunk you author.
+- **Non-ASCII that cli generated in captured output is fine and stays.** Do not set
+  `options(cli.unicode = FALSE)` to launder it. Suppressing it makes the rendered file disagree
+  with what the reader's own console shows, which is the one thing pasted output exists to
+  demonstrate.
+- **Pandoc manufactures non-ASCII from ASCII input if it is allowed to.** Its `smart` extension
+  turns a straight apostrophe into a curly one, so hand-written prose arrives non-ASCII through no
+  fault of the author. `README.Rmd` disables it in the YAML:
+
+  ```
+  output:
+    github_document:
+      md_extensions: -smart
+  ```
+
+### Rendering
+
+- Vignette: `knitr::knit("vignettes/x.Rmd", output = tempfile())` after `devtools::load_all()`.
+  It catches a chunk that should have been `eval = FALSE` by failing.
+- README: `devtools::build_readme(".")`, which installs the package into a temporary library and
+  compiles `src/`. **`Rscript --vanilla` cannot find pandoc**, so set `RSTUDIO_PANDOC` first. On a
+  machine with RStudio installed, `<RStudio>/resources/app/bin/quarto/bin/tools` holds it.
+
+Current files: `vignettes/assets.Rmd` and `README.Rmd`.

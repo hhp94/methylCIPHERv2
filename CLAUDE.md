@@ -350,15 +350,28 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   relative, both, taken as a `max` -- so one bad sample fails the test. The same reasoning bans
   `median`/`mean` as the reducer over per-element differences: any statistic that averages away a
   minority of arbitrarily-wrong samples is the same bug wearing a different name.
+- **Read `dev/WRITING.md` before editing any text a user can see. Reading it is the first step of
+  the task, not a review at the end.** The scope is the whole user-facing surface and not only
+  roxygen: doc blocks, `README.Rmd`, `vignettes/*.Rmd`, and every cli message. It is **not** a
+  style guide to consult when unsure. It holds load-bearing, non-obvious rules, and close to every
+  one of them is there because that exact failure has already happened in this package -- R1 to R8
+  (the English rules), the cli mechanics (`sprintf` output must never become a cli template, cap
+  before format, `cli::qty()` on every plural marker), the roxygen tag order and the `DOC_TYPES`
+  param vocabulary, the shared-parameter donor's inheritance footgun, the **closed** `@seealso`
+  set, the vignette-versus-README build split, and the line-break and ASCII rules for prose files.
+  An agent that writes first and reads afterwards breaks a rule it did not know existed, and
+  `lint_roxygen()` / `lint_seealso()` catch only the mechanical subset. Where a change and the file
+  disagree, **update the file in the same pass** -- a rule the shipped files violate is worse than
+  no rule.
 - **The exported surface is documented, and `dev/WRITING.md` is how.** Roxygen went on because the
   package went Rcpp and `useDynLib` has no route into `NAMESPACE` except a tag, so `NAMESPACE` and
   `man/*.Rd` are **generated files** and `devtools::document()` is a normal part of the workflow.
   Prose docs were deferred behind that for a year and **shipped 2026-08-03**: all 26 user-facing
   topics now carry real `@param` / `@details` / `@returns` / `@examples`, the `@seealso` groups are
-  closed, and `cite_clocks` merges its three methods onto one topic with `@rdname`. **Do not write
-  or edit a doc block without reading `dev/WRITING.md` first** -- it holds the tag order, the
-  `DOC_TYPES` param vocabulary, the shared-parameter donor and its footgun, and the closed
-  cross-reference set. `lint_roxygen()` and `lint_seealso()` (`R/dev-utils.R`) must both come back
+  closed, and `cite_clocks` merges its three methods onto one topic with `@rdname`. The tag order,
+  the `DOC_TYPES` param vocabulary, the shared-parameter donor and its footgun, and the closed
+  cross-reference set all live in `dev/WRITING.md`, under the invariant above.
+  `lint_roxygen()` and `lint_seealso()` (`R/dev-utils.R`) must both come back
   empty; both were empty on 2026-08-03 (DECISIONS 2026-07-27, 2026-08-03).
 - **Never hand-edit `NAMESPACE` or `man/*.Rd` -- own the tags, not the files.** They carry roxygen's
   "do not edit by hand" header and `document()` rewrites them from tags, **silently dropping**
@@ -436,8 +449,18 @@ contribute** (the catalog is committed). `sync()` needs read access to `methylCI
   `list_mc_assets()` reports size / `downloaded` / `superseded` per group without prompting,
   fetching or deleting, so no one has to call a mutating verb to find out what is on disk.
   The word "cache" is reserved for the unrelated internal `partial_cache` (cohort-mean fill). The
-  dir itself must stay `tools::R_user_dir(..., "cache")` -- derived, reclaimable, never
-  `which = "data"` (DECISIONS 2026-07-24).
+  dir itself stays `tools::R_user_dir(..., "cache")` -- but **not because `which = "data"` would
+  breach CRAN policy. It would not.** Policy permits data, configuration and cache alike, and its
+  two conditions ("sizes as small as possible", "actively managed") attach to all three equally, so
+  neither discriminates and `clear_mc_assets()` is required either way. This is a **platform call**:
+  `"data"` is `%APPDATA%` on Windows, which roams -- a LAN copy at every logon under a roaming
+  profile, or SMB reads on every scoring run under Folder Redirection -- while `"cache"` is
+  `%LOCALAPPDATA%` and never roams. The macOS counter-risk is a purge of `~/Library/Caches`, whose
+  cost is one consented re-download of a 43 MB corpus, and which the content-addressed filenames
+  already produce routinely whenever a `payload_hash` moves. Precedent agrees: `BiocFileCache` and
+  `ExperimentHub` -- the stack these users already run -- both resolve under `R_user_dir(..., "cache")`.
+  **Durability is the job of `MC_ASSETS_DIR` / `set_mc_assets_dir()`, not of the default**
+  (DECISIONS 2026-08-04, superseding the "policy violation" reading of DECISIONS 2026-07-24).
 - **Assets move in both directions under one consent rule.** `load_mc_assets()` /
   `download_mc_assets()` fill the dir and `clear_mc_assets()` empties it; all three take `ask`,
   prompt interactively, **refuse** non-interactively, and treat `ask = FALSE` as the explicit

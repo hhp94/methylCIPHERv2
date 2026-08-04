@@ -11,13 +11,9 @@ vignette: >
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
-Most clocks ship inside the package and need no setup. Four clock groups are
-different. Their weights are too large to ship, so they live in downloadable
-files called assets.
+Most clocks ship inside the package and need no setup. Four clock groups are different. Their weights are too large to ship, so they live in downloadable files called assets.
 
-This guide shows how to find the directory that holds the assets, how to fill
-it, and how to empty it. Every code block that downloads or deletes a file is
-shown but not run.
+This guide shows how to find the directory that holds the assets, how to fill it, and how to empty it. Every code block that downloads or deletes a file is shown but not run.
 
 ```{r setup}
 library(methylCIPHERv2)
@@ -25,8 +21,7 @@ library(methylCIPHERv2)
 
 ## The clocks that need an asset
 
-The `external` column of `list_clocks()` marks a clock whose weights are an
-asset.
+The `external` column of `list_clocks()` marks a clock whose weights are an asset.
 
 ```{r}
 catalog <- list_clocks()
@@ -41,42 +36,30 @@ A request for any other clock needs no download.
 
 ```{r, eval = FALSE}
 get_mc_assets_dir()
-#> [1] "/home/you/.cache/R/methylCIPHERv2"
 ```
 
 Four sources name that directory. The first one that is set wins.
 
-1. The `ext_data` argument of `calc_clocks()`, `clock_cpgs()` and
-   `load_mc_assets()`.
+1. The `ext_data` argument of `calc_clocks()`, `clock_cpgs()` and `load_mc_assets()`.
 2. The `mc.assets_dir` option, which `set_mc_assets_dir()` writes.
 3. The `MC_ASSETS_DIR` environment variable.
 4. The default cache directory, from `tools::R_user_dir()`.
 
-The default is a cache directory, so the operating system may reclaim it. Set
-one of the other three for a directory you control.
+The default is a cache directory, so the operating system may reclaim it. Set one of the other three for a directory you control.
 
 ## Seeing what is on disk
 
-`list_mc_assets()` answers every question about the directory without changing
-it. It never prompts, never downloads, and never deletes.
+`list_mc_assets()` answers every question about the directory without changing it. It never prompts, never downloads, and never deletes.
 
 ```{r, eval = FALSE}
 list_mc_assets()
-#>    group_id n_clocks n_cpgs      size downloaded superseded superseded_size
-#> 1 PCBrainAge        1  78464   61.2M       TRUE          0              0B
-#> 2   PCClocks        8  78464  240.1M      FALSE          0              0B
-#> 3 SystemsAge       12  78464   88.4M       TRUE          1           87.9M
-#> 4  Zhang2019        1 319607   12.4M      FALSE          0              0B
 ```
 
-`downloaded` says whether the current asset is on disk. `superseded` counts
-older assets for that group, which a later version of the package replaced.
-Superseded assets waste space and nothing reads them.
+`downloaded` says whether the current asset is on disk. `superseded` counts older assets for that group, which a later version of the package replaced. Superseded assets waste space and nothing reads them.
 
 ## Downloading an asset
 
-`download_mc_assets()` writes the assets to disk. It shows the size first and
-asks for consent.
+`download_mc_assets()` writes the assets to disk. It shows the size first and asks for consent.
 
 ```{r, eval = FALSE}
 download_mc_assets("SystemsAge")
@@ -88,13 +71,11 @@ Pass `"all"` for every group, or a vector of group names for some of them.
 download_mc_assets(c("SystemsAge", "PCClocks"))
 ```
 
-`calc_clocks()` downloads a missing asset for you, under the same prompt. A
-separate download is useful to prepare a machine before an analysis starts.
+`calc_clocks()` downloads a missing asset for you, under the same prompt. A separate download is useful to prepare a machine before an analysis starts.
 
 ## Loading an asset into memory
 
-`load_mc_assets()` reads the assets into memory and returns them. Pass the
-result to `ext_data` to score without touching the disk again.
+`load_mc_assets()` reads the assets into memory and returns them. Pass the result to `ext_data` to score without touching the disk again.
 
 ```{r, eval = FALSE}
 assets <- load_mc_assets("SystemsAge")
@@ -105,23 +86,19 @@ This is the fastest option for repeated scoring in one session.
 
 ## Choosing another directory
 
-`set_mc_assets_dir()` points the session at another directory. It creates the
-directory if it does not exist yet.
+`set_mc_assets_dir()` points the session at another directory. It creates the directory if it does not exist yet.
 
 ```{r, eval = FALSE}
 old <- set_mc_assets_dir("~/methylation-assets")
 ```
 
-The return value restores the previous state, in the manner of `setwd()`. It
-is the override that was in place, and it is `NULL` when no override was set.
-Pass it back to undo the change.
+The return value restores the previous state, in the manner of `setwd()`. It is the override that was in place, and it is `NULL` when no override was set. Pass it back to undo the change.
 
 ```{r, eval = FALSE}
 set_mc_assets_dir(old)
 ```
 
-The setting lasts for the session only. For a permanent choice, add the
-directory to your `.Renviron` file.
+The setting lasts for the session only. For a permanent choice, add the directory to your `.Renviron` file.
 
 ```
 MC_ASSETS_DIR=/data/methylation-assets
@@ -129,46 +106,36 @@ MC_ASSETS_DIR=/data/methylation-assets
 
 ## A directory that never downloads
 
-The `ext_data` argument takes a path. A path restricts the run to the assets
-already in that directory. Nothing is downloaded, and a missing asset is an
-error rather than a prompt.
+The `ext_data` argument takes a path. A path restricts the run to the assets already in that directory. Nothing is downloaded, and a missing asset is an error rather than a prompt.
 
 ```{r, eval = FALSE}
 res <- calc_clocks(DNAm, "SystemsAge", ext_data = "/data/methylation-assets")
 ```
 
-Use this form on a machine with no network access, or in a pipeline that must
-not reach out to the internet. Leave `ext_data` at its default of `NULL` to
-allow a download.
+Use this form on a machine with no network access, or in a pipeline that must not reach out to the internet. Leave `ext_data` at its default of `NULL` to allow a download.
 
 ## Deleting the assets
 
-`clear_mc_assets()` empties the directory. It lists the files and asks for
-consent first.
+`clear_mc_assets()` empties the directory. It lists the files and asks for consent first.
 
 ```{r, eval = FALSE}
 clear_mc_assets()
 ```
 
-The delete covers the current assets and the superseded ones together. Pass a
-group name to delete one group.
+The delete covers the current assets and the superseded ones together. Pass a group name to delete one group.
 
 ```{r, eval = FALSE}
 clear_mc_assets("SystemsAge")
 ```
 
-Nothing else in the directory is touched. A file the package did not write
-stays where it is.
+Nothing else in the directory is touched. A file the package did not write stays where it is.
 
 ## Working without a prompt
 
-`download_mc_assets()`, `load_mc_assets()` and `clear_mc_assets()` all refuse
-to run in a non-interactive session, because nobody can answer the prompt.
-Pass `ask = FALSE` to give consent ahead of time.
+`download_mc_assets()`, `load_mc_assets()` and `clear_mc_assets()` all refuse to run in a non-interactive session, because nobody can answer the prompt. Pass `ask = FALSE` to give consent ahead of time.
 
 ```{r, eval = FALSE}
 download_mc_assets("SystemsAge", ask = FALSE)
 ```
 
-Use `ask = FALSE` in a script, a scheduled job, or a container build. Consider
-the size of the download before you do.
+Use `ask = FALSE` in a script, a scheduled job, or a container build. Consider the size of the download before you do.

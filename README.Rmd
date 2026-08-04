@@ -1,5 +1,7 @@
 ---
-output: github_document
+output:
+  github_document:
+    md_extensions: -smart
 ---
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
@@ -18,14 +20,193 @@ knitr::opts_chunk$set(
 <!-- badges: start -->
 <!-- badges: end -->
 
-The goal of methylCIPHERv2 is to ...
+`{methylCIPHERv2}` scores CpG-based DNA methylation ages, commonly called epigenetic clocks. It reads a beta matrix and returns one score per sample per clock, together with the coverage counts that say how much of each clock's CpG panel was present in the data.
+
+`calc_clocks()` is the single entry point. Every other function either describes the available clocks before the calculation, or inspects the results after it.
 
 ## Installation
 
-Under Development
+`{methylCIPHERv2}` is not on CRAN yet.
 
-``` r
+You can install the development version of `{methylCIPHERv2}` with:
 
+```r
+pak::pkg_install("hhp94/methylCIPHERv2")
 ```
 
-## Example
+## Workflow
+
+```{r setup}
+library(methylCIPHERv2)
+```
+
+### Browse the clocks
+
+`list_clocks()` returns a data.frame showing all the supported clocks.
+
+```{r}
+head(list_clocks())
+```
+
+A clock can be selected by `clock_id`, `group_id`, or `tag`. `list_clock_tags()` returns every tag a `clocks` argument accepts.
+
+```{r}
+list_clock_tags()
+```
+
+`clock_cpgs()` returns the full CpG panel behind any set of clocks.
+
+```{r}
+grim_age_cpgs <- clock_cpgs("GrimAge")
+head(grim_age_cpgs)
+length(grim_age_cpgs)
+```
+
+### Download the external weights
+
+Most clocks ship inside the package. A few require downloadable assets. `list_mc_assets()` reports each group, its size, and whether it is already on disk.
+
+```{r, include = FALSE}
+old <- set_mc_assets_dir(tempdir())
+```
+
+```{r}
+list_mc_assets()
+```
+
+For example, `"SystemsAge"` needs its asset. `download_mc_assets()` downloads these assets.
+
+```{r, eval = FALSE}
+# pass "SystemsAge" to download that group alone
+download_mc_assets(groups = "all", ask = TRUE) # downloading requires confirmation
+```
+
+```{r, include = FALSE}
+set_mc_assets_dir(old)
+```
+
+```{r}
+list_mc_assets()
+```
+
+The function `clear_mc_assets()` delete the downloaded assets with confirmation. `vignette("assets")` covers the assets directory and the advanced path settings.
+
+### Calculate Epigenetic Clocks
+
+We simulate some data with the two kinds of missing data: CpGs that are absent altogether, and CpGs that are present but missing in some samples.
+
+```{r}
+set.seed(1)
+sim <- sim_DNAm(
+  "Horvath1",
+  n = 6,
+  Age = TRUE,
+  remove = 10 # drop CpGs entirely, to simulate completely missing CpGs
+)
+
+# simulate partially missing CpGs
+sim[["DNAm"]][sample.int(length(sim[["DNAm"]]), 20)] <- NA
+
+sim
+
+sum(is.na(sim[["DNAm"]]))
+```
+
+The two kinds of missingness are handled differently. A CpG that is absent altogether is either filled from a reference value that ships with the clock, or dropped. The `policy` column of `clocks_coverage()` says which one a clock uses. A CpG that is present but missing in some samples is imputed from the samples that do have it.
+
+Some clocks need a `Female` covariate, which the `covariates` column of `list_clocks()` marks. `predict_sex()` scores the two `DNAmSex_Wang` scores and returns a predicted sex for every sample. When `pheno` does carry `Female`, `predict_sex()` also returns `recorded_sex` and `sex_mismatch`, and reports how many samples disagree.
+
+```{r}
+sex_sim <- sim_DNAm(
+  c("DNAmSex_Wang_ChrX", "DNAmSex_Wang_ChrY"),
+  n = 6,
+  Female = TRUE
+)
+
+predict_sex(sex_sim[["DNAm"]], sex_sim[["pheno"]])
+```
+
+The betas are random here, so every predicted sex is arbitrary and the mismatches are expected.
+
+Clock calculation is performed by the `calc_clocks()` function.
+
+```{r}
+res <- calc_clocks(
+  sim[["DNAm"]],
+  "Horvath1",
+  pheno = sim[["pheno"]]
+)
+res
+```
+
+`calc_clocks()` can also run in batches, which are combined afterwards.
+
+```{r}
+batch_1 <- sim_DNAm(c("Knight"), n = 6, suffix = "1")
+batch_2 <- sim_DNAm(c("Knight"), n = 6, suffix = "2")
+
+r1 <- calc_clocks(batch_1[["DNAm"]], "Knight", pheno = batch_1[["pheno"]])
+r2 <- calc_clocks(batch_2[["DNAm"]], "Knight", pheno = batch_2[["pheno"]])
+
+rbind(r1, r2)
+```
+
+`as.data.frame()` or `as.matrix()` finalize the scores for further analysis. `as.data.frame()` returns long or wide.
+
+```{r}
+# long, the default
+head(as.data.frame(res))
+# wide
+head(as.data.frame(res, long = FALSE))
+```
+
+### Check the coverage
+
+Many factors affect the validity of a calculated clock. The most important is missing data, both for each clock and for each sample.
+
+`clocks_coverage()` reports missing data by `clock_id`. Its last column, `missing_cpgs`, names every CpG that was missing (dropped here for width).
+
+```{r}
+cov <- clocks_coverage(res, all_columns = TRUE)
+cov[setdiff(names(cov), grepv("missing_cpgs|norm|role", names(cov)))]
+```
+
+`Horvath1` uses the `omit` policy, so the 10 absent CpGs were dropped rather than filled, and the 20 missing values landed on 19 distinct CpGs that were imputed.
+
+`samples_coverage()` covers missingness per sample per clock.
+
+```{r}
+head(samples_coverage(res))
+```
+
+### Age acceleration
+
+`calc_accel()` regresses each score on chronological age and returns the residual. The value returned by `calc_clocks()` keeps only the id column and the covariates the calculation required, so chronological age is supplied through `data`, joined on the sample id.
+
+```{r}
+head(calc_accel(res, data = sim[["pheno"]]))
+```
+
+### Check the age associations
+
+`calc_accel()` works sample by sample. `score_associations()` looks at all the samples at once, and compares each clock's observed correlation with age against a reference range that ships with the package. Age is supplied through `age` here, for the same reason it goes through `data` above.
+
+```{r}
+score_associations(res, age = sim[["pheno"]][["Age"]])
+```
+
+The scores come from random data, so the correlation itself carries no meaning, and six samples make the reference range wide. What matters in real use are the two flags. `outside` marks a clock whose observed correlation falls outside the reference range, and `wrong_sign` marks one that runs in the opposite direction from a reference correlation stronger than 0.3.
+
+### Cite the clocks
+
+`cite_clocks()` returns the reference for every clock in a result, so a methods section can be assembled from the run itself.
+
+```{r}
+cite_clocks(res)
+```
+
+Or pass the desired `clock_id` directly.
+
+```{r, eval = FALSE}
+cite_clocks("Horvath1")
+```
