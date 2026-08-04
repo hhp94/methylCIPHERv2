@@ -1,0 +1,10 @@
+pandoc: 3.8.3
+pkgdown: 2.2.1
+pkgdown_sha: ~
+articles:
+  assets: assets.html
+  articles/clocks: clocks.html
+last_built: 2026-08-04T19:31Z
+urls:
+  reference: https://hhp94.github.io/methylCIPHERv2/reference
+  article: https://hhp94.github.io/methylCIPHERv2/articles
