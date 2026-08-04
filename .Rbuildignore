@@ -15,3 +15,5 @@
 ^CLAUDE\.local\.md$
 ^\.Rprofile$
 ^R/dev-utils\.R$
+^doc$
+^Meta$

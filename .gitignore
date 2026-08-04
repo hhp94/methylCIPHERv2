@@ -48,3 +48,5 @@ __MACOSX/
 
 # Posit / other
 .posit*
+/doc/
+/Meta/
