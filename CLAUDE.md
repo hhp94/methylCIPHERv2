@@ -167,9 +167,13 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
     a **package-owned** generic, because
     [`utils::citation`](https://rdrr.io/r/utils/citation.html) and
     [`utils::cite`](https://rdrr.io/r/utils/cite.html) both exist as
-    plain functions and taking either name masks it. `[`, `cbind`,
-    `augment` and `codebook` are **unbuilt ideas, not contracts**
-    (DECISIONS 2026-07-23/24/25, 2026-07-27).
+    plain functions and taking either name masks it. `[`, `cbind` and
+    `augment` are **unbuilt ideas, not contracts** (DECISIONS
+    2026-07-23/24/25, 2026-07-27). **`codebook()` is decided but
+    unbuilt**: `data.frame(clock_id, description)` dispatching like
+    [`cite_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/cite_clocks.md),
+    blocked until upstream verifies a `description` per clock. Do not
+    build it against a partly populated field (DECISIONS 2026-08-04).
   - **The batch column reaches an exit frame only when the record spans
     more than one batch** – at one batch it is a repeated hash carrying
     no information. All four exits (`as.data.frame`, `calc_accel`, both
@@ -894,7 +898,7 @@ plus `lint_seealso()` must both be empty before a doc change is done.
 
 ## Source-of-truth docs (`dev/`)
 
-The `dev/` folder is local-only **except** these three, which are
+The `dev/` folder is local-only **except** these four, which are
 tracked:
 
 - `dev/DECISIONS.md` – append-only, newest-first, date-stamped log of
@@ -907,6 +911,12 @@ tracked:
 - `dev/WRITING.md` – the single source for how user-facing text is
   written. See “CLI messages” above; this file points there and does not
   restate it.
+- `dev/to-do.md` – queued work, tracked since 2026-08-04. A **staging
+  area, not a record**: an item that becomes a design commitment gets a
+  DECISIONS entry when it lands, an item that becomes a rule moves here,
+  and a shipped item is deleted rather than marked done. Read it before
+  starting new work; the pre-alpha section is what blocks a public
+  release.
 
 **There is no live design doc, and that is deliberate.**
 `migration-plan.md` and `detail-plan.md` were retired on 2026-07-28, and
