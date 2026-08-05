@@ -9,7 +9,7 @@ each clock and batch."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -74,7 +74,7 @@ counts of its scoring panel, and the columns above that apply to <code>x</code>.
 <p>A clock assembled only from other clocks' scores reads no CpGs of its
 own, and gets a row of <code>NA</code> counts. Read the coverage of the clocks it
 depends on instead.</p>
-<p>Four more columns appear only where they say something about <code>x</code>.</p><ul><li><p><code>role</code> appears when <code>x</code> holds a clock that scores as part of another
+<p>Four more kinds of column appear only where they say something about <code>x</code>.</p><ul><li><p><code>role</code> appears when <code>x</code> holds a clock that scores as part of another
 clock.</p></li>
 <li><p><code>normalizes</code>, and the five <code>norm_*</code> counts for the normalizing panel,
 appear when a clock in <code>x</code> normalizes. There is no <code>norm_used</code>.</p></li>
@@ -84,9 +84,9 @@ when a CpG is absent.</p></li>
 the set of samples from one <code><a href="calc_clocks.html">calc_clocks()</a></code> call, and <code><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind()</a></code>
 combines batches.</p></li>
 </ul><p>Pass <code>all_columns = TRUE</code> to keep <code>role</code>, <code>normalizes</code>, the <code>norm_*</code>
-counts, and <code>missing_cpgs</code> in every frame. Use it where the code that
-reads the frame names a column directly. <code>mc_batch_id</code> is the one
-exception, and still appears only when <code>x</code> holds more than one batch.</p>
+counts, and <code>missing_cpgs</code> in every frame. Use it when your own code reads
+one of those columns by name. <code>mc_batch_id</code> is the one exception, and
+still appears only when <code>x</code> holds more than one batch.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

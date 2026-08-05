@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -66,18 +66,17 @@ sample. Default is <code>NULL</code>.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A data.frame. One row for each sample, with the two
-<code>DNAmSex_Wang</code> scores, <code>predicted_sex</code>, and, when <code>pheno</code> has a
-<code>Female</code> column, <code>recorded_sex</code> and <code>sex_mismatch</code>.</p>
+    <p>A data.frame. One row for each sample, with the
+<code>DNAmSex_Wang_ChrX</code> and <code>DNAmSex_Wang_ChrY</code> scores, <code>predicted_sex</code>,
+and, when <code>pheno</code> has a <code>Female</code> column, <code>recorded_sex</code> and
+<code>sex_mismatch</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>This is a re-implementation of the sex prediction algorithm of the
 wateRmelon package.</p>
-<p>The returned data.frame has one row for each sample, with the two
-<code>DNAmSex_Wang</code> scores and a <code>predicted_sex</code> column. <code>predicted_sex</code> is
-one of <code>"Male"</code>, <code>"Female"</code>, <code>"47,XXY"</code>, or <code>"45,XO"</code>. A sample missing
-either score gets <code>NA</code>, not a default call.</p>
+<p><code>predicted_sex</code> is one of <code>"Male"</code>, <code>"Female"</code>, <code>"47,XXY"</code>, or <code>"45,XO"</code>.
+A sample missing either score gets <code>NA</code>, not a default call.</p>
 <p>When <code>pheno</code> has a <code>Female</code> column, coded <code>0</code> or <code>1</code>, the result also
 carries <code>recorded_sex</code> and <code>sex_mismatch</code>. <code>sex_mismatch</code> is <code>TRUE</code> only
 where <code>predicted_sex</code> disagrees with a binary <code>recorded_sex</code>. A
@@ -94,8 +93,7 @@ classifier to predict sex and identify sex chromosome aneuploidy.
 
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">ids</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"DNAmSex_Wang_ChrX"</span>, <span class="st">"DNAmSex_Wang_ChrY"</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="va">sim</span> <span class="op">&lt;-</span> <span class="fu"><a href="sim_DNAm.html">sim_DNAm</a></span><span class="op">(</span><span class="va">ids</span>, n <span class="op">=</span> <span class="fl">6</span>, Female <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">sim</span> <span class="op">&lt;-</span> <span class="fu"><a href="sim_DNAm.html">sim_DNAm</a></span><span class="op">(</span><span class="st">"DNAmSex_Wang"</span>, n <span class="op">=</span> <span class="fl">6</span>, Female <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu">predict_sex</span><span class="op">(</span><span class="va">sim</span><span class="op">[[</span><span class="st">"DNAm"</span><span class="op">]</span><span class="op">]</span>, <span class="va">sim</span><span class="op">[[</span><span class="st">"pheno"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #BBBB00;">!</span> 3 samples have a predicted sex that does not match the <span style="color: #00BB00;">Female</span> column in</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   `pheno`.</span>

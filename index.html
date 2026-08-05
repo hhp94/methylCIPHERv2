@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -64,7 +64,7 @@
 <li>
 <code>clocks</code>: A list of clocks (e.g., Horvath1), clock “group” (e.g., GrimAge), or tags (“mitotic”).</li>
 <li>
-<code>pheno</code>: A data.frame that contains Age (Years) and Female (1/0) for only certain clocks, and an ID column that links to the sample names of the DNAm beta matrix.</li>
+<code>pheno</code>: An <em>optional</em> data.frame that contains Age (Years) and Female (1/0) for only certain clocks, and an ID column that links to the sample names of the DNAm beta matrix.</li>
 </ul>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
@@ -81,7 +81,7 @@
 <div class="section level3">
 <h3 id="browse-the-clocks">Browse the clocks<a class="anchor" aria-label="anchor" href="#browse-the-clocks"></a>
 </h3>
-<p><code><a href="reference/list_clocks.html">list_clocks()</a></code> returns a data.frame showing all the supported clocks. The <a href="https://hhp94.github.io/methylCIPHERv2/articles/clocks.html">clock catalog</a> article provides a searchable table.</p>
+<p><code><a href="reference/list_clocks.html">list_clocks()</a></code> returns a data.frame showing all the supported clocks. <a href="https://hhp94.github.io/methylCIPHERv2/articles/clocks.html">The clock catalog</a> article provides a searchable table.</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu"><a href="reference/list_clocks.html">list_clocks</a></span><span class="op">(</span><span class="op">)</span>, n <span class="op">=</span> <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt;    clock_id     group_id request_as covariates external        tags</span></span>
@@ -140,19 +140,16 @@
 <span><span class="fu"><a href="https://rdrr.io/r/base/sum.html" class="external-link">sum</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/NA.html" class="external-link">is.na</a></span><span class="op">(</span><span class="va">sim</span><span class="op">[[</span><span class="st">"DNAm"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 20</span></span></code></pre></div>
 <p>The two kinds of missingness are handled differently. A CpG that is absent altogether is either filled from a reference value that ships with the clock, or dropped. A CpG that is present but missing in some samples is column mean imputed (i.e., CpG-wise).</p>
-<p>Some clocks need a <code>Female</code> covariate. If not readily available, <code><a href="reference/predict_sex.html">predict_sex()</a></code> scores the two <code>DNAmSex_Wang</code> ChrX and ChrY clocks and returns a predicted sex for every sample. When <code>pheno</code> provides <code>Female</code>, <code><a href="reference/predict_sex.html">predict_sex()</a></code> also returns <code>recorded_sex</code> and <code>sex_mismatch</code>, and reports how many samples disagree.</p>
+<p>Some clocks need a <code>Female</code> covariate. If not readily available, <code><a href="reference/predict_sex.html">predict_sex()</a></code> scores the two clocks in the <code>DNAmSex_Wang</code> group and returns a predicted sex for every sample. When <code>pheno</code> provides <code>Female</code>, <code><a href="reference/predict_sex.html">predict_sex()</a></code> also returns <code>recorded_sex</code> and <code>sex_mismatch</code>, and reports how many samples disagree.</p>
 <div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># The betas are random here, so the mismatches are expected.</span></span>
-<span><span class="va">sex_sim</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/sim_DNAm.html">sim_DNAm</a></span><span class="op">(</span></span>
-<span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"DNAmSex_Wang_ChrX"</span>, <span class="st">"DNAmSex_Wang_ChrY"</span><span class="op">)</span>,</span>
-<span>  n <span class="op">=</span> <span class="fl">6</span>,</span>
-<span>  Female <span class="op">=</span> <span class="cn">TRUE</span></span>
-<span><span class="op">)</span></span>
+<span><span class="va">sex_sim</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/sim_DNAm.html">sim_DNAm</a></span><span class="op">(</span><span class="st">"DNAmSex_Wang"</span>, n <span class="op">=</span> <span class="fl">6</span>, Female <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span></span>
-<span><span class="fu"><a href="reference/predict_sex.html">predict_sex</a></span><span class="op">(</span><span class="va">sex_sim</span><span class="op">[[</span><span class="st">"DNAm"</span><span class="op">]</span><span class="op">]</span>, <span class="va">sex_sim</span><span class="op">[[</span><span class="st">"pheno"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span>
-<span><span class="co">#&gt;        ID DNAmSex_Wang_ChrX DNAmSex_Wang_ChrY predicted_sex recorded_sex</span></span>
-<span><span class="co">#&gt; 1 sample1          37.76046         -4.768303        Female       Female</span></span>
-<span><span class="co">#&gt; 2 sample2          35.86986         -4.877966        Female       Female</span></span></code></pre></div>
+<span><span class="fu"><a href="reference/predict_sex.html">predict_sex</a></span><span class="op">(</span><span class="va">sex_sim</span><span class="op">[[</span><span class="st">"DNAm"</span><span class="op">]</span><span class="op">]</span>, <span class="va">sex_sim</span><span class="op">[[</span><span class="st">"pheno"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">3</span>, <span class="op">]</span></span>
+<span><span class="co">#        ID DNAmSex_Wang_ChrX DNAmSex_Wang_ChrY predicted_sex recorded_sex sex_mismatch</span></span>
+<span><span class="co"># 1 sample1          38.03396         -4.118079        Female         Male         TRUE</span></span>
+<span><span class="co"># 2 sample2          36.36661         -4.152196        Female         Male         TRUE</span></span>
+<span><span class="co"># 3 sample3          37.47450         -3.756762        Female       Female        FALSE</span></span></code></pre></div>
 <p>Clock calculation is performed by the <code><a href="reference/calc_clocks.html">calc_clocks()</a></code> function.</p>
 <div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">res</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/calc_clocks.html">calc_clocks</a></span><span class="op">(</span></span>
@@ -244,7 +241,24 @@
 <code class="sourceCode R"><span><span class="fu"><a href="reference/cite_clocks.html">cite_clocks</a></span><span class="op">(</span><span class="va">res</span><span class="op">)</span></span></code></pre></div>
 <p>Or pass the desired <code>clock_id</code> directly.</p>
 <div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="reference/cite_clocks.html">cite_clocks</a></span><span class="op">(</span><span class="st">"Horvath1"</span><span class="op">)</span></span></code></pre></div>
+<code class="sourceCode R"><span><span class="fu"><a href="reference/cite_clocks.html">cite_clocks</a></span><span class="op">(</span><span class="st">"Horvath1"</span><span class="op">)</span></span>
+<span><span class="co">#&gt; &lt;mc_citation&gt; 1 clock(s) x 1 paper(s)</span></span>
+<span><span class="co">#&gt; $bibtex [1 paper(s)]</span></span>
+<span><span class="co">#&gt; @article{Horvath_2013_24138928,</span></span>
+<span><span class="co">#&gt;   title = {{DNA} methylation age of human tissues and cell types},</span></span>
+<span><span class="co">#&gt;   author = {Horvath, Steve},</span></span>
+<span><span class="co">#&gt;   year = {2013},</span></span>
+<span><span class="co">#&gt;   journal = {Genome biology},</span></span>
+<span><span class="co">#&gt;   volume = {14},</span></span>
+<span><span class="co">#&gt;   number = {10},</span></span>
+<span><span class="co">#&gt;   pages = {R115},</span></span>
+<span><span class="co">#&gt;   doi = {10.1186/gb-2013-14-10-r115},</span></span>
+<span><span class="co">#&gt;   pmid = {24138928},</span></span>
+<span><span class="co">#&gt;   url = {https://doi.org/10.1186/gb-2013-14-10-r115}</span></span>
+<span><span class="co">#&gt; }</span></span>
+<span><span class="co">#&gt; ℹ `as.data.frame(x)` returns the clock-to-paper table.</span></span>
+<span><span class="co">#&gt; ℹ `writeLines(toBibtex(x), "refs.bib")` writes the bibtex to a file.</span></span>
+<span><span class="co">#&gt; ℹ `citation("methylCIPHERv2")` cites the package itself.</span></span></code></pre></div>
 </div>
 </div>
 </div>

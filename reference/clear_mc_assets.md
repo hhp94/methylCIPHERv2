@@ -20,8 +20,8 @@ clear_mc_assets(groups = "all", ask = TRUE)
 
 - ask:
 
-  A boolean. Asks for consent before a download or a delete. Default is
-  `TRUE`. Pass `FALSE` to download or delete without asking, in a
+  A boolean. Asks for confirmation before the assets directory changes.
+  Default is `TRUE`. Pass `FALSE` to continue without asking, in a
   non-interactive session.
 
 ## Value
@@ -31,12 +31,12 @@ invisibly. Empty when no file was removed.
 
 ## Details
 
-`clear_mc_assets()` removes both the currently declared assets and every
-superseded asset left behind by an earlier sync, for the requested
-groups. It asks for consent before deleting, refuses in a
-non-interactive session, and treats `ask = FALSE` as consent to proceed
-without asking. If the assets directory holds no asset for the requested
-groups, no file is removed.
+`clear_mc_assets()` removes the current assets for the requested groups.
+It also removes the superseded assets that an earlier version of the
+package left in the directory. It asks for confirmation before deleting
+and refuses in a non-interactive session. `ask = FALSE` confirms the
+deletion in advance. If the assets directory holds no asset for the
+requested groups, no file is removed.
 
 ## See also
 

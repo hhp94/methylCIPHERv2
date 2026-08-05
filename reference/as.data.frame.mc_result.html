@@ -9,7 +9,7 @@ clocks, in long or wide format."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -73,9 +73,9 @@ clocks, in long or wide format.</p>
 
 
 <dt id="arg-long">long<a class="anchor" aria-label="anchor" href="#arg-long"></a></dt>
-<dd><p>A boolean. Returns one row for each sample and clock
-when <code>TRUE</code>, and one row for each sample, with one column for each
-clock, when <code>FALSE</code>. Default is <code>TRUE</code>.</p></dd>
+<dd><p>A boolean. Returns one row for each sample and clock when
+<code>TRUE</code>, and one row for each sample, with one column for each clock, when
+<code>FALSE</code>. Default is <code>TRUE</code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -86,11 +86,13 @@ with the score and, when <code>x</code> holds more than one batch, an
 column for each clock.</p>
     </div>
     <div class="section level2">
-    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when <code>x</code>
-holds more than one batch. This is the same calculation as
-<code><a href="refinalize_clocks.html">refinalize_clocks()</a></code>.</p>
+    <h2 id="clocks-that-use-all-the-samples">Clocks that use all the samples<a class="anchor" aria-label="anchor" href="#clocks-that-use-all-the-samples"></a></h2>
+
+
+<p>Some clocks depend on information from all the samples, such as a z-score.
+When <code>x</code> holds more than one batch, these clocks take their value from
+every sample in <code>x</code>, and not from one batch alone. This is the same
+calculation as <code><a href="refinalize_clocks.html">refinalize_clocks()</a></code>.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

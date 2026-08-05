@@ -51,24 +51,27 @@ sample, with one column for each clock.
 
 ## Details
 
-This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when `x`
-holds more than one batch. This is the same calculation as
-[`refinalize_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/refinalize_clocks.md).
-
-The default `type = "accel"` calculates the well-known age acceleration.
-It regresses each clock in `x` on `Age` and returns the residuals.
-`type = "diff"` calculates the raw difference between each clock and
-`Age`, and fits no model unless `formula` is given.
+The default `type = "accel"` calculates age acceleration. It regresses
+each clock in `x` on `Age` and returns the residuals. `type = "diff"`
+calculates the raw difference between each clock and `Age`, and fits no
+model unless `formula` is given.
 
 `formula` replaces the default model completely. It does not add to it,
 so `~ Plate` regresses each clock on the plate alone, and not on age.
 
-`data` may carry the covariates the calculation needs, as in
-`data.frame(ID, Plate)` passed to `data`, with
-`formula = ~ Age + Plate`. It may add a column, and it may repeat a
-column that scoring already used. `calc_accel()` stops when a repeated
-column disagrees with the value scoring used.
+`data` carries the covariates the calculation needs. Pass a data.frame
+of `ID` and `Plate` to `data`, with `formula = ~ Age + Plate`. It may
+add a column, and it may repeat a column that scoring already used.
+`calc_accel()` stops when a repeated column disagrees with the value
+scoring used.
+
+## Clocks that use all the samples
+
+Some clocks depend on information from all the samples, such as a
+z-score. When `x` holds more than one batch, these clocks take their
+value from every sample in `x`, and not from one batch alone. This is
+the same calculation as
+[`refinalize_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/refinalize_clocks.md).
 
 ## See also
 

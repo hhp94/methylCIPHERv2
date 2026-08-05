@@ -9,7 +9,7 @@ mc_result object."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -63,8 +63,8 @@ mc_result object."></head><body>
 
 
 <dl><dt id="arg-x">x<a class="anchor" aria-label="anchor" href="#arg-x"></a></dt>
-<dd><p>A character vector. The clock ids or group ids to cite, or an
-<code>mc_result</code> object from <code><a href="calc_clocks.html">calc_clocks()</a></code>.</p></dd>
+<dd><p>A character vector. The clock ids, group ids or tags to cite, or
+an <code>mc_result</code> object from <code><a href="calc_clocks.html">calc_clocks()</a></code>.</p></dd>
 
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>
@@ -78,9 +78,11 @@ the bibtex text for each paper.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>A character vector cites the clocks it names, and a group id cites every
-clock in the group. An <code>mc_result</code> object cites the clocks in its scores.
-Any other class raises an error that names the two accepted types.</p>
+    <p>A character vector cites the clocks it names. A group id cites every clock
+in the group, and a tag cites every clock the tag expands to. See
+<code><a href="list_clocks.html">list_clocks()</a></code> and <code><a href="list_clock_tags.html">list_clock_tags()</a></code>. An <code>mc_result</code> object cites the
+clocks in its scores. Any other class raises an error that names the two
+accepted types.</p>
     </div>
 
     <div class="section level2">

@@ -41,13 +41,16 @@ A clock needs at least 5 samples with a finite score and age, and
 variation in both, to appear in the result. A clock with no entry in the
 shipped reference table is left out.
 
-This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when `x`
-holds more than one batch. This is the same calculation as
-[`refinalize_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/refinalize_clocks.md).
-
 Rows are ordered by the gap between the observed and the reference
 correlation, most negative first.
+
+## Clocks that use all the samples
+
+Some clocks depend on information from all the samples, such as a
+z-score. When `x` holds more than one batch, these clocks take their
+value from every sample in `x`, and not from one batch alone. This is
+the same calculation as
+[`refinalize_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/refinalize_clocks.md).
 
 ## See also
 

@@ -27,11 +27,12 @@ as.matrix(x, ...)
 A numeric matrix. The scores, with samples in the rows and clocks in the
 columns.
 
-## Details
+## Clocks that use all the samples
 
-This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when `x`
-holds more than one batch. This is the same calculation as
+Some clocks depend on information from all the samples, such as a
+z-score. When `x` holds more than one batch, these clocks take their
+value from every sample in `x`, and not from one batch alone. This is
+the same calculation as
 [`refinalize_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/refinalize_clocks.md).
 
 ## See also

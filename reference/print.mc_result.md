@@ -36,8 +36,8 @@ An `mc_result` object. Returns `x`, invisibly, after printing it.
 
 ## Details
 
-The output lists batch labels only when `x` spans more than one
-`mc_batch_id`.
+The output lists the batch labels only when `x` holds more than one
+batch.
 
 ## Examples
 

@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -57,7 +57,7 @@ the rows and CpGs in the columns.</p></dd>
 
 <dt id="arg-clocks">clocks<a class="anchor" aria-label="anchor" href="#arg-clocks"></a></dt>
 <dd><p>A character vector. The clocks to score, named by clock id,
-group id, or tag.</p></dd>
+group id, or tag. See <code><a href="list_clocks.html">list_clocks()</a></code>.</p></dd>
 
 
 <dt id="arg-pheno">pheno<a class="anchor" aria-label="anchor" href="#arg-pheno"></a></dt>
@@ -77,9 +77,9 @@ assets. Default is <code>NULL</code>, which uses the assets directory.</p></dd>
 
 
 <dt id="arg-ask">ask<a class="anchor" aria-label="anchor" href="#arg-ask"></a></dt>
-<dd><p>A boolean. Asks for consent before a download or a delete.
-Default is <code>TRUE</code>. Pass <code>FALSE</code> to download or delete without asking, in
-a non-interactive session.</p></dd>
+<dd><p>A boolean. Asks for confirmation before the assets directory
+changes. Default is <code>TRUE</code>. Pass <code>FALSE</code> to continue without asking, in a
+non-interactive session.</p></dd>
 
 
 <dt id="arg-all-columns">all_columns<a class="anchor" aria-label="anchor" href="#arg-all-columns"></a></dt>
@@ -93,6 +93,12 @@ of <code>"PCBrainAge"</code>, <code>"PCClocks"</code>, <code>"SystemsAge"</code>
 <code>"all"</code> for every group. Repeated values are ignored, and an empty vector
 selects nothing. Default is <code>"all"</code>.</p></dd>
 
+
+<dt id="arg-long">long<a class="anchor" aria-label="anchor" href="#arg-long"></a></dt>
+<dd><p>A boolean. Returns one row for each sample and clock when
+<code>TRUE</code>, and one row for each sample, with one column for each clock, when
+<code>FALSE</code>. Default is <code>TRUE</code>.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="the-assets-directory">The assets directory<a class="anchor" aria-label="anchor" href="#the-assets-directory"></a></h2>
@@ -105,6 +111,15 @@ missing. Use <code><a href="set_mc_assets_dir.html">set_mc_assets_dir()</a></cod
 is an error.</p></li>
 <li><p>Assets already in memory from <code><a href="load_mc_assets.html">load_mc_assets()</a></code> are used directly.</p></li>
 </ul></div>
+    <div class="section level2">
+    <h2 id="clocks-that-use-all-the-samples">Clocks that use all the samples<a class="anchor" aria-label="anchor" href="#clocks-that-use-all-the-samples"></a></h2>
+
+
+<p>Some clocks depend on information from all the samples, such as a z-score.
+When <code>x</code> holds more than one batch, these clocks take their value from
+every sample in <code>x</code>, and not from one batch alone. This is the same
+calculation as <code><a href="refinalize_clocks.html">refinalize_clocks()</a></code>.</p>
+    </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside></div>

@@ -24,7 +24,8 @@ sim_DNAm(
 - clocks:
 
   A character vector. The clocks to score, named by clock id, group id,
-  or tag.
+  or tag. See
+  [`list_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clocks.md).
 
 - n:
 
@@ -59,8 +60,8 @@ sim_DNAm(
 
 - ask:
 
-  A boolean. Asks for consent before a download or a delete. Default is
-  `TRUE`. Pass `FALSE` to download or delete without asking, in a
+  A boolean. Asks for confirmation before the assets directory changes.
+  Default is `TRUE`. Pass `FALSE` to continue without asking, in a
   non-interactive session.
 
 - suffix:

@@ -71,6 +71,8 @@ Manage the downloadable weights that some clock groups need.
   : Loaded Clock Assets
 - [`clear_mc_assets()`](https://hhp94.github.io/methylCIPHERv2/reference/clear_mc_assets.md)
   : Clock Asset Removal
+- [`print(`*`<mc_assets>`*`)`](https://hhp94.github.io/methylCIPHERv2/reference/print.mc_assets.md)
+  : Print Method For An mc_assets Object
 
 ## Citations
 

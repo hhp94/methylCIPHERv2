@@ -14,7 +14,8 @@ clock_cpgs(clocks, normalize = NULL, ext_data = NULL, ask = TRUE)
 - clocks:
 
   A character vector. The clocks to score, named by clock id, group id,
-  or tag.
+  or tag. See
+  [`list_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clocks.md).
 
 - normalize:
 
@@ -29,8 +30,8 @@ clock_cpgs(clocks, normalize = NULL, ext_data = NULL, ask = TRUE)
 
 - ask:
 
-  A boolean. Asks for consent before a download or a delete. Default is
-  `TRUE`. Pass `FALSE` to download or delete without asking, in a
+  A boolean. Asks for confirmation before the assets directory changes.
+  Default is `TRUE`. Pass `FALSE` to continue without asking, in a
   non-interactive session.
 
 ## Value
@@ -40,9 +41,10 @@ removed.
 
 ## Details
 
-A clock built from other clocks also needs their CpGs. Turning
-`normalize` on for a clock adds its background panel to the returned
-set.
+A clock built from other clocks also needs their CpGs. A clock whose
+normalization is part of its definition always adds its background
+panel. For a clock whose normalization is optional, `normalize` adds the
+background panel only when it is on.
 
 ## The assets directory
 

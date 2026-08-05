@@ -1,20 +1,19 @@
 # The Clock Catalog
 
-``` r
-
-library(methylCIPHERv2)
-```
-
 ## What the columns mean
 
-**Clock** is the identifier for a single scored clock, and the name to
-pass to
-[`calc_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/calc_clocks.md).
-**Group** is the family it belongs to, and a group name can be requested
-on its own to score every member.
+**Clock** is the identifier for a single scored clock. **Group** is the
+family it belongs to.
 
 **Covariates** lists the columns that `pheno` must carry for that clock.
 An empty cell means the clock reads methylation values alone.
+
+**Normalize** names the background normalization scheme a clock uses,
+and an empty cell means it uses none. A `quantile` cell is part of the
+clock definition and always runs. A `bmiq` cell is optional, and stays
+off until the `normalize` argument of
+[`calc_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/calc_clocks.md)
+turns it on.
 
 ## Scoring from the catalog
 
@@ -45,8 +44,8 @@ names(list_clock_tags())
 ## Filtering the catalog in code
 
 [`list_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clocks.md)
-returns the table above as a data frame, so the catalog is available in
-a script as well as on this page. It takes a tag directly.
+returns this catalog as a data frame, so it is available in a script as
+well as on this page. It takes a tag directly.
 
 ``` r
 
@@ -56,13 +55,13 @@ mitotic[["clock_id"]]
 #> [5] "RepliTali"     "RepliTaliNorm"
 ```
 
-The result is an ordinary data frame, so the other columns filter with
-base R.
+The result is an ordinary data frame, so you can filter the other
+columns with base R.
 
 ``` r
 
-catalog <- list_clocks()
-bundled <- catalog[!catalog[["external"]], ]
+all_clocks <- list_clocks()
+bundled <- all_clocks[!all_clocks[["external"]], ]
 nrow(bundled)
 #> [1] 108
 ```

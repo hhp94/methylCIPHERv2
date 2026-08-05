@@ -11,9 +11,9 @@ docs for more details):
   in the columns
 - `clocks`: A list of clocks (e.g., Horvath1), clock “group” (e.g.,
   GrimAge), or tags (“mitotic”).
-- `pheno`: A data.frame that contains Age (Years) and Female (1/0) for
-  only certain clocks, and an ID column that links to the sample names
-  of the DNAm beta matrix.
+- `pheno`: An *optional* data.frame that contains Age (Years) and Female
+  (1/0) for only certain clocks, and an ID column that links to the
+  sample names of the DNAm beta matrix.
 
 ## Installation
 
@@ -35,7 +35,7 @@ library(methylCIPHERv2)
 ### Browse the clocks
 
 [`list_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clocks.md)
-returns a data.frame showing all the supported clocks. The [clock
+returns a data.frame showing all the supported clocks. [The clock
 catalog](https://hhp94.github.io/methylCIPHERv2/articles/clocks.html)
 article provides a searchable table.
 
@@ -137,7 +137,7 @@ samples is column mean imputed (i.e., CpG-wise).
 
 Some clocks need a `Female` covariate. If not readily available,
 [`predict_sex()`](https://hhp94.github.io/methylCIPHERv2/reference/predict_sex.md)
-scores the two `DNAmSex_Wang` ChrX and ChrY clocks and returns a
+scores the two clocks in the `DNAmSex_Wang` group and returns a
 predicted sex for every sample. When `pheno` provides `Female`,
 [`predict_sex()`](https://hhp94.github.io/methylCIPHERv2/reference/predict_sex.md)
 also returns `recorded_sex` and `sex_mismatch`, and reports how many
@@ -146,16 +146,13 @@ samples disagree.
 ``` r
 
 # The betas are random here, so the mismatches are expected.
-sex_sim <- sim_DNAm(
-  c("DNAmSex_Wang_ChrX", "DNAmSex_Wang_ChrY"),
-  n = 6,
-  Female = TRUE
-)
+sex_sim <- sim_DNAm("DNAmSex_Wang", n = 6, Female = TRUE)
 
-predict_sex(sex_sim[["DNAm"]], sex_sim[["pheno"]])
-#>        ID DNAmSex_Wang_ChrX DNAmSex_Wang_ChrY predicted_sex recorded_sex
-#> 1 sample1          37.76046         -4.768303        Female       Female
-#> 2 sample2          35.86986         -4.877966        Female       Female
+predict_sex(sex_sim[["DNAm"]], sex_sim[["pheno"]])[1:3, ]
+#        ID DNAmSex_Wang_ChrX DNAmSex_Wang_ChrY predicted_sex recorded_sex sex_mismatch
+# 1 sample1          38.03396         -4.118079        Female         Male         TRUE
+# 2 sample2          36.36661         -4.152196        Female         Male         TRUE
+# 3 sample3          37.47450         -3.756762        Female       Female        FALSE
 ```
 
 Clock calculation is performed by the
@@ -301,4 +298,21 @@ Or pass the desired `clock_id` directly.
 ``` r
 
 cite_clocks("Horvath1")
+#> <mc_citation> 1 clock(s) x 1 paper(s)
+#> $bibtex [1 paper(s)]
+#> @article{Horvath_2013_24138928,
+#>   title = {{DNA} methylation age of human tissues and cell types},
+#>   author = {Horvath, Steve},
+#>   year = {2013},
+#>   journal = {Genome biology},
+#>   volume = {14},
+#>   number = {10},
+#>   pages = {R115},
+#>   doi = {10.1186/gb-2013-14-10-r115},
+#>   pmid = {24138928},
+#>   url = {https://doi.org/10.1186/gb-2013-14-10-r115}
+#> }
+#> ℹ `as.data.frame(x)` returns the clock-to-paper table.
+#> ℹ `writeLines(toBibtex(x), "refs.bib")` writes the bibtex to a file.
+#> ℹ `citation("methylCIPHERv2")` cites the package itself.
 ```

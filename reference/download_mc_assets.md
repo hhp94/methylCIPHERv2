@@ -20,8 +20,8 @@ download_mc_assets(groups = "all", ask = TRUE)
 
 - ask:
 
-  A boolean. Asks for consent before a download or a delete. Default is
-  `TRUE`. Pass `FALSE` to download or delete without asking, in a
+  A boolean. Asks for confirmation before the assets directory changes.
+  Default is `TRUE`. Pass `FALSE` to continue without asking, in a
   non-interactive session.
 
 ## Value
@@ -32,9 +32,9 @@ group id. Returned invisibly.
 ## Details
 
 Only an asset that is missing from the assets directory is fetched.
-`download_mc_assets()` asks for consent before a download, refuses in a
-non-interactive session, and treats `ask = FALSE` as consent to proceed
-without asking.
+`download_mc_assets()` asks for confirmation before a download and
+refuses in a non-interactive session. `ask = FALSE` confirms the
+download in advance.
 
 ## See also
 

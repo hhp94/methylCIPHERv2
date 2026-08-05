@@ -27,19 +27,17 @@ predict_sex(DNAm, pheno = NULL, ...)
 
 ## Value
 
-A data.frame. One row for each sample, with the two `DNAmSex_Wang`
-scores, `predicted_sex`, and, when `pheno` has a `Female` column,
-`recorded_sex` and `sex_mismatch`.
+A data.frame. One row for each sample, with the `DNAmSex_Wang_ChrX` and
+`DNAmSex_Wang_ChrY` scores, `predicted_sex`, and, when `pheno` has a
+`Female` column, `recorded_sex` and `sex_mismatch`.
 
 ## Details
 
 This is a re-implementation of the sex prediction algorithm of the
 wateRmelon package.
 
-The returned data.frame has one row for each sample, with the two
-`DNAmSex_Wang` scores and a `predicted_sex` column. `predicted_sex` is
-one of `"Male"`, `"Female"`, `"47,XXY"`, or `"45,XO"`. A sample missing
-either score gets `NA`, not a default call.
+`predicted_sex` is one of `"Male"`, `"Female"`, `"47,XXY"`, or
+`"45,XO"`. A sample missing either score gets `NA`, not a default call.
 
 When `pheno` has a `Female` column, coded `0` or `1`, the result also
 carries `recorded_sex` and `sex_mismatch`. `sex_mismatch` is `TRUE` only
@@ -58,8 +56,7 @@ Genomics*, 22(1), 484.
 ## Examples
 
 ``` r
-ids <- c("DNAmSex_Wang_ChrX", "DNAmSex_Wang_ChrY")
-sim <- sim_DNAm(ids, n = 6, Female = TRUE)
+sim <- sim_DNAm("DNAmSex_Wang", n = 6, Female = TRUE)
 predict_sex(sim[["DNAm"]], sim[["pheno"]])
 #> ! 3 samples have a predicted sex that does not match the Female column in
 #>   `pheno`.

@@ -24,10 +24,12 @@ batch, `mc_batch_id`.
 
 ## Details
 
-Only the clocks in the returned scores of `x` get a row. A clock that
-scores as part of another clock gets none. A clock assembled only from
-other clocks' scores gets none. A clock scored separately for each sex
-has no row for a sample outside the sex it scored.
+A clock gets a row when it reads CpGs of its own, under its own name. A
+clock that scores as part of another clock is included. A clock
+assembled only from other clocks' scores gets no row, even when it is
+one of the scores of `x`. Read the rows of the clocks it depends on
+instead. A clock scored separately for each sex has no row for a sample
+outside the sex it scored.
 
 A clock that normalizes has a second row for each sample, under
 `panel = "norm"`, for the panel used to normalize it.

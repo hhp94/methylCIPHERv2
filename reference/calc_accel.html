@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -76,9 +76,9 @@ by sample id. Default is <code>NULL</code>.</p></dd>
 
 
 <dt id="arg-long">long<a class="anchor" aria-label="anchor" href="#arg-long"></a></dt>
-<dd><p>A boolean. Returns one row for each sample and clock
-when <code>TRUE</code>, and one row for each sample, with one column for each
-clock, when <code>FALSE</code>. Default is <code>TRUE</code>.</p></dd>
+<dd><p>A boolean. Returns one row for each sample and clock when
+<code>TRUE</code>, and one row for each sample, with one column for each clock, when
+<code>FALSE</code>. Default is <code>TRUE</code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -90,21 +90,26 @@ for each sample, with one column for each clock.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when <code>x</code>
-holds more than one batch. This is the same calculation as
-<code><a href="refinalize_clocks.html">refinalize_clocks()</a></code>.</p>
-<p>The default <code>type = "accel"</code> calculates the well-known age acceleration.
+    <p>The default <code>type = "accel"</code> calculates age acceleration.
 It regresses each clock in <code>x</code> on <code>Age</code> and returns the residuals.
 <code>type = "diff"</code> calculates the raw difference between each clock and
 <code>Age</code>, and fits no model unless <code>formula</code> is given.</p>
 <p><code>formula</code> replaces the default model completely. It does not add to it, so
 <code>~ Plate</code> regresses each clock on the plate alone, and not on age.</p>
-<p><code>data</code> may carry the covariates the calculation needs, as in
-<code>data.frame(ID, Plate)</code> passed to <code>data</code>, with <code>formula = ~ Age + Plate</code>.
+<p><code>data</code> carries the covariates the calculation needs. Pass a data.frame of
+<code>ID</code> and <code>Plate</code> to <code>data</code>, with <code>formula = ~ Age + Plate</code>.
 It may add a column, and it may repeat a column that scoring already used.
 <code>calc_accel()</code> stops when a repeated column disagrees with the value
 scoring used.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="clocks-that-use-all-the-samples">Clocks that use all the samples<a class="anchor" aria-label="anchor" href="#clocks-that-use-all-the-samples"></a></h2>
+
+
+<p>Some clocks depend on information from all the samples, such as a z-score.
+When <code>x</code> holds more than one batch, these clocks take their value from
+every sample in <code>x</code>, and not from one batch alone. This is the same
+calculation as <code><a href="refinalize_clocks.html">refinalize_clocks()</a></code>.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

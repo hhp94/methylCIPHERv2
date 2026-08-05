@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -63,21 +63,21 @@ assets. Default is <code>NULL</code>, which uses the assets directory.</p></dd>
 
 
 <dt id="arg-ask">ask<a class="anchor" aria-label="anchor" href="#arg-ask"></a></dt>
-<dd><p>A boolean. Asks for consent before a download or a delete.
-Default is <code>TRUE</code>. Pass <code>FALSE</code> to download or delete without asking, in
-a non-interactive session.</p></dd>
+<dd><p>A boolean. Asks for confirmation before the assets directory
+changes. Default is <code>TRUE</code>. Pass <code>FALSE</code> to continue without asking, in a
+non-interactive session.</p></dd>
 
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A named list. It holds the loaded asset for each requested group,
-in the order of <code>groups</code>.</p>
+    <p>An <code>mc_assets</code> object. It holds the loaded asset for each
+requested group, in the order of <code>groups</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p><code>load_mc_assets()</code> asks for consent before a download, refuses in a
-non-interactive session, and treats <code>ask = FALSE</code> as consent to proceed
-without asking.</p>
+    <p><code>load_mc_assets()</code> asks for confirmation before it downloads an asset that
+is not already in the assets directory. It refuses to download in a
+non-interactive session. <code>ask = FALSE</code> confirms the download in advance.</p>
 <p>An asset in <code>ext_data</code> for a group that was not requested is not used, and
 <code>load_mc_assets()</code> warns about it.</p>
     </div>

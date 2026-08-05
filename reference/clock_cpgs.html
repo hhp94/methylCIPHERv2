@@ -9,7 +9,7 @@ for normalization."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -55,7 +55,7 @@ for normalization.</p>
 
 <dl><dt id="arg-clocks">clocks<a class="anchor" aria-label="anchor" href="#arg-clocks"></a></dt>
 <dd><p>A character vector. The clocks to score, named by clock id,
-group id, or tag.</p></dd>
+group id, or tag. See <code><a href="list_clocks.html">list_clocks()</a></code>.</p></dd>
 
 
 <dt id="arg-normalize">normalize<a class="anchor" aria-label="anchor" href="#arg-normalize"></a></dt>
@@ -70,9 +70,9 @@ assets. Default is <code>NULL</code>, which uses the assets directory.</p></dd>
 
 
 <dt id="arg-ask">ask<a class="anchor" aria-label="anchor" href="#arg-ask"></a></dt>
-<dd><p>A boolean. Asks for consent before a download or a delete.
-Default is <code>TRUE</code>. Pass <code>FALSE</code> to download or delete without asking, in
-a non-interactive session.</p></dd>
+<dd><p>A boolean. Asks for confirmation before the assets directory
+changes. Default is <code>TRUE</code>. Pass <code>FALSE</code> to continue without asking, in a
+non-interactive session.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -82,8 +82,10 @@ duplicates removed.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>A clock built from other clocks also needs their CpGs. Turning
-<code>normalize</code> on for a clock adds its background panel to the returned set.</p>
+    <p>A clock built from other clocks also needs their CpGs. A clock whose
+normalization is part of its definition always adds its background panel.
+For a clock whose normalization is optional, <code>normalize</code> adds the
+background panel only when it is on.</p>
     </div>
     <div class="section level2">
     <h2 id="the-assets-directory">The assets directory<a class="anchor" aria-label="anchor" href="#the-assets-directory"></a></h2>

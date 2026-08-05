@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -67,7 +67,7 @@ the rows and CpGs in the columns.</p></dd>
 
 <dt id="arg-clocks">clocks<a class="anchor" aria-label="anchor" href="#arg-clocks"></a></dt>
 <dd><p>A character vector. The clocks to score, named by clock id,
-group id, or tag.</p></dd>
+group id, or tag. See <code><a href="list_clocks.html">list_clocks()</a></code>.</p></dd>
 
 
 <dt id="arg-pheno">pheno<a class="anchor" aria-label="anchor" href="#arg-pheno"></a></dt>
@@ -104,9 +104,9 @@ assets. Default is <code>NULL</code>, which uses the assets directory.</p></dd>
 
 
 <dt id="arg-ask">ask<a class="anchor" aria-label="anchor" href="#arg-ask"></a></dt>
-<dd><p>A boolean. Asks for consent before a download or a delete.
-Default is <code>TRUE</code>. Pass <code>FALSE</code> to download or delete without asking, in
-a non-interactive session.</p></dd>
+<dd><p>A boolean. Asks for confirmation before the assets directory
+changes. Default is <code>TRUE</code>. Pass <code>FALSE</code> to continue without asking, in a
+non-interactive session.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -116,14 +116,17 @@ the coverage counts, and the provenance of the run.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p><code>list_clocks(all_columns = TRUE)</code> names every supported scheme, in its
-<code>normalize</code> column.
-<code><a href="list_clocks.html">list_clocks()</a></code> and <code><a href="list_clock_tags.html">list_clock_tags()</a></code> show every value <code>clocks</code> accepts.</p>
+    <p><code><a href="list_clocks.html">list_clocks()</a></code> and <code><a href="list_clock_tags.html">list_clock_tags()</a></code> show every value <code>clocks</code> accepts.</p>
+<p><code>normalize</code> turns on the schemes that a clock declares as optional. It
+cannot turn off a scheme that is part of the clock. The <code>normalize</code> column
+of <code>list_clocks(all_columns = TRUE)</code> gives the scheme each clock uses.</p>
 <p>The two coverage arguments differ. <code>calc_clocks()</code> stops when a clock has
 too few CpGs present, so every clock in the returned scores passed
-<code>min_clocks_coverage</code>. A sample with too few CpGs present raises a warning
-and still scores. Pass the returned value to <code><a href="clocks_coverage.html">clocks_coverage()</a></code> or
-<code><a href="samples_coverage.html">samples_coverage()</a></code> to see the counts.</p>
+<code>min_clocks_coverage</code>. A clock just above that floor, and a clock whose
+normalization panel falls below it, each raise a warning and still score.
+A sample with too few CpGs present raises a warning and still scores. Pass
+the returned value to <code><a href="clocks_coverage.html">clocks_coverage()</a></code> or <code><a href="samples_coverage.html">samples_coverage()</a></code> to see
+the counts.</p>
 <p><code>calc_clocks()</code> narrows <code>pheno</code> before it stores it. The returned value
 keeps the id column and the covariates that the clocks need, and drops the
 other columns.</p>

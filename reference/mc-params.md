@@ -17,7 +17,8 @@ Parameter definitions reused across the package.
 - clocks:
 
   A character vector. The clocks to score, named by clock id, group id,
-  or tag.
+  or tag. See
+  [`list_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clocks.md).
 
 - pheno:
 
@@ -37,8 +38,8 @@ Parameter definitions reused across the package.
 
 - ask:
 
-  A boolean. Asks for consent before a download or a delete. Default is
-  `TRUE`. Pass `FALSE` to download or delete without asking, in a
+  A boolean. Asks for confirmation before the assets directory changes.
+  Default is `TRUE`. Pass `FALSE` to continue without asking, in a
   non-interactive session.
 
 - all_columns:
@@ -52,6 +53,12 @@ Parameter definitions reused across the package.
   `"PCBrainAge"`, `"PCClocks"`, `"SystemsAge"` and `"Zhang2019"`, or
   `"all"` for every group. Repeated values are ignored, and an empty
   vector selects nothing. Default is `"all"`.
+
+- long:
+
+  A boolean. Returns one row for each sample and clock when `TRUE`, and
+  one row for each sample, with one column for each clock, when `FALSE`.
+  Default is `TRUE`.
 
 ## The assets directory
 
@@ -70,3 +77,11 @@ forms.
 - Assets already in memory from
   [`load_mc_assets()`](https://hhp94.github.io/methylCIPHERv2/reference/load_mc_assets.md)
   are used directly.
+
+## Clocks that use all the samples
+
+Some clocks depend on information from all the samples, such as a
+z-score. When `x` holds more than one batch, these clocks take their
+value from every sample in `x`, and not from one batch alone. This is
+the same calculation as
+[`refinalize_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/refinalize_clocks.md).

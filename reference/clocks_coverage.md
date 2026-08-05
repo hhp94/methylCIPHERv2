@@ -35,7 +35,8 @@ A clock assembled only from other clocks' scores reads no CpGs of its
 own, and gets a row of `NA` counts. Read the coverage of the clocks it
 depends on instead.
 
-Four more columns appear only where they say something about `x`.
+Four more kinds of column appear only where they say something about
+`x`.
 
 - `role` appears when `x` holds a clock that scores as part of another
   clock.
@@ -53,9 +54,9 @@ Four more columns appear only where they say something about `x`.
   batches.
 
 Pass `all_columns = TRUE` to keep `role`, `normalizes`, the `norm_*`
-counts, and `missing_cpgs` in every frame. Use it where the code that
-reads the frame names a column directly. `mc_batch_id` is the one
-exception, and still appears only when `x` holds more than one batch.
+counts, and `missing_cpgs` in every frame. Use it when your own code
+reads one of those columns by name. `mc_batch_id` is the one exception,
+and still appears only when `x` holds more than one batch.
 
 ## See also
 

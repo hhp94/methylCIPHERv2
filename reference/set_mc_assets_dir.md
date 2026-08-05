@@ -28,11 +28,10 @@ the override falls back to the `mc.assets_dir` option, the
 `MC_ASSETS_DIR` environment variable, or the default cache directory, in
 that order.
 
-The return value restores the previous state exactly, in the manner of
-[`setwd()`](https://rdrr.io/r/base/getwd.html). It is the override that
-was in place, and it is `NULL` when no override was set. Passing `NULL`
-back clears the override, rather than pinning it to the directory that
-happened to be in effect.
+The return value restores the previous state exactly. It is the override
+that was in place, and it is `NULL` when no override was set. Passing
+`NULL` back clears the override, rather than pinning it to the directory
+that happened to be in effect.
 
 For the directory in effect, which is always a path, call
 [`get_mc_assets_dir()`](https://hhp94.github.io/methylCIPHERv2/reference/get_mc_assets_dir.md).

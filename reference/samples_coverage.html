@@ -9,7 +9,7 @@ each sample, clock, and panel."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -65,11 +65,12 @@ one batch, <code>mc_batch_id</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
-    <p>Only the clocks in the returned scores of <code>x</code> get a row. A clock that
-scores as part of another clock gets none. A clock assembled only from
-other clocks' scores gets none. A
-clock scored separately for each sex has no row for a sample outside
-the sex it scored.</p>
+    <p>A clock gets a row when it reads CpGs of its own, under its own name. A
+clock that scores as part of another clock is included. A clock assembled
+only from other clocks' scores gets no row, even when it is one of the
+scores of <code>x</code>. Read the rows of the clocks it depends on instead. A clock
+scored separately for each sex has no row for a sample outside the sex it
+scored.</p>
 <p>A clock that normalizes has a second row for each sample, under
 <code>panel = "norm"</code>, for the panel used to normalize it.</p>
 <p><code>samples_coverage()</code> warns when a row's <code>coverage</code> is under the

@@ -22,7 +22,7 @@ cite_clocks(x, ...)
 
 - x:
 
-  A character vector. The clock ids or group ids to cite, or an
+  A character vector. The clock ids, group ids or tags to cite, or an
   `mc_result` object from
   [`calc_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/calc_clocks.md).
 
@@ -37,10 +37,13 @@ bibtex text for each paper.
 
 ## Details
 
-A character vector cites the clocks it names, and a group id cites every
-clock in the group. An `mc_result` object cites the clocks in its
-scores. Any other class raises an error that names the two accepted
-types.
+A character vector cites the clocks it names. A group id cites every
+clock in the group, and a tag cites every clock the tag expands to. See
+[`list_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clocks.md)
+and
+[`list_clock_tags()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clock_tags.md).
+An `mc_result` object cites the clocks in its scores. Any other class
+raises an error that names the two accepted types.
 
 ## Examples
 

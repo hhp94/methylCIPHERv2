@@ -9,7 +9,7 @@ range shipped with the package."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">methylCIPHERv2</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -80,12 +80,17 @@ opposite sign from a reference correlation stronger than 0.3.</p>
 <p>A clock needs at least 5 samples with a finite score and age, and
 variation in both, to appear in the result. A clock with no entry in the
 shipped reference table is left out.</p>
-<p>This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when <code>x</code>
-holds more than one batch. This is the same calculation as
-<code><a href="refinalize_clocks.html">refinalize_clocks()</a></code>.</p>
 <p>Rows are ordered by the gap between the observed and the reference
 correlation, most negative first.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="clocks-that-use-all-the-samples">Clocks that use all the samples<a class="anchor" aria-label="anchor" href="#clocks-that-use-all-the-samples"></a></h2>
+
+
+<p>Some clocks depend on information from all the samples, such as a z-score.
+When <code>x</code> holds more than one batch, these clocks take their value from
+every sample in <code>x</code>, and not from one batch alone. This is the same
+calculation as <code><a href="refinalize_clocks.html">refinalize_clocks()</a></code>.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>

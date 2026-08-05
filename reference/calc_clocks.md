@@ -29,7 +29,8 @@ calc_clocks(
 - clocks:
 
   A character vector. The clocks to score, named by clock id, group id,
-  or tag.
+  or tag. See
+  [`list_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clocks.md).
 
 - pheno:
 
@@ -65,8 +66,8 @@ calc_clocks(
 
 - ask:
 
-  A boolean. Asks for consent before a download or a delete. Default is
-  `TRUE`. Pass `FALSE` to download or delete without asking, in a
+  A boolean. Asks for confirmation before the assets directory changes.
+  Default is `TRUE`. Pass `FALSE` to continue without asking, in a
   non-interactive session.
 
 ## Value
@@ -76,17 +77,22 @@ coverage counts, and the provenance of the run.
 
 ## Details
 
-`list_clocks(all_columns = TRUE)` names every supported scheme, in its
-`normalize` column.
 [`list_clocks()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clocks.md)
 and
 [`list_clock_tags()`](https://hhp94.github.io/methylCIPHERv2/reference/list_clock_tags.md)
 show every value `clocks` accepts.
 
+`normalize` turns on the schemes that a clock declares as optional. It
+cannot turn off a scheme that is part of the clock. The `normalize`
+column of `list_clocks(all_columns = TRUE)` gives the scheme each clock
+uses.
+
 The two coverage arguments differ. `calc_clocks()` stops when a clock
 has too few CpGs present, so every clock in the returned scores passed
-`min_clocks_coverage`. A sample with too few CpGs present raises a
-warning and still scores. Pass the returned value to
+`min_clocks_coverage`. A clock just above that floor, and a clock whose
+normalization panel falls below it, each raise a warning and still
+score. A sample with too few CpGs present raises a warning and still
+scores. Pass the returned value to
 [`clocks_coverage()`](https://hhp94.github.io/methylCIPHERv2/reference/clocks_coverage.md)
 or
 [`samples_coverage()`](https://hhp94.github.io/methylCIPHERv2/reference/samples_coverage.md)

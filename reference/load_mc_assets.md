@@ -24,20 +24,20 @@ load_mc_assets(groups, ext_data = NULL, ask = TRUE)
 
 - ask:
 
-  A boolean. Asks for consent before a download or a delete. Default is
-  `TRUE`. Pass `FALSE` to download or delete without asking, in a
+  A boolean. Asks for confirmation before the assets directory changes.
+  Default is `TRUE`. Pass `FALSE` to continue without asking, in a
   non-interactive session.
 
 ## Value
 
-A named list. It holds the loaded asset for each requested group, in the
-order of `groups`.
+An `mc_assets` object. It holds the loaded asset for each requested
+group, in the order of `groups`.
 
 ## Details
 
-`load_mc_assets()` asks for consent before a download, refuses in a
-non-interactive session, and treats `ask = FALSE` as consent to proceed
-without asking.
+`load_mc_assets()` asks for confirmation before it downloads an asset
+that is not already in the assets directory. It refuses to download in a
+non-interactive session. `ask = FALSE` confirms the download in advance.
 
 An asset in `ext_data` for a group that was not requested is not used,
 and `load_mc_assets()` warns about it.
