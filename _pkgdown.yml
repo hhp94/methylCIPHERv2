@@ -61,6 +61,7 @@ reference:
   - download_mc_assets
   - load_mc_assets
   - clear_mc_assets
+  - print.mc_assets
 
 - title: Citations
   desc: >

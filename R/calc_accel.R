@@ -54,15 +54,8 @@ shape_scores <- function(m, id_col, value_col, batch, long, label = NULL) {
 #' @param optional A boolean. Not used by this method. Default is
 #'   `FALSE`.
 #' @param ... Not used.
-#' @param long A boolean. Returns one row for each sample and clock
-#'   when `TRUE`, and one row for each sample, with one column for each
-#'   clock, when `FALSE`. Default is `TRUE`.
 #'
-#' @details
-#' This function recalculates any clock that depends on sample-wise
-#' information, such as a z-score, from all the available samples when `x`
-#' holds more than one batch. This is the same calculation as
-#' [refinalize_clocks()].
+#' @inheritSection mc-params Clocks that use all the samples
 #'
 #' @returns A data.frame. In long form, one row for each sample and clock,
 #'   with the score and, when `x` holds more than one batch, an
@@ -336,17 +329,11 @@ say_fill_batch <- function(x, rhs_vars) {
 #'   clock. Default is `"accel"`.
 #' @param data A data.frame. Extra sample metadata, joined to the `pheno` in `x`
 #'   by sample id. Default is `NULL`.
-#' @param long A boolean. Returns one row for each sample and clock
-#'   when `TRUE`, and one row for each sample, with one column for each
-#'   clock, when `FALSE`. Default is `TRUE`.
+#'
+#' @inheritSection mc-params Clocks that use all the samples
 #'
 #' @details
-#' This function recalculates any clock that depends on sample-wise
-#' information, such as a z-score, from all the available samples when `x`
-#' holds more than one batch. This is the same calculation as
-#' [refinalize_clocks()].
-#'
-#' The default `type = "accel"` calculates the well-known age acceleration.
+#' The default `type = "accel"` calculates age acceleration.
 #' It regresses each clock in `x` on `Age` and returns the residuals.
 #' `type = "diff"` calculates the raw difference between each clock and
 #' `Age`, and fits no model unless `formula` is given.
@@ -354,8 +341,8 @@ say_fill_batch <- function(x, rhs_vars) {
 #' `formula` replaces the default model completely. It does not add to it, so
 #' `~ Plate` regresses each clock on the plate alone, and not on age.
 #'
-#' `data` may carry the covariates the calculation needs, as in
-#' `data.frame(ID, Plate)` passed to `data`, with `formula = ~ Age + Plate`.
+#' `data` carries the covariates the calculation needs. Pass a data.frame of
+#' `ID` and `Plate` to `data`, with `formula = ~ Age + Plate`.
 #' It may add a column, and it may repeat a column that scoring already used.
 #' `calc_accel()` stops when a repeated column disagrees with the value
 #' scoring used.

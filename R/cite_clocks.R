@@ -5,14 +5,16 @@
 #' Builds the citations for a set of clocks, or for the clocks scored in an
 #' `mc_result` object.
 #'
-#' @param x A character vector. The clock ids or group ids to cite, or an
-#'   `mc_result` object from [calc_clocks()].
+#' @param x A character vector. The clock ids, group ids or tags to cite, or
+#'   an `mc_result` object from [calc_clocks()].
 #' @param ... Not used.
 #'
 #' @details
-#' A character vector cites the clocks it names, and a group id cites every
-#' clock in the group. An `mc_result` object cites the clocks in its scores.
-#' Any other class raises an error that names the two accepted types.
+#' A character vector cites the clocks it names. A group id cites every clock
+#' in the group, and a tag cites every clock the tag expands to. See
+#' [list_clocks()] and [list_clock_tags()]. An `mc_result` object cites the
+#' clocks in its scores. Any other class raises an error that names the two
+#' accepted types.
 #'
 #' @returns An `mc_citation` object. It holds the clock-to-paper links and
 #'   the bibtex text for each paper.

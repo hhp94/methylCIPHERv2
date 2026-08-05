@@ -192,7 +192,9 @@ test_that("a group token is matched exactly, and an empty selection is never all
   # empty selection selects nothing. never means every group.
   expect_equal(mc_resolve_groups(NULL), character(0))
   expect_equal(mc_resolve_groups(character(0)), character(0))
-  expect_length(load_mc_assets(character(0)), 0L)
+  empty <- load_mc_assets(character(0))
+  expect_length(empty, 0L)
+  expect_s3_class(empty, "mc_assets")
 })
 
 test_that("a consented fetch stages the pack, verifies it, and leaves no scratch", {

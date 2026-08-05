@@ -130,10 +130,10 @@ get_mc_assets_dir <- function() {
 #' override falls back to the `mc.assets_dir` option, the `MC_ASSETS_DIR`
 #' environment variable, or the default cache directory, in that order.
 #'
-#' The return value restores the previous state exactly, in the manner of
-#' [setwd()]. It is the override that was in place, and it is `NULL` when no
-#' override was set. Passing `NULL` back clears the override, rather than
-#' pinning it to the directory that happened to be in effect.
+#' The return value restores the previous state exactly. It is the override
+#' that was in place, and it is `NULL` when no override was set. Passing
+#' `NULL` back clears the override, rather than pinning it to the directory
+#' that happened to be in effect.
 #'
 #' For the directory in effect, which is always a path, call
 #' [get_mc_assets_dir()].
@@ -357,9 +357,9 @@ mc_consent <- function(rows, dir, ask) {
 #'
 #' @details
 #' Only an asset that is missing from the assets directory is fetched.
-#' `download_mc_assets()` asks for consent before a download, refuses in a
-#' non-interactive session, and treats `ask = FALSE` as consent to proceed
-#' without asking.
+#' `download_mc_assets()` asks for confirmation before a download and refuses
+#' in a non-interactive session. `ask = FALSE` confirms the download in
+#' advance.
 #'
 #' @returns A character vector. The path to each requested asset file, named
 #'   by group id. Returned invisibly.
@@ -568,15 +568,15 @@ mc_canonicalize_ext_data <- function(ext_data) {
 #' @inheritSection mc-params The assets directory
 #'
 #' @details
-#' `load_mc_assets()` asks for consent before a download, refuses in a
-#' non-interactive session, and treats `ask = FALSE` as consent to proceed
-#' without asking.
+#' `load_mc_assets()` asks for confirmation before it downloads an asset that
+#' is not already in the assets directory. It refuses to download in a
+#' non-interactive session. `ask = FALSE` confirms the download in advance.
 #'
 #' An asset in `ext_data` for a group that was not requested is not used, and
 #' `load_mc_assets()` warns about it.
 #'
-#' @returns A named list. It holds the loaded asset for each requested group,
-#'   in the order of `groups`.
+#' @returns An `mc_assets` object. It holds the loaded asset for each
+#'   requested group, in the order of `groups`.
 #'
 #' @seealso
 #' - [list_mc_assets()] for the assets already on disk.
@@ -595,7 +595,7 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
   # one reading of `groups` for every verb. empty is the common case.
   groups <- mc_resolve_groups(groups)
   if (!length(groups)) {
-    return(stats::setNames(list(), character(0)))
+    return(new_mc_assets(list(), character(0)))
   }
   rows <- lapply(groups, mc_asset)
 
@@ -632,7 +632,7 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
         call = NULL
       )
     }
-    return(stats::setNames(packs, groups))
+    return(new_mc_assets(packs, groups))
   }
 
   # path = closed set (no download), NULL = open set
@@ -667,7 +667,53 @@ load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
 
   unread <- vapply(packs, is.null, logical(1))
   packs[unread] <- lapply(files[unread], qs2::qs_read, validate_checksum = TRUE)
-  stats::setNames(packs, groups)
+  new_mc_assets(packs, groups)
+}
+
+# the one exit shape: a group-named list of loaded packs
+new_mc_assets <- function(packs, groups) {
+  structure(
+    stats::setNames(packs, groups),
+    class = c("mc_assets", "list")
+  )
+}
+
+# one line per loaded group, in the shared printer grammar (R/print.R)
+#' Print Method For An mc_assets Object
+#'
+#' Prints the clock count and the CpG count of every group in an `mc_assets`
+#' object.
+#'
+#' @param x An `mc_assets` object. The value returned by [load_mc_assets()].
+#' @param ... Not used.
+#'
+#' @returns An `mc_assets` object. Returns `x`, invisibly, after printing it.
+#'
+#' @examplesIf interactive()
+#' assets <- load_mc_assets("PCBrainAge")
+#' print(assets)
+#'
+#' @export
+print.mc_assets <- function(x, ...) {
+  n_clocks <- vapply(x, function(p) length(p[["clocks"]]), integer(1))
+  cat(
+    fmt_header("mc_assets", length(x), "group", sum(n_clocks), "clock"),
+    "\n",
+    sep = ""
+  )
+  # a homogeneous axis, so the groups list without a blank line between them
+  for (i in seq_along(x)) {
+    cat(
+      fmt_section(
+        names(x)[[i]],
+        plural_count(n_clocks[[i]], "clock"),
+        plural_count(length(x[[i]][["cpgs"]]), "CpG")
+      ),
+      "\n",
+      sep = ""
+    )
+  }
+  invisible(x)
 }
 
 # count phrase for the clear prompt (each part binds its own plural)
@@ -723,10 +769,11 @@ mc_consent_delete <- function(files, dir, ask, n_stale = 0L) {
 #' @inheritParams mc-params
 #'
 #' @details
-#' `clear_mc_assets()` removes both the currently declared assets and every
-#' superseded asset left behind by an earlier sync, for the requested groups.
-#' It asks for consent before deleting, refuses in a non-interactive
-#' session, and treats `ask = FALSE` as consent to proceed without asking.
+#' `clear_mc_assets()` removes the current assets for the requested groups. It
+#' also removes the superseded assets that an earlier version of the package
+#' left in the directory. It asks for confirmation before deleting and refuses
+#' in a non-interactive session. `ask = FALSE` confirms the deletion in
+#' advance.
 #' If the assets directory holds no asset for the requested groups, no file
 #' is removed.
 #'

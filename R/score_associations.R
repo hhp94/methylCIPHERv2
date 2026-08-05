@@ -111,6 +111,8 @@ assoc_empty <- function() {
 #'   the samples in `x`. Default is `NULL`, which uses the `Age` column of the
 #'   `pheno` in `x`.
 #'
+#' @inheritSection mc-params Clocks that use all the samples
+#'
 #' @details
 #' Each row compares a clock's observed score-age correlation with its
 #' reference correlation and expected range. The `outside` column marks a
@@ -121,11 +123,6 @@ assoc_empty <- function() {
 #' A clock needs at least 5 samples with a finite score and age, and
 #' variation in both, to appear in the result. A clock with no entry in the
 #' shipped reference table is left out.
-#'
-#' This function recalculates any clock that depends on sample-wise
-#' information, such as a z-score, from all the available samples when `x`
-#' holds more than one batch. This is the same calculation as
-#' [refinalize_clocks()].
 #'
 #' Rows are ordered by the gap between the observed and the reference
 #' correlation, most negative first.

@@ -124,18 +124,14 @@ with the clock, or dropped. A CpG that is present but missing in some
 samples is column mean imputed (i.e., CpG-wise).
 
 Some clocks need a `Female` covariate. If not readily available,
-`predict_sex()` scores the two `DNAmSex_Wang` ChrX and ChrY clocks and
+`predict_sex()` scores the two clocks in the `DNAmSex_Wang` group and
 returns a predicted sex for every sample. When `pheno` provides
 `Female`, `predict_sex()` also returns `recorded_sex` and
 `sex_mismatch`, and reports how many samples disagree.
 
 ``` r
 # The betas are random here, so the mismatches are expected.
-sex_sim <- sim_DNAm(
-  c("DNAmSex_Wang_ChrX", "DNAmSex_Wang_ChrY"),
-  n = 6,
-  Female = TRUE
-)
+sex_sim <- sim_DNAm("DNAmSex_Wang", n = 6, Female = TRUE)
 
 predict_sex(sex_sim[["DNAm"]], sex_sim[["pheno"]])
 #>        ID DNAmSex_Wang_ChrX DNAmSex_Wang_ChrY predicted_sex recorded_sex

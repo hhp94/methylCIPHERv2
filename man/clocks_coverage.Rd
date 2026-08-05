@@ -28,7 +28,7 @@ A clock assembled only from other clocks' scores reads no CpGs of its
 own, and gets a row of \code{NA} counts. Read the coverage of the clocks it
 depends on instead.
 
-Four more columns appear only where they say something about \code{x}.
+Four more kinds of column appear only where they say something about \code{x}.
 \itemize{
 \item \code{role} appears when \code{x} holds a clock that scores as part of another
 clock.
@@ -42,9 +42,9 @@ combines batches.
 }
 
 Pass \code{all_columns = TRUE} to keep \code{role}, \code{normalizes}, the \verb{norm_*}
-counts, and \code{missing_cpgs} in every frame. Use it where the code that
-reads the frame names a column directly. \code{mc_batch_id} is the one
-exception, and still appears only when \code{x} holds more than one batch.
+counts, and \code{missing_cpgs} in every frame. Use it when your own code reads
+one of those columns by name. \code{mc_batch_id} is the one exception, and
+still appears only when \code{x} holds more than one batch.
 }
 \examples{
 clocks <- c("Horvath1", "Hannum")

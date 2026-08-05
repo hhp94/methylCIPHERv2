@@ -134,7 +134,7 @@ batch_coverage <- function(per_clock, batch, returned) {
 #' own, and gets a row of `NA` counts. Read the coverage of the clocks it
 #' depends on instead.
 #'
-#' Four more columns appear only where they say something about `x`.
+#' Four more kinds of column appear only where they say something about `x`.
 #'
 #' - `role` appears when `x` holds a clock that scores as part of another
 #'   clock.
@@ -147,9 +147,9 @@ batch_coverage <- function(per_clock, batch, returned) {
 #'   combines batches.
 #'
 #' Pass `all_columns = TRUE` to keep `role`, `normalizes`, the `norm_*`
-#' counts, and `missing_cpgs` in every frame. Use it where the code that
-#' reads the frame names a column directly. `mc_batch_id` is the one
-#' exception, and still appears only when `x` holds more than one batch.
+#' counts, and `missing_cpgs` in every frame. Use it when your own code reads
+#' one of those columns by name. `mc_batch_id` is the one exception, and
+#' still appears only when `x` holds more than one batch.
 #'
 #' @returns A data.frame. One row for each clock and batch, with the CpG
 #'   counts of its scoring panel, and the columns above that apply to `x`.
@@ -282,7 +282,7 @@ say_low_samples <- function(out, threshold) {
   invisible(NULL)
 }
 
-# one row per (sample, returned clock, panel)
+# one row per (sample, clock with a coverage record, panel)
 #' Sample Coverage Counts
 #'
 #' Reports each sample's CpG coverage for every clock in `x`, one row for
@@ -291,11 +291,12 @@ say_low_samples <- function(out, threshold) {
 #' @inheritParams mc-params
 #'
 #' @details
-#' Only the clocks in the returned scores of `x` get a row. A clock that
-#' scores as part of another clock gets none. A clock assembled only from
-#' other clocks' scores gets none. A
-#' clock scored separately for each sex has no row for a sample outside
-#' the sex it scored.
+#' A clock gets a row when it reads CpGs of its own, under its own name. A
+#' clock that scores as part of another clock is included. A clock assembled
+#' only from other clocks' scores gets no row, even when it is one of the
+#' scores of `x`. Read the rows of the clocks it depends on instead. A clock
+#' scored separately for each sex has no row for a sample outside the sex it
+#' scored.
 #'
 #' A clock that normalizes has a second row for each sample, under
 #' `panel = "norm"`, for the panel used to normalize it.

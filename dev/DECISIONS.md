@@ -14,6 +14,104 @@ Older dated citations in `CLAUDE.md` resolve there. Do not restate that history 
 
 ---
 
+## 2026-08-05 -- two settled word choices in user-facing text: "confirm", and how a clock is named
+
+Both are vocabulary, so neither can be linted and both drift silently. They are written into
+`dev/WRITING.md` section 2 rather than left as a preference.
+
+**"confirmation" / "confirm", not "consent".** Four doc sites used "consent" for what a yes-or-no
+prompt does. `consent` reads as a legal term and overstates it. The replacement was scoped to text
+a user can see: the `ask` donor param and the `@details` on `download_mc_assets()`,
+`load_mc_assets()` and `clear_mc_assets()`. **The internal `mc_consent()` and
+`mc_consent_delete()` keep their names**, along with the code comments and the two test names, on
+the same line CLAUDE.md already draws between an audience and an implementation. Renaming them
+buys nothing a reader can see and touches a mocked binding in the suite. No cli message used the
+word, so the string surface was already clean, and `README.Rmd` had independently written
+"downloading requires confirmation".
+
+**A clock id in prose follows the reader, and the reader meets it in two different places.** The
+docs spelled the sex classifier both ways with no rule: `predict_sex()`'s example requested
+`c("DNAmSex_Wang_ChrX", "DNAmSex_Wang_ChrY")` while its `@returns` described the output as "the
+two `DNAmSex_Wang` scores". Both were backwards. Verified: `resolve_clocks("DNAmSex_Wang")` gives
+both members, and `predict_sex()` returns columns named `DNAmSex_Wang_ChrX` and
+`DNAmSex_Wang_ChrY`. So a **request** takes the shortest token that resolves, which is the group
+id, and a **returned column** is named in full, because `DNAmSex_Wang` is not a column anyone will
+find in their frame. The README example now shows both at once: a one-token request producing two
+long column names.
+
+`README.md` was regenerated with `devtools::build_readme()` rather than hand-edited. The diff came
+back as exactly the two intended edits with no churn, which is the check that the seeded chunks and
+the staged assets still render faithfully.
+
+---
+
+## 2026-08-05 -- repeated roxygen prose is hoisted to the donor, and donor text names effects
+
+An audit of every `@details` block found ten defects. Two of them were the same defect: text
+copied between topics, drifting or over-specific at one call site and correct at another. So the
+fix is structural, not per-topic.
+
+**What moved to `R/mc-params.R`.** The cross-sample paragraph, verbatim on `as.data.frame`,
+`as.matrix`, `calc_accel` and `score_associations`, is now the `Clocks that use all the samples`
+section, pulled in with `@inheritSection`. `long`, identical on two topics, is a donor param. That
+is the second `@section` on the donor and confirms the mechanism generalises past
+`The assets directory`: a `@section` renders after `\value`, which is the right place for a
+caveat about the returned value, and one edit now reaches four pages.
+
+**Donor text names the effect, not the operations.** `ask` read "Asks for consent before a
+download or a delete". Five of the six recipients cannot delete anything. An enumeration in shared
+text is the worst kind of duplication, because it is one list that has to stay true of N call
+sites and nothing checks it. It now reads "before the assets directory changes", which is true
+everywhere and stays true when a seventh topic takes `ask`. This also fixed the `load_mc_assets()`
+`@details`, which read as though the function refuses outright in a non-interactive session when
+it refuses only a download of a missing asset.
+
+**Three things were deliberately left duplicated**, all for the same reason: hoisting would
+replace visible duplication with an invisible wrong default. `...` is identical on 9 of 11 topics,
+but its three sentences mean opposite things and a wrong "Not used." on a topic that really passes
+`...` through is invisible in the rendered page. `n` and `p` differ between the two print methods,
+and `n` collides with `sim_DNAm()`'s different default. `optional` and `row.names` sit on two
+topics of which only one may inherit, because the donor's `x` is an `mc_result` -- so the saving is
+zero. Moving `x` out of the donor to close that footgun was costed and rejected: about ten topics
+inherit it.
+
+**The audit's own headline finding was unrelated to hoisting and worth recording.**
+`samples_coverage()`'s `@details` said "Only the clocks in the returned scores of `x` get a row. A
+clock that scores as part of another clock gets none." Both sentences were the exact inverse of
+`covered_ids(per_clock)`, and they contradicted the paragraph's own fourth sentence. Measured on
+`c("DNAmFitAge", "Horvath1")`: 12 rows are not score columns and 8 score columns have no row. The
+`#` comment above the function had drifted the same way and was corrected with it.
+
+---
+
+## 2026-08-05 -- `load_mc_assets()` returns a classed `mc_assets`, so it has a printer
+
+`load_mc_assets()` returned a bare named list of packs, and printing one dumped every coefficient
+matrix in it. The four packs are the heaviest objects the package hands back, so the default
+printer is the worst one it could have.
+
+**The fix is a class, not a wrapper.** `new_mc_assets()` is `setNames()` plus
+`class = c("mc_assets", "list")`, applied at both exits (the empty one included, so the shape is
+uniform). Nothing else changes: `ext_data` still reaches `mc_canonicalize_ext_data()` through the
+`is.list()` arm, `packs[[gid]]` still resolves in `clock_pack()`, and the existing tests that read
+the value by name pass untouched.
+
+**What it prints is `n_clocks` and `n_cpgs`, per group, because the reader has already met those
+two.** They are the columns of `list_mc_assets()`. Both come off the pack itself (`clocks`,
+`cpgs`), which every one of the four encoders in `sync.R` sets, rather than off the declared
+registry -- a pack handed in through `ext_data` need not be a group the registry knows.
+
+**The one departure from the shared grammar (`R/print.R`) is deliberate:** no blank line between
+the `$group [...]` lines. In `mc_result` and `mc_sim` a `$name` section is a distinct component
+with a data block under it. Here the sections are elements of one homogeneous axis and there is no
+block, so they read as a list. Header, `fmt_section()` and `plural_count()` are the shared ones.
+
+`mc_assets` also joins `DOC_TYPES` in `R/dev-utils.R` and the type table in `dev/WRITING.md`, and
+`print.mc_assets` joins the list of topics whose `x` **must not** inherit from the `mc-params`
+donor.
+
+---
+
 ## 2026-08-04 -- source-tree-only tests are build-ignored, not CRAN-skipped
 
 The first `devtools::check()` after the trim came back `1 error | 1 warning | 0 notes` in 51s (it

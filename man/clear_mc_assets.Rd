@@ -12,9 +12,9 @@ of \code{"PCBrainAge"}, \code{"PCClocks"}, \code{"SystemsAge"} and \code{"Zhang2
 \code{"all"} for every group. Repeated values are ignored, and an empty vector
 selects nothing. Default is \code{"all"}.}
 
-\item{ask}{A boolean. Asks for consent before a download or a delete.
-Default is \code{TRUE}. Pass \code{FALSE} to download or delete without asking, in
-a non-interactive session.}
+\item{ask}{A boolean. Asks for confirmation before the assets directory
+changes. Default is \code{TRUE}. Pass \code{FALSE} to continue without asking, in a
+non-interactive session.}
 }
 \value{
 A character vector. The path to each deleted asset file, returned
@@ -25,10 +25,11 @@ Deletes the clock assets for one or more groups from the assets
 directory.
 }
 \details{
-\code{clear_mc_assets()} removes both the currently declared assets and every
-superseded asset left behind by an earlier sync, for the requested groups.
-It asks for consent before deleting, refuses in a non-interactive
-session, and treats \code{ask = FALSE} as consent to proceed without asking.
+\code{clear_mc_assets()} removes the current assets for the requested groups. It
+also removes the superseded assets that an earlier version of the package
+left in the directory. It asks for confirmation before deleting and refuses
+in a non-interactive session. \code{ask = FALSE} confirms the deletion in
+advance.
 If the assets directory holds no asset for the requested groups, no file
 is removed.
 }

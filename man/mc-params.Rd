@@ -10,7 +10,7 @@ the rows and CpGs in the columns.}
 \item{x}{An \code{mc_result} object. The value returned by \code{\link[=calc_clocks]{calc_clocks()}}.}
 
 \item{clocks}{A character vector. The clocks to score, named by clock id,
-group id, or tag.}
+group id, or tag. See \code{\link[=list_clocks]{list_clocks()}}.}
 
 \item{pheno}{A data.frame. The sample metadata, with one row for each
 sample. Default is \code{NULL}.}
@@ -22,9 +22,9 @@ optional schemes off.}
 \item{ext_data}{A string. The path to the directory that holds the clock
 assets. Default is \code{NULL}, which uses the assets directory.}
 
-\item{ask}{A boolean. Asks for consent before a download or a delete.
-Default is \code{TRUE}. Pass \code{FALSE} to download or delete without asking, in
-a non-interactive session.}
+\item{ask}{A boolean. Asks for confirmation before the assets directory
+changes. Default is \code{TRUE}. Pass \code{FALSE} to continue without asking, in a
+non-interactive session.}
 
 \item{all_columns}{A boolean. Returns every column, including the ones the
 frame leaves out by default. Default is \code{FALSE}.}
@@ -33,6 +33,10 @@ frame leaves out by default. Default is \code{FALSE}.}
 of \code{"PCBrainAge"}, \code{"PCClocks"}, \code{"SystemsAge"} and \code{"Zhang2019"}, or
 \code{"all"} for every group. Repeated values are ignored, and an empty vector
 selects nothing. Default is \code{"all"}.}
+
+\item{long}{A boolean. Returns one row for each sample and clock when
+\code{TRUE}, and one row for each sample, with one column for each clock, when
+\code{FALSE}. Default is \code{TRUE}.}
 }
 \description{
 Parameter definitions reused across the package.
@@ -48,6 +52,14 @@ missing. Use \code{\link[=set_mc_assets_dir]{set_mc_assets_dir()}} to choose tha
 is an error.
 \item Assets already in memory from \code{\link[=load_mc_assets]{load_mc_assets()}} are used directly.
 }
+}
+
+\section{Clocks that use all the samples}{
+
+Some clocks depend on information from all the samples, such as a z-score.
+When \code{x} holds more than one batch, these clocks take their value from
+every sample in \code{x}, and not from one batch alone. This is the same
+calculation as \code{\link[=refinalize_clocks]{refinalize_clocks()}}.
 }
 
 \keyword{internal}

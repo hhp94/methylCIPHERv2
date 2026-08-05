@@ -6,19 +6,19 @@ title: "The Clock Catalog"
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
-```{r setup}
+```{r setup, include = FALSE}
 library(methylCIPHERv2)
 ```
 
 ```{r, echo = FALSE}
-catalog <- list_clocks()
+catalog <- list_clocks(all_columns = TRUE)
 
 # a sex-routed family is scored through its own name, so its internal members
 # are dropped here. They are the rows whose request_as points elsewhere.
 catalog <- catalog[catalog[["clock_id"]] == catalog[["request_as"]], ]
 
 reactable::reactable(
-  catalog[c("clock_id", "group_id", "covariates")],
+  catalog[c("clock_id", "group_id", "covariates", "normalize")],
   searchable = TRUE,
   filterable = TRUE,
   striped = TRUE,
@@ -29,18 +29,21 @@ reactable::reactable(
   pageSizeOptions = c(25, 50, 100),
   defaultSorted = "group_id",
   columns = list(
-    clock_id = reactable::colDef(name = "Clock", minWidth = 150),
-    group_id = reactable::colDef(name = "Group", minWidth = 130),
-    covariates = reactable::colDef(name = "Covariates", minWidth = 130)
+    clock_id = reactable::colDef(name = "Clock", minWidth = 200),
+    group_id = reactable::colDef(name = "Group", minWidth = 160),
+    covariates = reactable::colDef(name = "Covariates", minWidth = 110),
+    normalize = reactable::colDef(name = "Normalize", minWidth = 110)
   )
 )
 ```
 
 ## What the columns mean
 
-**Clock** is the identifier for a single scored clock, and the name to pass to `calc_clocks()`. **Group** is the family it belongs to, and a group name can be requested on its own to score every member.
+**Clock** is the identifier for a single scored clock. **Group** is the family it belongs to.
 
 **Covariates** lists the columns that `pheno` must carry for that clock. An empty cell means the clock reads methylation values alone.
+
+**Normalize** names the background normalization scheme a clock uses, and an empty cell means it uses none. A `quantile` cell is part of the clock definition and always runs. A `bmiq` cell is optional, and stays off until the `normalize` argument of `calc_clocks()` turns it on.
 
 ## Scoring from the catalog
 
@@ -64,17 +67,17 @@ names(list_clock_tags())
 
 ## Filtering the catalog in code
 
-`list_clocks()` returns the table above as a data frame, so the catalog is available in a script as well as on this page. It takes a tag directly.
+`list_clocks()` returns this catalog as a data frame, so it is available in a script as well as on this page. It takes a tag directly.
 
 ```{r}
 mitotic <- list_clocks(tag = "mitotic")
 mitotic[["clock_id"]]
 ```
 
-The result is an ordinary data frame, so the other columns filter with base R.
+The result is an ordinary data frame, so you can filter the other columns with base R.
 
 ```{r}
-catalog <- list_clocks()
-bundled <- catalog[!catalog[["external"]], ]
+all_clocks <- list_clocks()
+bundled <- all_clocks[!all_clocks[["external"]], ]
 nrow(bundled)
 ```

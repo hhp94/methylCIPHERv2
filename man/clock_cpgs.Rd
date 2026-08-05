@@ -8,7 +8,7 @@ clock_cpgs(clocks, normalize = NULL, ext_data = NULL, ask = TRUE)
 }
 \arguments{
 \item{clocks}{A character vector. The clocks to score, named by clock id,
-group id, or tag.}
+group id, or tag. See \code{\link[=list_clocks]{list_clocks()}}.}
 
 \item{normalize}{A named logical vector. Turns background normalization on
 for the clocks that support it. Default is \code{NULL}, which leaves the
@@ -17,9 +17,9 @@ optional schemes off.}
 \item{ext_data}{A string. The path to the directory that holds the clock
 assets. Default is \code{NULL}, which uses the assets directory.}
 
-\item{ask}{A boolean. Asks for consent before a download or a delete.
-Default is \code{TRUE}. Pass \code{FALSE} to download or delete without asking, in
-a non-interactive session.}
+\item{ask}{A boolean. Asks for confirmation before the assets directory
+changes. Default is \code{TRUE}. Pass \code{FALSE} to continue without asking, in a
+non-interactive session.}
 }
 \value{
 A character vector. The CpGs needed to score \code{clocks}, with
@@ -30,8 +30,10 @@ Lists the CpGs needed to score a set of clocks, including background CpGs
 for normalization.
 }
 \details{
-A clock built from other clocks also needs their CpGs. Turning
-\code{normalize} on for a clock adds its background panel to the returned set.
+A clock built from other clocks also needs their CpGs. A clock whose
+normalization is part of its definition always adds its background panel.
+For a clock whose normalization is optional, \code{normalize} adds the
+background panel only when it is on.
 }
 \section{The assets directory}{
 

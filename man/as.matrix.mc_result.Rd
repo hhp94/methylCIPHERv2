@@ -18,12 +18,14 @@ clocks in the columns.
 \description{
 Converts the \code{\link[=calc_clocks]{calc_clocks()}} output to a matrix containing just the clocks.
 }
-\details{
-This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when \code{x}
-holds more than one batch. This is the same calculation as
-\code{\link[=refinalize_clocks]{refinalize_clocks()}}.
+\section{Clocks that use all the samples}{
+
+Some clocks depend on information from all the samples, such as a z-score.
+When \code{x} holds more than one batch, these clocks take their value from
+every sample in \code{x}, and not from one batch alone. This is the same
+calculation as \code{\link[=refinalize_clocks]{refinalize_clocks()}}.
 }
+
 \examples{
 clocks <- c("Horvath1", "Hannum")
 sim <- sim_DNAm(clocks, n = 10)

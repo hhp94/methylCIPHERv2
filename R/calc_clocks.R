@@ -5,9 +5,6 @@
 #' Scores CpG-based epigenetic clocks on a matrix of methylation beta values.
 #'
 #' @inheritParams mc-params
-#' @param normalize A named logical vector. Turns background normalization on
-#'   for the clocks that support it. Default is `NULL`, which leaves the
-#'   optional schemes off.
 #' @param pheno_id A string. The name of the column in `pheno` that holds the
 #'   sample ids. Default is `"ID"`.
 #' @param min_clocks_coverage A number between 0 and 1. The smallest fraction
@@ -20,15 +17,19 @@
 #' @inheritSection mc-params The assets directory
 #'
 #' @details
-#' `list_clocks(all_columns = TRUE)` names every supported scheme, in its
-#' `normalize` column.
 #' [list_clocks()] and [list_clock_tags()] show every value `clocks` accepts.
+#'
+#' `normalize` turns on the schemes that a clock declares as optional. It
+#' cannot turn off a scheme that is part of the clock. The `normalize` column
+#' of `list_clocks(all_columns = TRUE)` gives the scheme each clock uses.
 #'
 #' The two coverage arguments differ. `calc_clocks()` stops when a clock has
 #' too few CpGs present, so every clock in the returned scores passed
-#' `min_clocks_coverage`. A sample with too few CpGs present raises a warning
-#' and still scores. Pass the returned value to [clocks_coverage()] or
-#' [samples_coverage()] to see the counts.
+#' `min_clocks_coverage`. A clock just above that floor, and a clock whose
+#' normalization panel falls below it, each raise a warning and still score.
+#' A sample with too few CpGs present raises a warning and still scores. Pass
+#' the returned value to [clocks_coverage()] or [samples_coverage()] to see
+#' the counts.
 #'
 #' `calc_clocks()` narrows `pheno` before it stores it. The returned value
 #' keeps the id column and the covariates that the clocks need, and drops the

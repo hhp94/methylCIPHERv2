@@ -34,14 +34,17 @@ A clock needs at least 5 samples with a finite score and age, and
 variation in both, to appear in the result. A clock with no entry in the
 shipped reference table is left out.
 
-This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when \code{x}
-holds more than one batch. This is the same calculation as
-\code{\link[=refinalize_clocks]{refinalize_clocks()}}.
-
 Rows are ordered by the gap between the observed and the reference
 correlation, most negative first.
 }
+\section{Clocks that use all the samples}{
+
+Some clocks depend on information from all the samples, such as a z-score.
+When \code{x} holds more than one batch, these clocks take their value from
+every sample in \code{x}, and not from one batch alone. This is the same
+calculation as \code{\link[=refinalize_clocks]{refinalize_clocks()}}.
+}
+
 \examples{
 clocks <- c("Horvath1", "Hannum")
 sim <- sim_DNAm(clocks, n = 20)

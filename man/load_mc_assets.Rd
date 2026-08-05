@@ -15,21 +15,21 @@ loads nothing.}
 \item{ext_data}{A string. The path to the directory that holds the clock
 assets. Default is \code{NULL}, which uses the assets directory.}
 
-\item{ask}{A boolean. Asks for consent before a download or a delete.
-Default is \code{TRUE}. Pass \code{FALSE} to download or delete without asking, in
-a non-interactive session.}
+\item{ask}{A boolean. Asks for confirmation before the assets directory
+changes. Default is \code{TRUE}. Pass \code{FALSE} to continue without asking, in a
+non-interactive session.}
 }
 \value{
-A named list. It holds the loaded asset for each requested group,
-in the order of \code{groups}.
+An \code{mc_assets} object. It holds the loaded asset for each
+requested group, in the order of \code{groups}.
 }
 \description{
 Reads the assets for one or more clock groups into memory.
 }
 \details{
-\code{load_mc_assets()} asks for consent before a download, refuses in a
-non-interactive session, and treats \code{ask = FALSE} as consent to proceed
-without asking.
+\code{load_mc_assets()} asks for confirmation before it downloads an asset that
+is not already in the assets directory. It refuses to download in a
+non-interactive session. \code{ask = FALSE} confirms the download in advance.
 
 An asset in \code{ext_data} for a group that was not requested is not used, and
 \code{load_mc_assets()} warns about it.

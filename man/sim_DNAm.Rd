@@ -18,7 +18,7 @@ sim_DNAm(
 }
 \arguments{
 \item{clocks}{A character vector. The clocks to score, named by clock id,
-group id, or tag.}
+group id, or tag. See \code{\link[=list_clocks]{list_clocks()}}.}
 
 \item{n}{A single whole number. The number of samples to simulate. Default
 is \code{10}.}
@@ -39,9 +39,9 @@ optional schemes off.}
 \item{ext_data}{A string. The path to the directory that holds the clock
 assets. Default is \code{NULL}, which uses the assets directory.}
 
-\item{ask}{A boolean. Asks for consent before a download or a delete.
-Default is \code{TRUE}. Pass \code{FALSE} to download or delete without asking, in
-a non-interactive session.}
+\item{ask}{A boolean. Asks for confirmation before the assets directory
+changes. Default is \code{TRUE}. Pass \code{FALSE} to continue without asking, in a
+non-interactive session.}
 
 \item{suffix}{A string. Appended to every sample id, so two simulated
 matrices stay distinct. Default is \code{NULL}, which leaves the ids as

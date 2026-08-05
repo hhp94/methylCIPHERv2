@@ -16,8 +16,8 @@ cite_clocks(x, ...)
 \method{cite_clocks}{default}(x, ...)
 }
 \arguments{
-\item{x}{A character vector. The clock ids or group ids to cite, or an
-\code{mc_result} object from \code{\link[=calc_clocks]{calc_clocks()}}.}
+\item{x}{A character vector. The clock ids, group ids or tags to cite, or
+an \code{mc_result} object from \code{\link[=calc_clocks]{calc_clocks()}}.}
 
 \item{...}{Not used.}
 }
@@ -30,9 +30,11 @@ Builds the citations for a set of clocks, or for the clocks scored in an
 \code{mc_result} object.
 }
 \details{
-A character vector cites the clocks it names, and a group id cites every
-clock in the group. An \code{mc_result} object cites the clocks in its scores.
-Any other class raises an error that names the two accepted types.
+A character vector cites the clocks it names. A group id cites every clock
+in the group, and a tag cites every clock the tag expands to. See
+\code{\link[=list_clocks]{list_clocks()}} and \code{\link[=list_clock_tags]{list_clock_tags()}}. An \code{mc_result} object cites the
+clocks in its scores. Any other class raises an error that names the two
+accepted types.
 }
 \examples{
 cite_clocks(c("Horvath1", "Hannum"))

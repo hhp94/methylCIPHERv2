@@ -96,6 +96,23 @@ no first person, no contractions, no `--`, no `;`. See section 10 for what else 
   and the count columns are `score_*` and `norm_*` against it. A word the reader sees in their own
   output is theirs, not ours.
 
+### Settled word choices
+
+Neither is rule-shaped, and no linter catches either. Both were decided once and apply to every
+word a user can see (DECISIONS 2026-08-05).
+
+- **"confirmation" and "confirm", never "consent".** The `ask` argument asks the user to confirm
+  an action. `consent` reads as a legal term and overstates what a yes-or-no prompt is. The
+  internal `mc_consent()` / `mc_consent_delete()` keep their names -- they are code, not text a
+  user sees -- so do not read a `mc_consent` call as a licence to write "consent" in prose.
+- **A clock id in prose follows what the reader would type, or what they would read back.** Name a
+  **request** by the shortest token that resolves to it, which is the group id where one exists:
+  `sim_DNAm("DNAmSex_Wang", ...)`, not `c("DNAmSex_Wang_ChrX", "DNAmSex_Wang_ChrY")`. Name a
+  **returned column** by its actual column name, in full: the two `predict_sex()` scores are
+  `DNAmSex_Wang_ChrX` and `DNAmSex_Wang_ChrY`, never "the two `DNAmSex_Wang` scores", because
+  `DNAmSex_Wang` is not a column the reader will find. The two halves are not in conflict -- a
+  short request producing long column names is exactly what the README example demonstrates.
+
 ### What no rule covers
 
 Wordiness is not rule-shaped. "Packs already loaded by `load_mc_assets()` are used as they are"
@@ -182,6 +199,7 @@ One sentence. What it does.
 | record | ``An `mc_result` object.`` |
 | citation | ``An `mc_citation` object.`` |
 | simulation | ``An `mc_sim` object.`` |
+| loaded assets | ``An `mc_assets` object.`` |
 | formula | `A one-sided formula.` |
 | named logical | `A named logical vector.` |
 | enum | `One of "accel" or "diff".` |
@@ -216,10 +234,24 @@ appears somewhere in the text.
 
 ## 5. The shared-parameter donor
 
-`R/mc-params.R` holds the text for every param used by more than one topic. A topic that takes
-one writes **`@inheritParams mc-params`** and does not repeat the text. Currently in the donor,
-nine: `DNAm`, `x`, `clocks`, `pheno`, `normalize`, `ext_data`, `ask`, `all_columns`, `groups`.
-Re-read `R/mc-params.R` rather than trusting this list.
+`R/mc-params.R` holds the text for every param used by more than one topic, **and every block of
+prose that would otherwise be copied between topics**. A topic that takes one writes
+**`@inheritParams mc-params`** and does not repeat the text. Currently in the donor, ten params:
+`DNAm`, `x`, `clocks`, `pheno`, `normalize`, `ext_data`, `ask`, `all_columns`, `groups`, `long`;
+and two `@section`s, `The assets directory` and `Clocks that use all the samples`, pulled in with
+`@inheritSection mc-params <title>`. Re-read `R/mc-params.R` rather than trusting this list.
+
+- **Donor text stays general, and does not enumerate.** `ask` once read "before a download or a
+  delete", which was wrong on the five topics that cannot delete and had to be re-checked against
+  every recipient on every change. It now names the effect, not the operations. An enumeration in
+  shared text is a list that has to be maintained from N call sites at once, which is the cost the
+  donor exists to remove (DECISIONS 2026-08-05).
+- **What is deliberately *not* hoisted.** `...` is on 11 topics and identical on 9, but its three
+  fixed sentences mean different things, so a donor entry would make "Not used." the silent
+  default for a topic that forgets to override, and a wrong `...` is invisible in the rendered
+  page. `n` and `p` differ in meaning between the two `print` methods, and `n` collides with
+  `sim_DNAm()`, which has a different default. `optional` and `row.names` are on two topics, only
+  one of which may inherit (see the `x` footgun below), so hoisting them saves nothing.
 
 - **It must keep `@keywords internal`.** Measured: a `@keywords internal` donor generates an
   `.Rd` with no `\usage` and draws no check NOTE. A `@noRd` donor **breaks** -- roxygen resolves
@@ -232,9 +264,12 @@ Re-read `R/mc-params.R` rather than trusting this list.
   overrides it locally. That is worth doing when the shared text is long enough to be worth
   sharing, as the four asset-group names are; it is not worth doing for a one-line param.
 - **The donor's `x` is an `mc_result`.** A topic whose `x` is something else --
-  `print.mc_sim`, `cite_clocks.character`, the `mc_citation` methods -- **must not** write
-  `@inheritParams mc-params`. Inheritance matches on name alone and yields confidently wrong text
-  rather than an error. This is the one live footgun in the scheme.
+  `print.mc_sim`, `print.mc_assets`, `cite_clocks.character`, the `mc_citation` methods --
+  **must not** write `@inheritParams mc-params`. Inheritance matches on name alone and yields
+  confidently wrong text rather than an error. This is the one live footgun in the scheme, and it
+  is what stops the `as.data.frame` methods sharing `optional` and `row.names`. Moving `x` out of
+  the donor would close it and was rejected: about ten topics inherit `x` today, so each would
+  write its own copy, which is the duplication the donor exists to remove.
 - **Argument naming is settled: `x` stays `x`.** Renaming to `mc_result` was possible for only 5
   of 12 topics, because `print`, `as.matrix`, `as.data.frame`, `rbind` and `toBibtex` are locked
   to the base generic's argument names by the "S3 generic/method consistency" check. Uniform won.
@@ -334,13 +369,13 @@ section is **intended and verified**. Reporting one of these as a defect is a fa
 
 ### The three shape rules, and where the package stands
 
-Measured 2026-08-03 over all 28 topics. Re-measure rather than trust this line.
+Measured 2026-08-05 over all 29 topics. Re-measure rather than trust this line.
 
 | rule | state |
 |---|---|
-| Every exported topic carries `@examples` or `@examplesIf` | 26 of 26 |
+| Every exported topic carries `@examples` or `@examplesIf` | 27 of 27 |
 | No internal topic carries an example | 0 of 2 carry one |
-| Every exported topic carries `@returns` | 26 of 26 |
+| Every exported topic carries `@returns` | 27 of 27 |
 
 The two internal topics are `mc-params` (the shared `@param` donor, section 5) and
 `methylCIPHERv2-package` (roxygen-generated). Neither has `@returns` or `@examples`, and neither

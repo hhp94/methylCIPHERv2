@@ -10,8 +10,10 @@
 #' @inheritSection mc-params The assets directory
 #'
 #' @details
-#' A clock built from other clocks also needs their CpGs. Turning
-#' `normalize` on for a clock adds its background panel to the returned set.
+#' A clock built from other clocks also needs their CpGs. A clock whose
+#' normalization is part of its definition always adds its background panel.
+#' For a clock whose normalization is optional, `normalize` adds the
+#' background panel only when it is on.
 #'
 #' @returns A character vector. The CpGs needed to score `clocks`, with
 #'   duplicates removed.

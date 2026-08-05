@@ -12,9 +12,9 @@ of \code{"PCBrainAge"}, \code{"PCClocks"}, \code{"SystemsAge"} and \code{"Zhang2
 \code{"all"} for every group. Repeated values are ignored, and an empty vector
 selects nothing. Default is \code{"all"}.}
 
-\item{ask}{A boolean. Asks for consent before a download or a delete.
-Default is \code{TRUE}. Pass \code{FALSE} to download or delete without asking, in
-a non-interactive session.}
+\item{ask}{A boolean. Asks for confirmation before the assets directory
+changes. Default is \code{TRUE}. Pass \code{FALSE} to continue without asking, in a
+non-interactive session.}
 }
 \value{
 A character vector. The path to each requested asset file, named
@@ -26,9 +26,9 @@ directory.
 }
 \details{
 Only an asset that is missing from the assets directory is fetched.
-\code{download_mc_assets()} asks for consent before a download, refuses in a
-non-interactive session, and treats \code{ask = FALSE} as consent to proceed
-without asking.
+\code{download_mc_assets()} asks for confirmation before a download and refuses
+in a non-interactive session. \code{ask = FALSE} confirms the download in
+advance.
 }
 \examples{
 \dontshow{if (interactive()) withAutoprint(\{ # examplesIf}

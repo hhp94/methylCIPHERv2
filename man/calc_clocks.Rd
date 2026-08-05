@@ -21,7 +21,7 @@ calc_clocks(
 the rows and CpGs in the columns.}
 
 \item{clocks}{A character vector. The clocks to score, named by clock id,
-group id, or tag.}
+group id, or tag. See \code{\link[=list_clocks]{list_clocks()}}.}
 
 \item{pheno}{A data.frame. The sample metadata, with one row for each
 sample. Default is \code{NULL}.}
@@ -44,9 +44,9 @@ optional schemes off.}
 \item{ext_data}{A string. The path to the directory that holds the clock
 assets. Default is \code{NULL}, which uses the assets directory.}
 
-\item{ask}{A boolean. Asks for consent before a download or a delete.
-Default is \code{TRUE}. Pass \code{FALSE} to download or delete without asking, in
-a non-interactive session.}
+\item{ask}{A boolean. Asks for confirmation before the assets directory
+changes. Default is \code{TRUE}. Pass \code{FALSE} to continue without asking, in a
+non-interactive session.}
 }
 \value{
 An \code{mc_result} object. It holds the scores, the narrowed \code{pheno},
@@ -56,15 +56,19 @@ the coverage counts, and the provenance of the run.
 Scores CpG-based epigenetic clocks on a matrix of methylation beta values.
 }
 \details{
-\code{list_clocks(all_columns = TRUE)} names every supported scheme, in its
-\code{normalize} column.
 \code{\link[=list_clocks]{list_clocks()}} and \code{\link[=list_clock_tags]{list_clock_tags()}} show every value \code{clocks} accepts.
+
+\code{normalize} turns on the schemes that a clock declares as optional. It
+cannot turn off a scheme that is part of the clock. The \code{normalize} column
+of \code{list_clocks(all_columns = TRUE)} gives the scheme each clock uses.
 
 The two coverage arguments differ. \code{calc_clocks()} stops when a clock has
 too few CpGs present, so every clock in the returned scores passed
-\code{min_clocks_coverage}. A sample with too few CpGs present raises a warning
-and still scores. Pass the returned value to \code{\link[=clocks_coverage]{clocks_coverage()}} or
-\code{\link[=samples_coverage]{samples_coverage()}} to see the counts.
+\code{min_clocks_coverage}. A clock just above that floor, and a clock whose
+normalization panel falls below it, each raise a warning and still score.
+A sample with too few CpGs present raises a warning and still scores. Pass
+the returned value to \code{\link[=clocks_coverage]{clocks_coverage()}} or \code{\link[=samples_coverage]{samples_coverage()}} to see
+the counts.
 
 \code{calc_clocks()} narrows \code{pheno} before it stores it. The returned value
 keeps the id column and the covariates that the clocks need, and drops the

@@ -23,10 +23,10 @@ stops if the directory cannot be created or is not writable. Clearing the
 override falls back to the \code{mc.assets_dir} option, the \code{MC_ASSETS_DIR}
 environment variable, or the default cache directory, in that order.
 
-The return value restores the previous state exactly, in the manner of
-\code{\link[=setwd]{setwd()}}. It is the override that was in place, and it is \code{NULL} when no
-override was set. Passing \code{NULL} back clears the override, rather than
-pinning it to the directory that happened to be in effect.
+The return value restores the previous state exactly. It is the override
+that was in place, and it is \code{NULL} when no override was set. Passing
+\code{NULL} back clears the override, rather than pinning it to the directory
+that happened to be in effect.
 
 For the directory in effect, which is always a path, call
 \code{\link[=get_mc_assets_dir]{get_mc_assets_dir()}}.

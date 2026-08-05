@@ -24,8 +24,7 @@ An \code{mc_result} object. Returns \code{x}, invisibly, after printing it.
 Prints the scores and the \code{pheno} table for an \code{mc_result} object.
 }
 \details{
-The output lists batch labels only when \code{x} spans more than one
-\code{mc_batch_id}.
+The output lists the batch labels only when \code{x} holds more than one batch.
 }
 \examples{
 clocks <- c("Horvath1", "Hannum")

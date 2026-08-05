@@ -153,8 +153,7 @@ construct_mc_result <- function(
 #' @param ... Not used.
 #'
 #' @details
-#' The output lists batch labels only when `x` spans more than one
-#' `mc_batch_id`.
+#' The output lists the batch labels only when `x` holds more than one batch.
 #'
 #' @returns An `mc_result` object. Returns `x`, invisibly, after printing it.
 #'
@@ -215,11 +214,7 @@ print.mc_result <- function(x, n = 6, p = 6, ...) {
 #' @inheritParams mc-params
 #' @param ... Not used.
 #'
-#' @details
-#' This function recalculates any clock that depends on sample-wise
-#' information, such as a z-score, from all the available samples when `x`
-#' holds more than one batch. This is the same calculation as
-#' [refinalize_clocks()].
+#' @inheritSection mc-params Clocks that use all the samples
 #'
 #' @returns A numeric matrix. The scores, with samples in the rows and
 #'   clocks in the columns.

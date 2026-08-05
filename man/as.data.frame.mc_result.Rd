@@ -17,9 +17,9 @@
 
 \item{...}{Not used.}
 
-\item{long}{A boolean. Returns one row for each sample and clock
-when \code{TRUE}, and one row for each sample, with one column for each
-clock, when \code{FALSE}. Default is \code{TRUE}.}
+\item{long}{A boolean. Returns one row for each sample and clock when
+\code{TRUE}, and one row for each sample, with one column for each clock, when
+\code{FALSE}. Default is \code{TRUE}.}
 }
 \value{
 A data.frame. In long form, one row for each sample and clock,
@@ -31,12 +31,14 @@ column for each clock.
 Converts the \code{\link[=calc_clocks]{calc_clocks()}} output to a data.frame containing just the
 clocks, in long or wide format.
 }
-\details{
-This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when \code{x}
-holds more than one batch. This is the same calculation as
-\code{\link[=refinalize_clocks]{refinalize_clocks()}}.
+\section{Clocks that use all the samples}{
+
+Some clocks depend on information from all the samples, such as a z-score.
+When \code{x} holds more than one batch, these clocks take their value from
+every sample in \code{x}, and not from one batch alone. This is the same
+calculation as \code{\link[=refinalize_clocks]{refinalize_clocks()}}.
 }
+
 \examples{
 clocks <- c("Horvath1", "Hannum")
 sim <- sim_DNAm(clocks, n = 20)

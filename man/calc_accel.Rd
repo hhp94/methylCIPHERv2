@@ -24,9 +24,9 @@ clock. Default is \code{"accel"}.}
 \item{data}{A data.frame. Extra sample metadata, joined to the \code{pheno} in \code{x}
 by sample id. Default is \code{NULL}.}
 
-\item{long}{A boolean. Returns one row for each sample and clock
-when \code{TRUE}, and one row for each sample, with one column for each
-clock, when \code{FALSE}. Default is \code{TRUE}.}
+\item{long}{A boolean. Returns one row for each sample and clock when
+\code{TRUE}, and one row for each sample, with one column for each clock, when
+\code{FALSE}. Default is \code{TRUE}.}
 }
 \value{
 A data.frame. In long form, one row for each sample and clock,
@@ -38,12 +38,7 @@ for each sample, with one column for each clock.
 Computes age acceleration or age difference for every clock in \code{x}.
 }
 \details{
-This function recalculates any clock that depends on sample-wise
-information, such as a z-score, from all the available samples when \code{x}
-holds more than one batch. This is the same calculation as
-\code{\link[=refinalize_clocks]{refinalize_clocks()}}.
-
-The default \code{type = "accel"} calculates the well-known age acceleration.
+The default \code{type = "accel"} calculates age acceleration.
 It regresses each clock in \code{x} on \code{Age} and returns the residuals.
 \code{type = "diff"} calculates the raw difference between each clock and
 \code{Age}, and fits no model unless \code{formula} is given.
@@ -51,12 +46,20 @@ It regresses each clock in \code{x} on \code{Age} and returns the residuals.
 \code{formula} replaces the default model completely. It does not add to it, so
 \code{~ Plate} regresses each clock on the plate alone, and not on age.
 
-\code{data} may carry the covariates the calculation needs, as in
-\code{data.frame(ID, Plate)} passed to \code{data}, with \code{formula = ~ Age + Plate}.
+\code{data} carries the covariates the calculation needs. Pass a data.frame of
+\code{ID} and \code{Plate} to \code{data}, with \code{formula = ~ Age + Plate}.
 It may add a column, and it may repeat a column that scoring already used.
 \code{calc_accel()} stops when a repeated column disagrees with the value
 scoring used.
 }
+\section{Clocks that use all the samples}{
+
+Some clocks depend on information from all the samples, such as a z-score.
+When \code{x} holds more than one batch, these clocks take their value from
+every sample in \code{x}, and not from one batch alone. This is the same
+calculation as \code{\link[=refinalize_clocks]{refinalize_clocks()}}.
+}
+
 \examples{
 clocks <- c("Horvath1", "Hannum")
 sim <- sim_DNAm(clocks, n = 20, Age = TRUE, Female = TRUE)
