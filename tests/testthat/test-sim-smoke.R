@@ -21,7 +21,7 @@ for (id in bundled_smoke_clocks()) {
       }
       sim <- sim_DNAm(clock_id, n = 4L, Age = TRUE, Female = TRUE)
       expect_no_error(
-        calc_clocks(sim$DNAm, clock_id, pheno = sim$pheno)
+        suppressMessages(calc_clocks(sim$DNAm, clock_id, pheno = sim$pheno))
       )
     })
   })

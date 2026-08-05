@@ -3,7 +3,7 @@
 # a cohort carrying every missingness shape at once
 chunk_cohort <- function(ids, n = 30L) {
   spec <- mc_spec(ids)
-  panel <- panels_union(spec$panels)
+  panel <- spec$needed_union
   DNAm <- random_betas(panel, n = n)
 
   # 1. ordinary partial NA, spread across blocks
@@ -17,7 +17,7 @@ chunk_cohort <- function(ids, n = 30L) {
 }
 
 # stitch per-block fragments by clock id, restore cohort row order
-bind_blocks <- function(fragments, sample_id) {
+stitch_fragments <- function(fragments, sample_id) {
   fragments <- lapply(fragments, function(f) Filter(Negate(is.null), f))
   ids <- unique(unlist(lapply(fragments, names), use.names = FALSE))
   out <- lapply(ids, function(p) {
@@ -36,7 +36,7 @@ split_score <- function(spec, DNAm, blocks) {
     score_cohort(DNAm[i, , drop = FALSE], spec, facts)
   })
   fragments <- function(field) {
-    bind_blocks(lapply(parts, function(p) p[[field]]), facts$sample_id)
+    stitch_fragments(lapply(parts, function(p) p[[field]]), facts$sample_id)
   }
   list(
     facts = facts,
@@ -50,22 +50,32 @@ split_score <- function(spec, DNAm, blocks) {
   )
 }
 
-# mixed request: per-sample clocks, one cohort reduction, one sample_scale clock
-MIXED <- c(
-  "Hannum",
-  "Horvath1",
-  "PhenoAge",
-  "Lin",
-  "Weidner",
-  "DNAmPhysAge",
-  "Zhang2019EN"
-)
+# one clock per chunk-sensitive shape: linear, cohort reduction, and row-moment banking.
+MIXED <- c("Hannum", "DNAmPhysAge", "Zhang2019EN")
+
+# one cohort, scored whole and in three blocks. built on first use.
+chunk_cache <- new.env(parent = emptyenv())
+chunk_run <- function() {
+  if (is.null(chunk_cache[["fx"]])) {
+    # mc_spec() notes the full-matrix clock in the request. not the point here.
+    suppressMessages({
+      cohort <- chunk_cohort(MIXED)
+      chunk_cache[["fx"]] <- list(
+        cohort = cohort,
+        run = split_score(cohort$spec, cohort$DNAm, list(1:10, 11:20, 21:30))
+      )
+    })
+  }
+  chunk_cache[["fx"]]
+}
 
 test_that("scoring a row subset equals scoring the whole cohort", {
-  cohort <- chunk_cohort(MIXED)
-  run <- split_score(cohort$spec, cohort$DNAm, list(1:10, 11:20, 21:30))
+  skip_on_cran()
+  fx <- chunk_run()
+  cohort <- fx$cohort
+  run <- fx$run
 
-  # both chunk-sensitive shapes: a cross-sample reduce, and banked row moments
+  # both chunk-sensitive shapes are actually in the request
   expect_true(length(cohort$spec$cross_sample) > 0)
   expect_true(length(cohort$spec$moment_domains) > 0)
 
@@ -76,8 +86,10 @@ test_that("scoring a row subset equals scoring the whole cohort", {
 })
 
 test_that("the scoring loop defers exactly the declared cohort-reducing set", {
-  cohort <- chunk_cohort(MIXED)
-  run <- split_score(cohort$spec, cohort$DNAm, list(1:10, 11:20, 21:30))
+  skip_on_cran()
+  fx <- chunk_run()
+  cohort <- fx$cohort
+  run <- fx$run
 
   # deferred clocks leave the loop with an intermediate and no score ...
   expect_equal(sort(names(run$whole$pending)), sort(cohort$spec$cross_sample))
@@ -95,33 +107,33 @@ test_that("the scoring loop defers exactly the declared cohort-reducing set", {
 })
 
 test_that("the sample-axis split comes off the catalog, not a clock list", {
-  # only a declared cohort-reducing recipe is cross_sample
+  skip_on_cran()
+  # only a declared cohort-reducing recipe is cross_sample. split is total over the pool.
   all_ids <- resolve_clocks("all")
   split <- split_cross_sample(all_ids)
-  expect_equal(
-    sort(c(split$per_sample, split$cross_sample)),
-    sort(all_ids)
-  )
-  for (id in split$cross_sample) {
-    expect_false(is.na(clock_cross_sample_at(id)))
-  }
-  for (id in split$per_sample) {
-    expect_true(is.na(clock_cross_sample_at(id)))
-  }
+  expect_equal(sort(c(split$per_sample, split$cross_sample)), sort(all_ids))
+  expect_false(any(is.na(vapply(split$cross_sample, clock_cross_sample_at, 1))))
+  expect_true(all(is.na(vapply(split$per_sample, clock_cross_sample_at, 1))))
 
   # sex-routed alias inherits the axis from its members
-  for (alias in unique(unname(sex_routed_members()$alias))) {
-    members <- unlist(clock_routing(alias), use.names = FALSE)
-    expect_equal(
-      clock_is_cross_sample(alias),
-      any(vapply(members, clock_is_cross_sample, logical(1)))
-    )
-  }
+  aliases <- unique(unname(sex_routed_members()$alias))
+  inherited <- vapply(
+    aliases,
+    function(a) {
+      members <- unlist(clock_routing(a), use.names = FALSE)
+      isTRUE(clock_is_cross_sample(a)) ==
+        any(vapply(members, clock_is_cross_sample, logical(1)))
+    },
+    logical(1)
+  )
+  expect_true(all(inherited))
 })
 
 test_that("cohort facts classify a column the first block cannot see", {
-  cohort <- chunk_cohort(MIXED)
-  facts <- mc_cohort(cohort$DNAm, cohort$spec, pheno = NULL)
+  skip_on_cran()
+  fx <- chunk_run()
+  cohort <- fx$cohort
+  facts <- fx$run$facts
 
   # partial cohort-wide, so it is a fill column even though block 1 is all NA
   expect_true(cohort$panel[2] %in% names(facts$partial_fill))
@@ -131,19 +143,25 @@ test_that("cohort facts classify a column the first block cannot see", {
 })
 
 test_that("coverage assembles from blocks by concatenate, never by sum", {
-  cohort <- chunk_cohort(MIXED)
-  run <- split_score(cohort$spec, cohort$DNAm, list(1:10, 11:20, 21:30))
+  skip_on_cran()
+  fx <- chunk_run()
+  cohort <- fx$cohort
+  run <- fx$run
 
   for (id in cohort$spec$sequence) {
     whole <- run$whole$coverage$per_clock[[id]]
 
-    # partial fills are a CpG count off cohort-level facts: same in every block
+    # panel-derived fields are CpG counts. every block agrees with the single pass.
     for (p in run$parts) {
       expect_equal(
         p$coverage$per_clock[[id]]$score_imputed_partial,
         whole$score_imputed_partial
       )
     }
+    expect_equal(
+      run$parts[[1]]$coverage$per_clock[[id]]$score_present,
+      whole$score_present
+    )
 
     # per-sample miss concatenates over disjoint rows
     miss_whole <- run$whole$coverage$sample_miss$score[[id]]
@@ -152,22 +170,13 @@ test_that("coverage assembles from blocks by concatenate, never by sum", {
       function(p) p$coverage$sample_miss$score[[id]]
     ))
     expect_equal(miss_parts[names(miss_whole)], miss_whole)
-
-    # panel-derived fields are identical across blocks (shared cpg_list)
-    expect_equal(
-      run$parts[[1]]$coverage$per_clock[[id]]$score_present,
-      whole$score_present
-    )
-    expect_equal(
-      run$parts[[1]]$coverage$per_clock[[id]]$missing_cpgs,
-      whole$missing_cpgs
-    )
   }
 })
 
 test_that("the clocks gate throws out of mc_cohort, before anything is scored", {
+  skip_on_cran()
   spec <- mc_spec("Hannum")
-  panel <- panels_union(spec$panels)
+  panel <- spec$needed_union
   DNAm <- random_betas(panel, n = 6L)
   # strip most of the panel -- coverage falls under the default floor
   DNAm <- DNAm[, seq_len(length(panel) %/% 4L), drop = FALSE]

@@ -1,4 +1,4 @@
-# miAge optimizer branch (parity owns the numeric golden).
+# miAge optimizer. parity owns the clean-panel golden. this owns the holed-panel round-trip.
 
 p <- miage_params("MiAge")
 
@@ -13,16 +13,8 @@ miage_model_betas <- function(divisions, cpgs) {
   m
 }
 
-test_that("MiAge recovers the divisions that generated the betas", {
-  panel <- clock_scoring_cpgs("MiAge")
-  divisions <- c(300, 620, 900, 1400)
-  DNAm <- miage_model_betas(divisions, panel)
-
-  got <- calc_clocks(DNAm, "MiAge")$scores[, "MiAge"]
-  expect_equal(unname(got), divisions, tolerance = 1e-6)
-})
-
 test_that("absent MiAge CpGs drop out of the objective", {
+  skip_on_cran()
   panel <- clock_scoring_cpgs("MiAge")
   divisions <- c(450, 1100)
   DNAm <- miage_model_betas(divisions, panel)

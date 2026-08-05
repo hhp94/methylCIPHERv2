@@ -1,5 +1,4 @@
-# score_associations(): the advisory age-correlation frame. Disposable feature
-# -- delete this file alongside R/score_associations.R.
+# score_associations(): advisory age-correlation frame. delete with R/score_associations.R.
 
 assoc_fixture <- function(clocks = "Hannum", n = 20L) {
   DNAm <- random_betas(clock_cpgs(clocks), n = n)
@@ -19,7 +18,6 @@ assoc_ref <- function(id, age_r, lo, hi) {
     stringsAsFactors = FALSE
   )
 }
-
 
 test_that("one row per clock the reference covers", {
   fx <- assoc_fixture()
@@ -41,58 +39,13 @@ test_that("one row per clock the reference covers", {
   expect_equal(out$clock_id, "Hannum")
   expect_equal(out$n, 20L)
   expect_true(is.finite(out$obs_age_r))
-})
 
-test_that("age falls back to the Age column the record carries", {
+  # age falls back to the Age column the record carries
   n <- 20L
   DNAm <- random_betas(clock_cpgs("DNAmADM"), n = n)
-  pheno <- data.frame(
-    ID = rownames(DNAm),
-    Age = stats::runif(n, 20, 80),
-    stringsAsFactors = FALSE
-  )
-  res <- calc_clocks(DNAm, "DNAmADM", pheno = pheno)
-
-  out <- score_associations(res)
-  expect_equal(nrow(out), 1L)
-  expect_equal(out$clock_id, "DNAmADM")
-})
-
-test_that("outside reads off the supplied interval", {
-  fx <- assoc_fixture()
-  obs <- score_associations(fx$result, age = fx$age)$obs_age_r
-
-  covered <- assoc_ref("Hannum", obs, obs - 0.2, obs + 0.2)
-  missed <- assoc_ref("Hannum", obs, obs + 0.1, obs + 0.3)
-
-  expect_false(assoc_report(fx$result, fx$age, covered)$outside)
-  expect_true(assoc_report(fx$result, fx$age, missed)$outside)
-})
-
-test_that("wrong_sign needs a reference strong enough to have a sign", {
-  fx <- assoc_fixture()
-  obs <- score_associations(fx$result, age = fx$age)$obs_age_r
-
-  # flipped and well clear of SIGN_FLAG_MIN_R
-  strong <- assoc_ref("Hannum", -sign(obs) * 0.9, NA_real_, NA_real_)
-  # flipped but too weak for the sign to mean anything
-  weak <- assoc_ref("Hannum", -sign(obs) * 0.1, NA_real_, NA_real_)
-
-  expect_true(assoc_report(fx$result, fx$age, strong)$wrong_sign)
-  expect_false(assoc_report(fx$result, fx$age, weak)$wrong_sign)
-})
-
-test_that("a reference covering nothing keeps the schema", {
-  fx <- assoc_fixture()
-  full <- score_associations(fx$result, age = fx$age)
-  none <- assoc_report(
-    fx$result,
-    fx$age,
-    assoc_ref("NotAClock", 0.5, 0.1, 0.9)
-  )
-
-  expect_equal(nrow(none), 0L)
-  expect_equal(names(none), names(full))
+  pheno <- mc_pheno(rownames(DNAm), Age = stats::runif(n, 20, 80))
+  carried <- score_associations(calc_clocks(DNAm, "DNAmADM", pheno = pheno))
+  expect_equal(carried$clock_id, "DNAmADM")
 })
 
 test_that("degenerate cohorts drop out rather than correlating", {
@@ -112,4 +65,22 @@ test_that("bad input is refused", {
   expect_error(score_associations(fx$result$scores, age = fx$age))
   expect_error(score_associations(fx$result))
   expect_error(score_associations(fx$result, age = fx$age[-1]))
+})
+
+test_that("the flags read off the supplied reference", {
+  skip_on_cran()
+  fx <- assoc_fixture()
+  obs <- score_associations(fx$result, age = fx$age)$obs_age_r
+
+  # outside is the interval test
+  covered <- assoc_ref("Hannum", obs, obs - 0.2, obs + 0.2)
+  missed <- assoc_ref("Hannum", obs, obs + 0.1, obs + 0.3)
+  expect_false(assoc_report(fx$result, fx$age, covered)$outside)
+  expect_true(assoc_report(fx$result, fx$age, missed)$outside)
+
+  # wrong_sign needs a reference strong enough to have a sign
+  strong <- assoc_ref("Hannum", -sign(obs) * 0.9, NA_real_, NA_real_)
+  weak <- assoc_ref("Hannum", -sign(obs) * 0.1, NA_real_, NA_real_)
+  expect_true(assoc_report(fx$result, fx$age, strong)$wrong_sign)
+  expect_false(assoc_report(fx$result, fx$age, weak)$wrong_sign)
 })

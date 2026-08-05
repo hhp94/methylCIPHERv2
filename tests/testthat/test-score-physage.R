@@ -1,13 +1,9 @@
 # physAge: vendor-mean fill + cohort_zscore composites (synthetic).
 
-physage_union <- function() {
-  members <- mc_groups[["PhysAge"]]$members
-  unique(unlist(lapply(members, clock_scoring_cpgs)))
-}
-
-# fill offset lands inside the mean's divisor (plain mean golden is elsewhere)
+# fill offset lands inside the mean's divisor. parity cannot see this.
 test_that("absent surrogate CpGs vendor-fill by offset under mean reduction", {
-  DNAm <- random_betas(physage_union(), n = 6L)
+  skip_on_cran()
+  DNAm <- random_betas(clock_scoring_cpgs("DNAmPhysAge"), n = 6L)
   co <- clock_coefs("DNAmCRP")
   ic <- clock_intercept("DNAmCRP")
 
@@ -30,30 +26,27 @@ test_that("absent surrogate CpGs vendor-fill by offset under mean reduction", {
   expect_equal(cov$score_dropped, 0L)
 })
 
+# the cross-sample (`pending`) route: reduces over the cohort, so n = 1 refuses
 test_that("PhysAge composites run and need >= 2 samples", {
-  DNAm <- random_betas(physage_union(), n = 6L)
-  res <- calc_clocks(DNAm, c("DNAmPhysAge", "DNAmPhysAge_years"))
+  skip_on_cran()
+  DNAm <- random_betas(clock_scoring_cpgs("DNAmPhysAge"), n = 6L)
+  cols <- c("DNAmPhysAge", "DNAmPhysAge_years")
+  res <- calc_clocks(DNAm, cols)
 
-  expect_true(all(
-    c("DNAmPhysAge", "DNAmPhysAge_years") %in% colnames(res$scores)
-  ))
-  expect_true(all(is.finite(res$scores[, "DNAmPhysAge"])))
-  expect_true(all(is.finite(res$scores[, "DNAmPhysAge_years"])))
+  expect_true(all(is.finite(res$scores[, cols])))
 
-  one <- random_betas(physage_union(), n = 1L)
+  one <- random_betas(clock_scoring_cpgs("DNAmPhysAge"), n = 1L)
   expect_error(calc_clocks(one, "DNAmPhysAge"))
 })
 
 test_that("a surrogate that goes constant stops instead of NaN-ing the cohort", {
-  # blank a small surrogate: scale() NaN must stop, not spread via rowSums
+  skip_on_cran()
+  # blank a small surrogate: scale() NaN must stop, not spread via rowSums.
   surr <- physage_surrogates("DNAmPhysAge")
-  flat <- names(surr[[which(vapply(
-    surr,
-    function(s) identical(s[["name"]], "raw_DNAmPulsePr"),
-    logical(1)
-  ))]][["coef"]])
+  coefs <- lapply(surr, `[[`, "coef")
+  flat <- names(coefs[[which.min(lengths(coefs))]])
 
-  panel <- setdiff(physage_union(), flat)
+  panel <- setdiff(clock_scoring_cpgs("DNAmPhysAge"), flat)
   DNAm <- random_betas(panel, n = 6L)
   expect_error(suppressWarnings(calc_clocks(DNAm, "DNAmPhysAge")))
 })

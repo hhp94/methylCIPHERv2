@@ -1,5 +1,4 @@
-# Advisory age-association check: a cohort's observed score-age correlation
-# against the shipped per-clock reference (DECISIONS 2026-08-02).
+# advisory age-association check against the shipped per-clock reference.
 
 MIN_ASSOC_N <- 5L
 

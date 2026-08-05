@@ -15,8 +15,7 @@ did_you_mean <- function(tok, pool, n = 5L) {
   utils::head(unique(unname(pool[order(d, nchar(names(pool)))])), n)
 }
 
-# nearest-match bullets for unmatched tokens. the cap is on the token count,
-# because adist() runs per token and is the cost, not the render.
+# nearest-match bullets for unmatched tokens. cap is on token count.
 suggestion_bullets <- function(toks, pools = suggestion_pools(), n = 5L) {
   cli_escape(unlist(lapply(capped_vals(toks), function(tok) {
     hits <- lapply(pools, function(pool) did_you_mean(tok, pool, n))

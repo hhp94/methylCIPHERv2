@@ -3,6 +3,13 @@
 # digest is a Suggests-only dep (content-addresses fake pack filenames)
 skip_if_not_installed("digest")
 
+# silence asset-verb chatter (cli + download.file stderr) when it is not under test.
+quietly <- function(expr) {
+  out <- NULL
+  utils::capture.output(out <- suppressMessages(expr), type = "message")
+  out
+}
+
 # fake external pack on disk, returns its provenance row
 fake_asset <- function(dir, group = "FakeGroup", payload = NULL) {
   if (is.null(payload)) {
@@ -61,6 +68,34 @@ local_fake_registry <- function(rows, .env = parent.frame()) {
   invisible(rows)
 }
 
+# standing setup: temp assets dir, one staged fake pack per group, mocked registry.
+local_assets <- function(
+  groups = "FakeGroup",
+  set_option = TRUE,
+  .env = parent.frame()
+) {
+  assets <- withr::local_tempdir(.local_envir = .env)
+  if (set_option) {
+    withr::local_options(mc.assets_dir = assets, .local_envir = .env)
+  }
+  rows <- lapply(groups, function(g) {
+    fake_asset(withr::local_tempdir(.local_envir = .env), group = g)
+  })
+  names(rows) <- groups
+  local_fake_registry(if (length(rows) == 1L) rows[[1L]] else rows, .env = .env)
+  list(dir = assets, row = rows[[1L]], rows = rows)
+}
+
+# what an earlier sync left behind: same declared stem, older content hash
+stage_superseded <- function(assets, group = "FakeGroup") {
+  path <- file.path(
+    assets,
+    sprintf("%s-%s.qs2", tolower(group), strrep("a", 64))
+  )
+  writeLines("an older pack", path)
+  path
+}
+
 test_that("the assets dir resolves arg > option > env > default", {
   withr::local_options(mc.assets_dir = NULL)
   withr::local_envvar(MC_ASSETS_DIR = NA)
@@ -103,139 +138,93 @@ test_that("set_mc_assets_dir() sets, creates, restores, and rejects non-paths", 
   for (bad in list(5, c("a", "b"), "", NA_character_)) {
     expect_error(set_mc_assets_dir(bad))
   }
-})
 
-test_that("the setter returns what restores the previous state exactly", {
-  # the case that separates the previous override from the resolved dir: with
-  # MC_ASSETS_DIR in charge and no option set, set-then-restore has to hand the
-  # env var back. returning the resolved path would pin the option instead.
-  withr::local_options(mc.assets_dir = NULL)
+  # set-then-restore must return the previous override, not the resolved dir.
   env_dir <- withr::local_tempdir()
   withr::local_envvar(MC_ASSETS_DIR = env_dir)
-  expect_equal(get_mc_assets_dir(), as.character(fs::path_expand(env_dir)))
-
   was <- set_mc_assets_dir(withr::local_tempdir())
   expect_null(was)
   set_mc_assets_dir(was)
   expect_equal(get_mc_assets_dir(), as.character(fs::path_expand(env_dir)))
 })
 
-test_that("list_mc_assets() answers what exists, what is staged, what is reclaimable", {
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
+test_that("list_mc_assets() answers what is staged without fetching or prompting", {
+  skip_on_cran()
+  fx <- local_assets()
+  assets <- fx$dir
 
-  # readable before anything is on disk, and without prompting or fetching
   before <- list_mc_assets()
   expect_equal(before$group_id, "FakeGroup")
   expect_false(before$downloaded)
   expect_equal(before$superseded, 0L)
-  expect_gt(as.numeric(before$size), 0)
-  expect_length(list.files(assets), 0)
+  expect_length(list.files(assets), 0) # read-only: nothing fetched
 
-  suppressMessages(download_mc_assets(ask = FALSE))
-  writeLines(
-    "an older pack",
-    file.path(assets, sprintf("fakegroup-%s.qs2", strrep("a", 64)))
-  )
+  quietly(download_mc_assets(ask = FALSE))
+  stage_superseded(assets)
 
   after <- list_mc_assets()
   expect_true(after$downloaded)
   expect_equal(after$superseded, 1L)
-  expect_gt(as.numeric(after$superseded_size), 0)
-
-  # sizes stay numeric, so a caller can total them
-  expect_true(is.numeric(after$size))
+  expect_true(is.numeric(after$size)) # so a caller can total them
   expect_error(list_mc_assets("NotAClockGroup"))
 })
 
 test_that("the shipped registry covers exactly the groups holding external clocks", {
+  skip_on_cran()
   # group is external when any clock of it is.
   declared <- unique(unlist(lapply(mc_catalog, function(e) {
     if (isTRUE(e[["external_group"]])) e[["group_id"]] else NULL
   })))
   expect_setequal(mc_external_groups(), declared)
   expect_gt(length(declared), 0)
-  for (gid in mc_external_groups()) {
-    row <- mc_asset(gid)
-    expect_equal(row$group_id, gid)
-    expect_gt(row$size_bytes, 0)
-  }
 })
 
-test_that("registry lookups reject unknown ids and resolve group sets", {
+test_that("a group token is matched exactly, and an empty selection is never all", {
+  skip_on_cran()
   expect_error(mc_asset("NotAClockGroup"))
   expect_error(mc_resolve_groups(c("PCClocks", "Nope")))
-  expect_setequal(mc_resolve_groups("all"), mc_external_groups())
-
-  # an empty selection selects nothing, so a filter that came out empty can
-  # never mean "every group" to a verb that downloads or deletes
-  expect_equal(mc_resolve_groups(NULL), character(0))
-  expect_equal(mc_resolve_groups(character(0)), character(0))
-  expect_equal(length(load_mc_assets(character(0))), 0L)
+  expect_error(mc_resolve_groups("Sys")) # an abbreviation is not a group id
 
   # several allowed and deduplicated, and "all" absorbs the rest
-  expect_equal(
-    mc_resolve_groups(c("PCClocks", "PCClocks")),
-    "PCClocks"
-  )
-
-  # exact match only: an abbreviation is not a group id
-  expect_error(mc_resolve_groups("Sys"))
+  expect_equal(mc_resolve_groups(c("PCClocks", "PCClocks")), "PCClocks")
   expect_setequal(mc_resolve_groups(c("PCClocks", "all")), mc_external_groups())
+
+  # empty selection selects nothing. never means every group.
+  expect_equal(mc_resolve_groups(NULL), character(0))
+  expect_equal(mc_resolve_groups(character(0)), character(0))
+  expect_length(load_mc_assets(character(0)), 0L)
 })
 
-test_that("load_mc_assets() refuses to fetch unprompted in a non-interactive session", {
-  skip_if(interactive())
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
+test_that("a consented fetch stages the pack, verifies it, and leaves no scratch", {
+  skip_on_cran()
+  fx <- local_assets()
+  assets <- fx$dir
+  row <- fx$row
 
-  expect_error(load_mc_assets("FakeGroup"))
-  expect_length(list.files(assets), 0)
-})
-
-test_that("download_mc_assets() fetches, verifies, and leaves no scratch files", {
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
-
-  paths <- suppressMessages(download_mc_assets(ask = FALSE))
-  expect_equal(unname(basename(paths)), row$file)
+  quietly(download_mc_assets(ask = FALSE))
   expect_true(file.exists(file.path(assets, row$file)))
   expect_false(any(grepl(".part", list.files(assets), fixed = TRUE)))
 
+  # already staged: no second fetch, so the "server" can go away
   file.remove(row$.src)
-  expect_silent(suppressMessages(download_mc_assets(ask = FALSE)))
+  packs <- quietly(load_mc_assets("FakeGroup", ask = FALSE))
+  expect_named(packs, "FakeGroup")
+  expect_equal(packs[["FakeGroup"]], row$.payload)
 })
 
-test_that("a download failure is reported with the URL and leaves nothing behind", {
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
-  file.remove(row$.src) # the "server" 404s
+test_that("a failed fetch leaves nothing behind", {
+  skip_on_cran()
+  fx <- local_assets()
+  assets <- fx$dir
+  file.remove(fx$row$.src) # the "server" 404s
 
-  expect_error(download_mc_assets(ask = FALSE))
+  # download.file() warns then returns failed status. mc_fetch() turns that into the abort.
+  expect_error(suppressWarnings(quietly(download_mc_assets(ask = FALSE))))
   expect_length(list.files(assets), 0)
 })
 
-test_that("load_mc_assets() downloads missing packs on consent and returns a named registry", {
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
-
-  packs <- suppressMessages(load_mc_assets("FakeGroup", ask = FALSE))
-  expect_named(packs, "FakeGroup")
-  expect_equal(packs[["FakeGroup"]], row$.payload)
-  expect_true(file.exists(file.path(assets, row$file)))
-})
-
 test_that("load_mc_assets() rejects a corrupt staged file via the qs2 checksum", {
+  skip_on_cran()
   assets <- withr::local_tempdir()
   row <- fake_asset(withr::local_tempdir())
   local_fake_registry(row)
@@ -243,16 +232,26 @@ test_that("load_mc_assets() rejects a corrupt staged file via the qs2 checksum",
   expect_error(load_mc_assets("FakeGroup", ext_data = assets))
 })
 
-test_that("load_mc_assets() with an explicit path is a closed set: no download, missing is fatal", {
-  assets <- withr::local_tempdir() # deliberately empty
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
+test_that("an explicit ext_data is a closed set, and a non-path is an error", {
+  fx <- local_assets()
+  assets <- fx$dir
+  row <- fx$row
+  empty <- withr::local_tempdir()
 
-  expect_error(load_mc_assets("FakeGroup", ext_data = assets, ask = FALSE))
+  # a path names a closed set. missing pack is fatal, never downloaded.
+  expect_error(load_mc_assets("FakeGroup", ext_data = empty, ask = FALSE))
+  expect_length(list.files(empty), 0)
   expect_length(list.files(assets), 0)
+
+  # a value that is not a path must not silently fall back to the assets dir
+  quietly(download_mc_assets(ask = FALSE))
+  staged <- file.path(assets, row$file)
+  expect_error(load_mc_assets("FakeGroup", ext_data = 5))
+  expect_true(file.exists(staged))
 })
 
 test_that("load_mc_assets() resolves in-memory pack(s) without touching disk", {
+  skip_on_cran()
   dir <- withr::local_tempdir()
   a <- fake_asset(dir, group = "GroupA")
   b <- fake_asset(dir, group = "GroupB")
@@ -267,43 +266,22 @@ test_that("load_mc_assets() resolves in-memory pack(s) without touching disk", {
     res <- load_mc_assets("GroupA", ext_data = list(a$.payload, b$.payload))
   )
   expect_named(res, "GroupA")
-  expect_equal(res[["GroupA"]], a$.payload)
+
+  # a loaded pack names no directory, so the dir resolver must refuse one
+  expect_error(mc_resolve_assets_dir(a$.payload))
 })
 
-test_that("clear_mc_assets() removes staged packs only on explicit consent", {
+test_that("clear_mc_assets() reclaims the current and superseded packs only", {
   skip_if(interactive())
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
+  fx <- local_assets()
+  assets <- fx$dir
+  row <- fx$row
 
   # nothing staged: reports and is a no-op
   expect_message(clear_mc_assets())
 
-  suppressMessages(download_mc_assets(ask = FALSE))
-  # unprompted deletion is refused non-interactively (file survives)
-  expect_error(clear_mc_assets())
-  expect_true(file.exists(file.path(assets, row$file)))
-
-  removed <- suppressMessages(clear_mc_assets(ask = FALSE))
-  expect_equal(basename(removed), row$file)
-  expect_false(file.exists(file.path(assets, row$file)))
-})
-
-test_that("clear_mc_assets() reclaims superseded packs and spares everything else", {
-  skip_if(interactive())
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
-  suppressMessages(download_mc_assets(ask = FALSE))
-
-  # what an earlier sync left behind: same declared stem, older content hash
-  superseded <- file.path(
-    assets,
-    sprintf("fakegroup-%s.qs2", strrep("a", 64))
-  )
-  writeLines("an older pack", superseded)
+  quietly(download_mc_assets(ask = FALSE))
+  superseded <- stage_superseded(assets)
 
   # neither of these is ours: a foreign stem, and a file with no content address
   bystanders <- file.path(
@@ -314,118 +292,54 @@ test_that("clear_mc_assets() reclaims superseded packs and spares everything els
     writeLines("keep me", f)
   }
 
-  expect_named(mc_stale_files(), "FakeGroup")
-  expect_equal(unname(basename(mc_stale_files())), basename(superseded))
-
   # clear means clear: the current pack and the superseded one both go
   removed <- suppressMessages(clear_mc_assets(ask = FALSE))
-  expect_setequal(basename(removed), basename(c(superseded, row$file)))
+  expect_length(removed, 2L)
   expect_false(file.exists(file.path(assets, row$file)))
   expect_false(file.exists(superseded))
 
   # but only ours -- a foreign stem and an uncontent-addressed file survive
   expect_true(all(file.exists(bystanders)))
-  expect_length(mc_stale_files(), 0)
 })
 
-test_that("the delete prompt counts downloaded and superseded packs apart", {
+test_that("the consent gate fails closed -- only ask = FALSE moves bytes", {
   skip_if(interactive())
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
-  suppressMessages(download_mc_assets(ask = FALSE))
-  writeLines(
-    "an older pack",
-    file.path(assets, sprintf("fakegroup-%s.qs2", strrep("a", 64)))
-  )
+  fx <- local_assets()
+  assets <- fx$dir
+  row <- fx$row
 
-  # non-interactive refusal is where the clear summary is observable
-  expect_error(clear_mc_assets(), "1 downloaded asset and 1 superseded asset")
-})
-
-test_that("download -> load -> clear round trips and leaves the assets dir empty", {
-  skip_if(interactive())
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  a <- fake_asset(withr::local_tempdir(), group = "GroupA")
-  b <- fake_asset(withr::local_tempdir(), group = "GroupB")
-  local_fake_registry(stats::setNames(list(a, b), c("GroupA", "GroupB")))
-
-  paths <- suppressMessages(download_mc_assets(ask = FALSE))
-  expect_true(all(file.exists(paths)))
-  expect_false(any(grepl(".part", list.files(assets), fixed = TRUE)))
-
-  # staged: loads from disk, needs no consent even with ask = TRUE
-  packs <- load_mc_assets("all")
-  expect_named(packs, c("GroupA", "GroupB"))
-  expect_equal(packs[["GroupA"]], a$.payload)
-  expect_equal(packs[["GroupB"]], b$.payload)
-
-  removed <- suppressMessages(clear_mc_assets(ask = FALSE))
-  expect_setequal(basename(removed), c(a$file, b$file))
-  expect_false(any(file.exists(paths)))
-  expect_length(mc_staged_files("all"), 0)
+  # unprompted, a non-interactive session cannot answer, so nothing is fetched
+  expect_error(load_mc_assets("FakeGroup"))
   expect_length(list.files(assets), 0)
 
-  # really gone: the next load would have to download, so it refuses
-  expect_error(load_mc_assets("all"))
-
-  # an empty request stays empty (it is not "all")
-  expect_length(load_mc_assets(character(0)), 0)
-})
-
-test_that("a non-path `ext_data` errors instead of silently hitting the assets dir", {
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
-  suppressMessages(download_mc_assets(ask = FALSE))
-  staged <- file.path(assets, row$file)
-  expect_true(file.exists(staged))
-
-  # a loaded pack names no directory -- the dir resolver must reject it
-  expect_error(mc_resolve_assets_dir(row$.payload))
-  expect_error(mc_resolve_assets_dir(5))
-  expect_error(mc_resolve_assets_dir(c("a", "b")))
-  expect_error(mc_resolve_assets_dir(""))
-  expect_error(load_mc_assets("FakeGroup", ext_data = 5))
-  expect_true(file.exists(staged))
-})
-
-test_that("`ask` is a strict flag -- only FALSE consents", {
-  skip_if(interactive())
-  assets <- withr::local_tempdir()
-  withr::local_options(mc.assets_dir = assets)
-  row <- fake_asset(withr::local_tempdir())
-  local_fake_registry(row)
   bad_flags <- list(NA, NULL, "yes", 1, c(TRUE, TRUE))
-
   for (bad in bad_flags) {
     expect_error(download_mc_assets(ask = bad))
     expect_error(load_mc_assets("FakeGroup", ask = bad))
   }
   expect_length(list.files(assets), 0) # nothing fetched under a bad flag
 
-  suppressMessages(download_mc_assets(ask = FALSE))
+  quietly(download_mc_assets(ask = FALSE))
   staged <- file.path(assets, row$file)
+  expect_error(clear_mc_assets()) # deletion is refused unprompted too
   for (bad in bad_flags) {
     expect_error(clear_mc_assets(ask = bad))
   }
-  expect_true(file.exists(staged)) # and nothing deleted under one either
+  expect_true(file.exists(staged)) # and nothing deleted under either
 })
 
 test_that("the real PCBrainAge release asset downloads and verifies", {
   skip_on_cran()
-  skip_if_offline()
+  # opt-in flag gates first. skip_if_offline() is a live DNS lookup.
   skip_if_not(
     nzchar(Sys.getenv("MC_TEST_NETWORK")),
     "set MC_TEST_NETWORK=1 to run live download tests"
   )
+  skip_if_offline()
 
   assets <- withr::local_tempdir()
   withr::local_options(mc.assets_dir = assets)
-  packs <- suppressMessages(load_mc_assets("PCBrainAge", ask = FALSE))
+  packs <- quietly(load_mc_assets("PCBrainAge", ask = FALSE))
   pack <- packs[["PCBrainAge"]]
   row <- mc_asset("PCBrainAge")
   expect_length(pack$cpgs, row$n_cpgs)

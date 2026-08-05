@@ -16,8 +16,27 @@ bind_records <- function(clocks = "Hannum", n = 12L, blocks = 3L) {
   fx
 }
 
+# the two default shapes, built once each. tests that only read them share a draw.
+BIND3 <- bind_records()
+BIND2 <- bind_records(blocks = 2L)
+
+# cross-sample clock is derived. this file is the main gate on `pending`.
+XS_ID <- Filter(clock_is_cross_sample, resolve_clocks("all"))[[1L]]
+
+# whole-cohort vs per-block records for the cross-sample clock
+xs_split <- function(n = 12L, blocks = list(1:6, 7:12)) {
+  DNAm <- random_betas(clock_cpgs(XS_ID), n = n)
+  list(
+    DNAm = DNAm,
+    whole = calc_clocks(DNAm, XS_ID),
+    parts = lapply(blocks, function(i) {
+      calc_clocks(DNAm[i, , drop = FALSE], XS_ID)
+    })
+  )
+}
+
 test_that("disjoint records bind into one labelled union", {
-  fx <- bind_records()
+  fx <- BIND3
   out <- do.call(rbind, fx$records)
 
   expect_s3_class(out, "mc_result")
@@ -41,228 +60,148 @@ test_that("disjoint records bind into one labelled union", {
     names(out$coverage$per_clock),
     unlist(lapply(fx$records, function(r) names(r$coverage$per_clock)))
   )
+
+  # pheno stays aligned to the sample axis, by id
+  expect_equal(out$pheno$ID, out$provenance$sample_id)
 })
 
-test_that("a batch label is a function of the sample ids and nothing else", {
+test_that("rbind refuses what the caller chose differently", {
+  fx <- BIND2
+
+  # overlapping sample ids, whole or partial
+  expect_error(rbind(fx$records[[1]], fx$records[[1]]))
+  both <- calc_clocks(fx$DNAm, "Hannum")
+  expect_error(rbind(both, fx$records[[1]]))
+
+  # differing score columns
+  cpgs <- union(clock_cpgs("Hannum"), clock_cpgs("PhenoAge"))
+  DNAm <- random_betas(cpgs, n = 8L)
+  expect_error(rbind(
+    calc_clocks(DNAm[1:4, , drop = FALSE], "Hannum"),
+    calc_clocks(DNAm[5:8, , drop = FALSE], "PhenoAge")
+  ))
+
+  # differing pheno_id
+  bl <- bind_blocks(blocks = 2L)
+  ph <- function(m, id) {
+    out <- data.frame(x = rownames(m), stringsAsFactors = FALSE)
+    names(out) <- id
+    out
+  }
+  mk <- function(m, id) {
+    calc_clocks(m, "Hannum", pheno = ph(m, id), pheno_id = id)
+  }
+  expect_error(rbind(mk(bl$parts[[1]], "ID"), mk(bl$parts[[2]], "sample")))
+
+  # differing normalize -- state the decision directly (bmiq unfit on U(0,1))
+  other <- fx$records[[2]]
+  other$provenance$normalized <- "Hannum"
+  expect_error(rbind(fx$records[[1]], other))
+})
+
+test_that("rbind is associative, and argument names are dropped not adopted", {
+  fx <- bind_records(n = 16L, blocks = 4L)
+  flat <- do.call(rbind, fx$records)
+
+  expect_equal(Reduce(rbind, fx$records), flat)
+  expect_equal(
+    rbind(
+      rbind(fx$records[[1]], fx$records[[2]]),
+      rbind(fx$records[[3]], fx$records[[4]])
+    ),
+    flat
+  )
+  expect_equal(nrow(flat$scores), 16L)
+  expect_equal(length(unique(flat$provenance$mc_batch_id)), 4L)
+
+  # every record's samples still share the one label they arrived with
+  for (rec in fx$records) {
+    got <- flat$provenance$mc_batch_id[
+      match(rownames(rec$scores), flat$provenance$sample_id)
+    ]
+    expect_equal(unique(got), unique(rec$provenance$mc_batch_id))
+  }
+
+  # the split() idiom the feature exists for: names ignored, never a label
+  named <- rbind(early = fx$records[[1]], late = fx$records[[2]])
+  expect_equal(named, rbind(fx$records[[1]], fx$records[[2]]))
+})
+
+test_that("a batch label is a function of the sample id set and nothing else", {
+  skip_on_cran()
   DNAm <- random_betas(clock_cpgs("Hannum"), n = 6L)
   a <- calc_clocks(DNAm, "Hannum")
-  b <- calc_clocks(DNAm, "Hannum")
-  # same ids scored twice -> same label, whatever the betas did in between
-  expect_equal(a$provenance$mc_batch_id, b$provenance$mc_batch_id)
 
-  # the id *set*, not its order: re-scoring a reordered block keeps the label
+  # same ids scored twice -> same label, whatever the betas did in between
+  expect_equal(
+    calc_clocks(DNAm, "Hannum")$provenance$mc_batch_id,
+    a$provenance$mc_batch_id
+  )
+
+  # the id *set*, not its order
   shuffled <- calc_clocks(DNAm[rev(seq_len(6L)), , drop = FALSE], "Hannum")
   expect_equal(
     unique(shuffled$provenance$mc_batch_id),
     unique(a$provenance$mc_batch_id)
   )
 
-  # different ids -> different label
-  other <- DNAm
-  rownames(other) <- paste0(rownames(other), "_T2")
-  expect_false(
-    identical(
-      calc_clocks(other, "Hannum")$provenance$mc_batch_id,
-      a$provenance$mc_batch_id
-    )
+  # different ids -> different label. sim_DNAm(suffix =) is how a caller gets there.
+  s1 <- sim_DNAm("Hannum", n = 4L, suffix = "T1")
+  s2 <- sim_DNAm("Hannum", n = 4L, suffix = "T2")
+  expect_equal(length(intersect(rownames(s1$DNAm), rownames(s2$DNAm))), 0L)
+  out <- rbind(
+    calc_clocks(s1$DNAm, "Hannum", pheno = s1$pheno),
+    calc_clocks(s2$DNAm, "Hannum", pheno = s2$pheno)
   )
-})
-
-test_that("colliding sample ids throw", {
-  fx <- bind_records(blocks = 2L)
-  expect_error(rbind(fx$records[[1]], fx$records[[1]]))
-  # partial overlap is the same fault
-  both <- calc_clocks(fx$DNAm, "Hannum")
-  expect_error(rbind(both, fx$records[[1]]))
-})
-
-test_that("differing score columns throw", {
-  n <- 8L
-  cpgs <- union(clock_cpgs("Hannum"), clock_cpgs("PhenoAge"))
-  DNAm <- random_betas(cpgs, n = n)
-  r1 <- calc_clocks(DNAm[1:4, , drop = FALSE], "Hannum")
-  r2 <- calc_clocks(DNAm[5:8, , drop = FALSE], "PhenoAge")
-  expect_error(rbind(r1, r2))
-})
-
-test_that("differing pheno_id throws", {
-  fx <- bind_blocks(blocks = 2L)
-  ph <- function(m, id) {
-    out <- data.frame(x = rownames(m), stringsAsFactors = FALSE)
-    names(out) <- id
-    out
-  }
-  r1 <- calc_clocks(
-    fx$parts[[1]],
-    "Hannum",
-    pheno = ph(fx$parts[[1]], "ID"),
-    pheno_id = "ID"
-  )
-  r2 <- calc_clocks(
-    fx$parts[[2]],
-    "Hannum",
-    pheno = ph(fx$parts[[2]], "sample"),
-    pheno_id = "sample"
-  )
-  expect_error(rbind(r1, r2))
+  expect_equal(length(names(out$coverage$per_clock)), 2L)
 })
 
 test_that("pheno never carries row names, whatever came in", {
+  skip_on_cran()
   # negative .row_names_info means automatic/compact row names.
   is_auto <- function(df) .row_names_info(df) < 0
 
   n <- 6L
   DNAm <- random_betas(clock_cpgs("Hannum"), n = n)
-  expect_true(is_auto(calc_clocks(DNAm, "Hannum")$pheno))
-
   ph <- data.frame(ID = rownames(DNAm), stringsAsFactors = FALSE)
   rownames(ph) <- paste0("row_", seq_len(n))
-  expect_true(is_auto(calc_clocks(DNAm, "Hannum", pheno = ph)$pheno))
 
+  expect_true(is_auto(calc_clocks(DNAm, "Hannum")$pheno))
   # reordered, so the id-join subsets out of order
   rev_ph <- ph[rev(seq_len(n)), , drop = FALSE]
   expect_true(is_auto(calc_clocks(DNAm, "Hannum", pheno = rev_ph)$pheno))
 
   # and the bind keeps it, without a reset of its own
-  bound <- rbind(
+  half <- function(i) {
     calc_clocks(
-      DNAm[1:3, , drop = FALSE],
+      DNAm[i, , drop = FALSE],
       "Hannum",
-      pheno = ph[1:3, , drop = FALSE]
-    ),
-    calc_clocks(
-      DNAm[4:6, , drop = FALSE],
-      "Hannum",
-      pheno = ph[4:6, , drop = FALSE]
+      pheno = ph[i, , drop = FALSE]
     )
-  )
-  expect_true(is_auto(bound$pheno))
-  expect_equal(bound$pheno$ID, bound$provenance$sample_id)
-})
-
-test_that("passing a pheno and omitting it give the same carried columns", {
-  fx <- bind_blocks(blocks = 2L)
-  r1 <- calc_clocks(
-    fx$parts[[1]],
-    "Hannum",
-    pheno = data.frame(ID = rownames(fx$parts[[1]]), stringsAsFactors = FALSE)
-  )
-  r2 <- calc_clocks(fx$parts[[2]], "Hannum")
-
-  # omitted pheno materializes to the id column, so both records bind.
-  expect_equal(names(r1$pheno), "ID")
-  expect_equal(names(r2$pheno), "ID")
-  out <- rbind(r1, r2)
-  expect_equal(nrow(out$pheno), nrow(out$scores))
-  expect_equal(out$pheno$ID, out$provenance$sample_id)
-})
-
-test_that("records normalized differently do not bind", {
-  fx <- bind_records(blocks = 2L)
-  # state the normalize decision directly (bmiq unfit on U(0,1)).
-  fx$records[[2]]$provenance$normalized <- "Hannum"
-  expect_error(rbind(fx$records[[1]], fx$records[[2]]))
-})
-
-test_that("flat rbind, Reduce and do.call agree", {
-  fx <- bind_records()
-  flat <- rbind(fx$records[[1]], fx$records[[2]], fx$records[[3]])
-  expect_equal(Reduce(rbind, fx$records), flat)
-  expect_equal(do.call(rbind, fx$records), flat)
-})
-
-test_that("a named list binds -- split() names are not a labelling attempt", {
-  n <- 12L
-  DNAm <- random_betas(clock_cpgs("Hannum"), n = n)
-  # the canonical blocking idiom: split() names its result by factor level
-  blocks <- split(seq_len(n), rep(1:3, each = 4))
-  recs <- lapply(blocks, function(i) {
-    calc_clocks(DNAm[i, , drop = FALSE], "Hannum")
-  })
-  expect_true(!is.null(names(recs)))
-
-  out <- do.call(rbind, recs)
-  expect_equal(nrow(out$scores), n)
-  # the names are dropped, not adopted -- labels stay derived
-  expect_equal(length(unique(out$provenance$mc_batch_id)), 3L)
-  expect_false(any(c("1", "2", "3") %in% out$provenance$mc_batch_id))
-
-  # naming by hand is the same: ignored, never a label
-  fx <- bind_records(blocks = 2L)
-  named <- rbind(early = fx$records[[1]], late = fx$records[[2]])
-  expect_equal(named, do.call(rbind, fx$records))
-})
-
-test_that("sim_DNAm suffixes ids so two blocks are disjoint, and they bind", {
-  a <- sim_DNAm("Hannum", n = 4L, suffix = "T1")
-  b <- sim_DNAm("Hannum", n = 4L, suffix = "T2")
-
-  expect_equal(a$suffix, "T1")
-  expect_true(all(endsWith(rownames(a$DNAm), "_T1")))
-  # the pheno id column is the same id source, not a parallel one
-  expect_equal(a$pheno$ID, rownames(a$DNAm))
-  expect_equal(length(intersect(rownames(a$DNAm), rownames(b$DNAm))), 0L)
-
-  out <- rbind(
-    calc_clocks(a$DNAm, "Hannum", pheno = a$pheno),
-    calc_clocks(b$DNAm, "Hannum", pheno = b$pheno)
-  )
-  expect_equal(length(names(out$coverage$per_clock)), 2L)
-  expect_equal(nrow(out$scores), 8L)
-
-  # unsuffixed is the default, and leaves the ids alone
-  plain <- sim_DNAm("Hannum", n = 4L)
-  expect_null(plain$suffix)
-  expect_equal(rownames(plain$DNAm), paste0("sample", 1:4))
-})
-
-test_that("re-association is exact: labels derive from ids, so nothing moves", {
-  fx <- bind_records(n = 16L, blocks = 4L)
-  flat <- do.call(rbind, fx$records)
-  nested <- rbind(
-    rbind(fx$records[[1]], fx$records[[2]]),
-    rbind(fx$records[[3]], fx$records[[4]])
-  )
-
-  # the whole record agrees, not just the labels -- no renumbering to undo
-  expect_equal(nested, flat)
-  expect_equal(nrow(nested$scores), 16L)
-  expect_equal(length(unique(nested$provenance$mc_batch_id)), 4L)
-
-  # every record's samples still share one batch
-  for (rec in fx$records) {
-    got <- nested$provenance$mc_batch_id[
-      match(rownames(rec$scores), nested$provenance$sample_id)
-    ]
-    expect_equal(length(unique(got)), 1L)
-    expect_equal(unique(got), unique(rec$provenance$mc_batch_id))
   }
+  bound <- rbind(half(1:3), half(4:6))
+  expect_true(is_auto(bound$pheno))
 })
 
-test_that("clocks_coverage is one row per (clock, batch)", {
-  fx <- bind_records()
+test_that("the coverage frames span the bind, keyed by batch", {
+  fx <- BIND3
   out <- do.call(rbind, fx$records)
 
   cc <- clocks_coverage(out)
   one <- clocks_coverage(fx$records[[1]])
-  # batch hash is last, not in front of clock_id.
-  expect_equal(names(cc)[[length(cc)]], "mc_batch_id")
   expect_equal(names(cc)[[1]], "clock_id")
   expect_equal(nrow(cc), nrow(one) * 3L)
   expect_setequal(unique(cc$mc_batch_id), unique(out$provenance$mc_batch_id))
 
+  # a bound row is the row its own record carried
   b1 <- unique(fx$records[[1]]$provenance$mc_batch_id)
   expect_equal(
     cc[cc$mc_batch_id == b1 & cc$clock_id == "Hannum", "score_needed"],
     one[one$clock_id == "Hannum", "score_needed"]
   )
-})
 
-test_that("samples_coverage carries every sample once, under its own batch", {
-  fx <- bind_records()
-  out <- do.call(rbind, fx$records)
+  # every sample once, under its own batch
   sc <- samples_coverage(out)
-
   expect_setequal(sc$id, rownames(fx$DNAm))
   expect_equal(
     sc$mc_batch_id[match(out$provenance$sample_id, sc$id)],
@@ -271,25 +210,25 @@ test_that("samples_coverage carries every sample once, under its own batch", {
 })
 
 test_that("the batch label reaches an exit frame only when there is more than one", {
-  fx <- bind_records()
-  one <- fx$records[[1]]
-  many <- do.call(rbind, fx$records)
-  # calc_accel shares shape_scores with as.data.frame, so these are the exits
+  fx <- BIND3
+  # all four exits must gain and lose the column together
   exits <- function(x) {
+    ph <- mc_pheno(x$provenance$sample_id, Age = mc_ages(nrow(x$scores)))
     list(
       as.data.frame(x),
       as.data.frame(x, long = FALSE),
+      calc_accel(x, data = ph, long = FALSE),
       clocks_coverage(x),
       samples_coverage(x)
     )
   }
 
   # one batch means one repeated hash, which tells the reader nothing
-  for (df in exits(one)) {
+  for (df in exits(fx$records[[1]])) {
     expect_false("mc_batch_id" %in% names(df))
   }
   # and all of them carry it, last, once there is something to tell apart
-  for (df in exits(many)) {
+  for (df in exits(do.call(rbind, fx$records))) {
     expect_equal(names(df)[[length(df)]], "mc_batch_id")
   }
 })
@@ -315,102 +254,75 @@ test_that("a probe all-NA in one batch is recorded there, not merged away", {
   )
 })
 
-test_that("an ordinary clock retains no pending, and re-finalize says so", {
-  fx <- bind_records(blocks = 2L)
-  expect_equal(fx$records[[1]]$provenance$pending, list())
+test_that("binding a cohort-reducing clock says so, and an ordinary one does not", {
+  parts <- xs_split()$parts
+  # the id is pinned because the note's content is which columns are unresolved
+  expect_message(do.call(rbind, parts), XS_ID, fixed = TRUE)
 
-  out <- do.call(rbind, fx$records)
-  expect_equal(out$provenance$pending, list())
-  expect_message(same <- refinalize_clocks(out))
-  expect_equal(same$scores, out$scores)
+  # one record in, one batch out -- its reduction still spans its whole cohort
+  expect_no_message(rbind(parts[[1]]))
+
+  # an ordinary clock retains no pending, so there is nothing to say
+  fx <- BIND2
+  expect_equal(fx$records[[1]]$provenance$pending, list())
+  expect_no_message(do.call(rbind, fx$records))
 })
 
-test_that("re-finalizing a bound record reproduces the single-pass column", {
-  id <- "DNAmPhysAge"
-  DNAm <- random_betas(clock_cpgs(id), n = 12L)
-  whole <- calc_clocks(DNAm, id)
-  parts <- lapply(list(1:6, 7:12), function(i) {
-    calc_clocks(DNAm[i, , drop = FALSE], id)
-  })
-  bound <- do.call(rbind, parts)
-
-  # the per-sample intermediates survive the bind, stacked over every sample
-  expect_setequal(names(bound$provenance$pending), id)
-  expect_equal(nrow(bound$provenance$pending[[id]]), 12L)
-
-  # bound, the column is two within-batch z-scores -- not the cohort number
+test_that("refinalize composes: it reads pending and never consumes it", {
+  id <- XS_ID
+  fx <- xs_split(n = 18L, blocks = list(1:6, 7:12, 13:18))
+  whole <- fx$whole
+  r <- fx$parts
   by_row <- rownames(whole$scores)
+
+  # bound, the column is three within-batch reductions -- not the cohort number
+  bound <- suppressMessages(do.call(rbind, r))
+  expect_setequal(names(bound$provenance$pending), id)
+  expect_equal(nrow(bound$provenance$pending[[id]]), 18L)
   expect_false(isTRUE(all.equal(
     unname(bound$scores[by_row, id]),
     unname(whole$scores[, id])
   )))
 
-  suppressMessages(fixed <- refinalize_clocks(bound))
-  expect_equal(fixed$scores[by_row, id], whole$scores[, id])
-})
-
-test_that("binding a cohort-reducing clock says so, and an ordinary one does not", {
-  id <- "DNAmPhysAge"
-  DNAm <- random_betas(clock_cpgs(id), n = 12L)
-  parts <- lapply(list(1:6, 7:12), function(i) {
-    calc_clocks(DNAm[i, , drop = FALSE], id)
-  })
-  # the clock is named from the record's own pending, not from a list here
-  expect_message(do.call(rbind, parts), id, fixed = TRUE)
-
-  # one record in, one batch out -- its reduction still spans its whole cohort
-  expect_no_message(rbind(parts[[1]]))
-
-  fx <- bind_records(blocks = 2L)
-  expect_no_message(do.call(rbind, fx$records))
-})
-
-test_that("refinalize composes: it reads pending and never consumes it", {
-  id <- "DNAmPhysAge"
-  DNAm <- random_betas(clock_cpgs(id), n = 18L)
-  whole <- calc_clocks(DNAm, id)
-  r <- lapply(list(1:6, 7:12, 13:18), function(i) {
-    calc_clocks(DNAm[i, , drop = FALSE], id)
-  })
-
   # re-finalize partway, bind more, re-finalize again
   suppressMessages({
     step <- refinalize_clocks(rbind(r[[1]], r[[2]]))
-    grown <- rbind(r[[3]], step)
-    out <- refinalize_clocks(grown)
+    out <- refinalize_clocks(rbind(r[[3]], step))
   })
 
   # pending accumulates across the interleaving rather than being spent
   expect_equal(nrow(step$provenance$pending[[id]]), 12L)
   expect_equal(nrow(out$provenance$pending[[id]]), 18L)
-
-  by_row <- rownames(whole$scores)
   expect_equal(out$scores[by_row, id], whole$scores[, id])
 
   # so a second call changes nothing, and the order of the folds does not either
   suppressMessages({
     expect_equal(refinalize_clocks(out)$scores, out$scores)
-    flat <- refinalize_clocks(do.call(rbind, r))
+    flat <- refinalize_clocks(bound)
   })
   expect_equal(flat$scores[by_row, id], out$scores[by_row, id])
 })
 
-test_that("every finalizer agrees, matrix included", {
-  id <- "DNAmPhysAge"
-  DNAm <- random_betas(clock_cpgs(id), n = 12L)
-  whole <- calc_clocks(DNAm, id)
-  parts <- lapply(list(1:6, 7:12), function(i) {
-    calc_clocks(DNAm[i, , drop = FALSE], id)
-  })
-  bound <- do.call(rbind, parts)
+test_that("every finalizer resolves pending", {
+  id <- XS_ID
+  fx <- xs_split()
+  whole <- fx$whole
+  by_row <- rownames(whole$scores)
 
   suppressMessages({
+    bound <- do.call(rbind, fx$parts)
     m <- as.matrix(bound)
     d <- as.data.frame(bound, long = FALSE)
+    ph <- mc_pheno(bound$provenance$sample_id, Age = mc_ages(12L))
+    acc <- calc_accel(bound, type = "diff", data = ph, long = FALSE)
   })
 
   # leaving the mc_result structure resolves pending, whichever exit is used
-  by_row <- rownames(whole$scores)
   expect_equal(unname(m[by_row, id]), unname(whole$scores[, id]))
   expect_equal(d[[id]][match(by_row, d[[1L]])], unname(whole$scores[, id]))
+  # diff is score - Age, so it re-derives the same finalized column
+  expect_equal(
+    acc[[paste0(id, "_diff")]] + ph$Age[match(acc$ID, ph$ID)],
+    unname(whole$scores[acc$ID, id])
+  )
 })

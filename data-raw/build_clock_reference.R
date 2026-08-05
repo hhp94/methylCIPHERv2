@@ -1,10 +1,5 @@
-# Build the per-clock expectation reference that report() checks a user's data
-# against. Maintainer-run (not at build/check). Input is the per-dataset age/sex
-# regression table from the TranslAGE AgeSexAssociations workflow; we keep only a
-# dataset-UNIDENTIFIABLE meta-analytic summary per clock (pooled estimate,
-# heterogeneity, a prediction interval, and aggregate counts -- no dataset names,
-# no per-dataset values). Output data-raw/clock_reference.csv is committed; the
-# large input is not.
+# build per-clock age-association reference (maintainer-run).
+# input: TranslAGE AgeSexAssociations table. output: data-raw/clock_reference.csv.
 
 suppressMessages(devtools::load_all(quiet = TRUE))
 
@@ -19,9 +14,7 @@ MIN_N <- 20L # drop tiny datasets: their correlations are noise
 
 # --- meta-analysis helpers -------------------------------------------------
 
-# DerSimonian-Laird random-effects pool of estimates y with standard errors se.
-# Returns the pooled estimate and a 95% prediction interval -- the plausible
-# range for a *new* dataset, which is what a user's data should fall inside.
+# random-effects pool (DerSimonian-Laird). returns pooled estimate and 95% prediction interval.
 re_meta <- function(y, se) {
   ok <- is.finite(y) & is.finite(se) & se > 0
   y <- y[ok]

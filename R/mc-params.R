@@ -1,12 +1,5 @@
-# Shared @param definitions. Every topic that takes one of these writes
-# `@inheritParams mc-params` instead of copying the text.
-#
-# A param belongs here only if its default is the same at every call site, or
-# a topic overrides it locally. `groups` is the overriding case: the donor
-# carries `Default is "all"` for the three asset verbs, and `load_mc_assets()`,
-# which has no default, writes its own @param and wins.
-# `x` here is an mc_result, so a topic whose `x` is something else
-# (`print.mc_sim`, `cite_clocks.character`) must not inherit from this file.
+# shared @param definitions. inherit with `@inheritParams mc-params`.
+# only same-default params. override locally. `x` is mc_result -- do not inherit for other types.
 
 #' Shared Parameters
 #'

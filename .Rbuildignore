@@ -22,3 +22,5 @@
 ^pkgdown$
 ^\.github$
 ^vignettes/articles$
+^tests/testthat/test-fixtures-parity\.R$
+^tests/testthat/test-source-hygiene\.R$

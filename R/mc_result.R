@@ -20,10 +20,7 @@ is_multi_batch <- function(batch) {
   length(unique(batch)) > 1L
 }
 
-# how many batches the record spans. the per-sample provenance vector is
-# authoritative -- it is the vector that fills mc_batch_id -- and per_clock
-# must agree with it. a disagreement means the record was assembled wrong, so
-# it stops rather than silently picking one of the two counts.
+# batch count from provenance. stop if per_clock disagrees.
 n_batches <- function(x) {
   n <- length(unique(x[["provenance"]][[MC_BATCH]]))
   n_cov <- length(x[["coverage"]][["per_clock"]])

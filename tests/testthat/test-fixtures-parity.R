@@ -71,6 +71,13 @@ PARITY_REL_TOL <- 1e-10
 # packs: abs tol 1e-6 (scale ~3e6).
 PARITY_ABS_TOL <- c(core = 1e-10, fitage = 1e-10, packs = 1e-6, horvath = 1e-10)
 
+# snapshot of the normalized-horvath residual (not an agreement target). keyed clock@cohort.
+#   Horvath1@cohort_450K  max_abs 1.137877e-01  max_rel 1.926282e-03
+# a pair with no entry here fails. measure new pairs. do not default.
+HORVATH_NORM_TOL <- list(
+  "Horvath1@cohort_450K" = c(abs = 1.2e-1, rel = 2.0e-3)
+)
+
 # horvath-online oracle clocks (declared, not listed)
 is_horvath_online <- function(id) {
   any(vapply(
@@ -80,8 +87,10 @@ is_horvath_online <- function(id) {
   ))
 }
 
-# sample_scale needs the full array (same predicate as calc_clocks)
-needs_full_panel <- clock_needs_full_panel
+# horvath-online clocks with an expressible scheme. today only Horvath1 (bmiq).
+is_normalized_horvath <- function(id) {
+  is_horvath_online(id) && clock_norm_scheme(id) %in% NORM_SCHEMES
+}
 
 # which block a clock is graded in. Derived from the catalog, never a clock list.
 parity_block <- function(id) {
@@ -179,23 +188,15 @@ if (
   }
 }
 
-skip_if_parity_off <- function() {
-  testthat::skip_if_not(
-    parity_on,
-    "parity tier off (set MC_PARITY=1, e.g. via dev test_parity())"
-  )
+# cohorts actually on disk. generators key on this. unstaged tiers emit nothing.
+staged_cohorts <- PARITY_COHORTS[PARITY_COHORTS %in% names(cohort_cons)]
+unstaged_cohorts <- if (parity_on) {
+  setdiff(PARITY_COHORTS, staged_cohorts)
+} else {
+  character(0)
 }
 
-skip_if_no_cohort <- function(cohort) {
-  skip_if_parity_off()
-  testthat::skip_if(
-    is.null(cohort_cons[[cohort]]),
-    paste0(cohort, " fixture not staged")
-  )
-}
-
-# wang@cohort_450K: no sex-chromosome probes, empty panel would score as Female.
-# skip. epicv1 passes.
+# wang@cohort_450K: no sex-chromosome probes. skip. epicv1 passes.
 WANG_450K_GAP <- paste0(
   "cohort_450K has no sex-chromosome probes, so the panel is 0% present. ",
   "The fixture expects the oracle's empty-panel 0; we decline to score."
@@ -235,25 +236,28 @@ parity_gap <- function(id, cohort) {
   NULL
 }
 
-# (clock, cohort) pairs upstream declares a fixture for, for one block.
+# (clock, cohort) pairs with an upstream fixture. unstaged cohorts are not targets.
 parity_targets <- function(block) {
+  if (!length(staged_cohorts)) {
+    return(list())
+  }
   out <- list()
   for (id in names(mc_catalog)) {
     if (!identical(parity_block(id), block)) {
       next
     }
     for (fx in clock_fixtures(id) %||% list()) {
-      out[[length(out) + 1L]] <- list(
-        id = id,
-        cohort = as.character(fx[["cohort"]])
-      )
+      cohort <- as.character(fx[["cohort"]])
+      if (!cohort %in% staged_cohorts) {
+        next
+      }
+      out[[length(out) + 1L]] <- list(id = id, cohort = cohort)
     }
   }
   out
 }
 
 run_parity_target <- function(clock_id, cohort) {
-  skip_if_no_cohort(cohort)
   skip_if_no_pack(clock_id)
   gap <- parity_gap(clock_id, cohort)
   if (!is.null(gap)) {
@@ -269,7 +273,7 @@ run_parity_target <- function(clock_id, cohort) {
   # packs carry their group's scoring panel -- resolve before the union
   seq_ids <- resolve_clocks_sequence(resolve_clocks(request))
   packs <- load_mc_assets(pack_groups_needed(seq_ids), NULL, FALSE)
-  DNAm <- if (any(vapply(seq_ids, needs_full_panel, logical(1)))) {
+  DNAm <- if (any(vapply(seq_ids, clock_needs_full_panel, logical(1)))) {
     cohort_betas_full(cohort_cons[[cohort]])
   } else {
     # same union as clock_cpgs() (panels alone would drop moment refs).
@@ -288,90 +292,81 @@ run_parity_target <- function(clock_id, cohort) {
   expect_parity(res$scores[, request], clock_id, cohort)
 }
 
-# census: every catalog clock declares a fixture per cohort (guards the generator)
-test_that("every clock declares a fixture for every registry cohort", {
-  skip_if_not(parity_on, "parity tier off (set MC_PARITY=1)")
-
-  ids <- names(mc_catalog)
-  declared <- lapply(stats::setNames(ids, ids), function(id) {
-    unique(vapply(
-      clock_fixtures(id) %||% list(),
-      function(fx) as.character(fx[["cohort"]]),
-      character(1)
-    ))
+# what the tier could not run, said once each rather than once per target
+if (!parity_on) {
+  test_that("cohort parity tier", {
+    skip("parity tier off (set MC_PARITY=1, e.g. via dev test_parity())")
   })
-
-  # sex-routed aliases declare no fixture (members do)
-  aliases <- unique(unlist(sex_routed_members()$alias))
-  expect_setequal(names(Filter(function(x) !length(x), declared)), aliases)
-
-  # every other clock: both cohorts. Partial coverage is a gap, not a pass.
-  rest <- setdiff(ids, aliases)
-  incomplete <- rest[
-    !vapply(
-      rest,
-      function(id) setequal(declared[[id]], PARITY_COHORTS),
-      logical(1)
-    )
-  ]
-  expect_equal(incomplete, character(0))
-
-  # a cohort outside the registry would generate targets that can never run
-  expect_setequal(unique(unlist(declared)), PARITY_COHORTS)
-})
-
-# block 1 -- bundled clocks outside the DNAmFitAge family
-for (target in parity_targets("core")) {
+}
+for (cohort_i in unstaged_cohorts) {
   local({
-    clock_id <- target$id
-    cohort <- target$cohort
-    test_that(paste0("parity: ", clock_id, " @ ", cohort), {
-      run_parity_target(clock_id, cohort)
+    cohort <- cohort_i
+    test_that(paste0("cohort parity: ", cohort), {
+      skip(paste0(cohort, " fixture not staged"))
     })
   })
 }
 
-# block 2 -- DNAmFitAge family at core tolerances
-for (target in parity_targets("fitage")) {
-  local({
-    clock_id <- target$id
-    cohort <- target$cohort
-    test_that(paste0("parity (fitage): ", clock_id, " @ ", cohort), {
-      run_parity_target(clock_id, cohort)
+# census: every catalog clock declares a fixture per cohort. needs the flag, not duckdb.
+if (parity_on) {
+  test_that("every clock declares a fixture for every registry cohort", {
+    ids <- names(mc_catalog)
+    declared <- lapply(stats::setNames(ids, ids), function(id) {
+      unique(vapply(
+        clock_fixtures(id) %||% list(),
+        function(fx) as.character(fx[["cohort"]]),
+        character(1)
+      ))
     })
+
+    # sex-routed aliases declare no fixture (members do)
+    aliases <- unique(unlist(sex_routed_members()$alias))
+    expect_setequal(names(Filter(function(x) !length(x), declared)), aliases)
+
+    # every other clock: both cohorts. Partial coverage is a gap, not a pass.
+    rest <- setdiff(ids, aliases)
+    incomplete <- rest[
+      !vapply(
+        rest,
+        function(id) setequal(declared[[id]], PARITY_COHORTS),
+        logical(1)
+      )
+    ]
+    expect_equal(incomplete, character(0))
+
+    # a cohort outside the registry would generate targets that can never run
+    expect_setequal(unique(unlist(declared)), PARITY_COHORTS)
   })
 }
 
-# block 3 -- external packs (relaxed abs tol only)
-for (target in parity_targets("packs")) {
-  local({
-    clock_id <- target$id
-    cohort <- target$cohort
-    test_that(paste0("parity (packs): ", clock_id, " @ ", cohort), {
-      run_parity_target(clock_id, cohort)
-    })
-  })
-}
+# the four blocks and their labels. membership is derived by parity_block().
+PARITY_BLOCK_LABELS <- c(
+  core = "parity", # bundled clocks outside the DNAmFitAge family
+  fitage = "parity (fitage)", # DNAmFitAge family at core tolerances
+  packs = "parity (packs)", # external packs (relaxed abs tol only)
+  horvath = "parity (horvath online)" # online oracles (skipped wholesale)
+)
 
-# block 4 -- horvath online oracles (skipped wholesale)
-for (target in parity_targets("horvath")) {
-  local({
-    clock_id <- target$id
-    cohort <- target$cohort
-    test_that(paste0("parity (horvath online): ", clock_id, " @ ", cohort), {
-      run_parity_target(clock_id, cohort)
+for (block_i in names(PARITY_BLOCK_LABELS)) {
+  for (target_i in parity_targets(block_i)) {
+    local({
+      label <- PARITY_BLOCK_LABELS[[block_i]]
+      clock_id <- target_i$id
+      cohort <- target_i$cohort
+      test_that(paste0(label, ": ", clock_id, " @ ", cohort), {
+        run_parity_target(clock_id, cohort)
+      })
     })
-  })
+  }
 }
 
 # both PhysAge composites in one call, per cohort
-for (cohort_i in PARITY_COHORTS) {
+for (cohort_i in staged_cohorts) {
   local({
     cohort <- cohort_i
     test_that(
       paste0("PhysAge composites match the author fixtures @ ", cohort),
       {
-        skip_if_no_cohort(cohort)
         members <- mc_groups[["PhysAge"]]$members
         cpgs <- unique(unlist(lapply(members, clock_scoring_cpgs)))
         DNAm <- cohort_betas(cohort_cons[[cohort]], cpgs)
@@ -393,40 +388,99 @@ for (cohort_i in PARITY_COHORTS) {
   })
 }
 
-# Degraded coverage against the reference implementation. Not a cohort fixture:
-# it builds its own holed panel, so it needs the tier flag but no duckdb. Lives
-# here because DunedinPACE is undeclared and only the maintainer laptop has it.
-test_that("DunedinPACE matches danbelsky/DunedinPACE through a holed panel", {
-  skip_if_parity_off()
-  skip_if_not_installed("betanorm")
+# normalized horvath-online (Horvath1 bmiq). skip unless the cohort leaves zero scoring probes absent.
+for (cohort_i in staged_cohorts) {
+  for (id_i in Filter(is_normalized_horvath, names(mc_catalog))) {
+    local({
+      cohort <- cohort_i
+      clock_id <- id_i
+      test_that(
+        paste0("parity (horvath normalized): ", clock_id, " @ ", cohort),
+        {
+          skip_if_not_installed("betanorm")
+          norm_on <- stats::setNames(TRUE, clock_id)
+          DNAm <- cohort_betas(
+            cohort_cons[[cohort]],
+            clock_cpgs(clock_id, normalize = norm_on)
+          )
 
-  norm_panel <- names(clock_norm_target("DunedinPACE"))
-  score_panel <- clock_scoring_cpgs("DunedinPACE")
-  norm_only <- setdiff(norm_panel, score_panel)
+          # any absent scoring probe confounds the comparison with the oracle fill.
+          absent <- setdiff(clock_scoring_cpgs(clock_id), colnames(DNAm))
+          skip_if_not(
+            length(absent) == 0L,
+            paste0(
+              length(absent),
+              " scoring CpGs absent -- ",
+              HORVATH_ONLINE_GAP
+            )
+          )
 
-  # complete miss: 3 of 173 scoring CpGs and 1000 background-only ones
-  absent <- c(score_panel[1:3], norm_only[1:1000])
-  DNAm <- random_betas(setdiff(norm_panel, absent), n = 10L)
+          res <- calc_clocks(
+            DNAm,
+            clock_id,
+            pheno = cohort_pheno(cohort),
+            normalize = norm_on,
+            min_clocks_coverage = 0,
+            min_samples_coverage = 0
+          )
+          exp <- expected_scores(clock_id, cohort)
+          got <- as.numeric(res$scores[, clock_id][exp$sample_id])
+          expect_false(anyNA(got))
 
-  # partial miss on both panels. reference vendor-fills rare probes, we never do
-  holed_score <- score_panel[4:8]
-  holed_norm <- norm_only[1001:1005]
-  for (j in seq_along(holed_score)) {
-    DNAm[j, holed_score[[j]]] <- NA_real_
-    DNAm[j, holed_norm[[j]]] <- NA_real_
+          key <- paste0(clock_id, "@", cohort)
+          tol <- HORVATH_NORM_TOL[[key]]
+          if (is.null(tol)) {
+            stop("No recorded residual snapshot for ", key, call. = FALSE)
+          }
+          expect_lt(
+            max(abs(got - exp$value)),
+            tol[["abs"]],
+            label = sprintf("%s max_abs_diff", key)
+          )
+          expect_lt(
+            rel_diff(got, exp$value),
+            tol[["rel"]],
+            label = sprintf("%s max_rel_diff", key)
+          )
+        }
+      )
+    })
   }
+}
 
-  got <- calc_clocks(DNAm, "DunedinPACE")
-  ref <- DunedinPACE::PACEProjector(t(DNAm))[["DunedinPACE"]]
-  expect_false(anyNA(ref))
-  expect_equal(got$scores[, "DunedinPACE"], ref[rownames(DNAm)])
+# degraded coverage against the DunedinPACE reference. needs the tier flag, not duckdb.
+if (parity_on) {
+  test_that("DunedinPACE matches danbelsky/DunedinPACE through a holed panel", {
+    skip_if_not_installed("betanorm")
 
-  # absent cpgs filled from the target. present-but-holed ones cohort-mean filled.
-  cov <- got$coverage$per_clock[[1]]$DunedinPACE
-  expect_equal(cov$score_imputed_full, 3L)
-  expect_equal(cov$norm_imputed_full, 1003L)
-  expect_equal(cov$score_imputed_partial, 5L)
-  expect_equal(cov$norm_imputed_partial, 10L)
-  expect_equal(cov$score_dropped, 0L)
-  expect_equal(cov$norm_dropped, 0L)
-})
+    norm_panel <- names(clock_norm_target("DunedinPACE"))
+    score_panel <- clock_scoring_cpgs("DunedinPACE")
+    norm_only <- setdiff(norm_panel, score_panel)
+
+    # complete miss: 3 of 173 scoring CpGs and 1000 background-only ones
+    absent <- c(score_panel[1:3], norm_only[1:1000])
+    DNAm <- random_betas(setdiff(norm_panel, absent), n = 10L)
+
+    # partial miss on both panels. reference vendor-fills rare probes, we never do
+    holed_score <- score_panel[4:8]
+    holed_norm <- norm_only[1001:1005]
+    for (j in seq_along(holed_score)) {
+      DNAm[j, holed_score[[j]]] <- NA_real_
+      DNAm[j, holed_norm[[j]]] <- NA_real_
+    }
+
+    got <- calc_clocks(DNAm, "DunedinPACE")
+    ref <- DunedinPACE::PACEProjector(t(DNAm))[["DunedinPACE"]]
+    expect_false(anyNA(ref))
+    expect_equal(got$scores[, "DunedinPACE"], ref[rownames(DNAm)])
+
+    # absent cpgs filled from the target. present-but-holed ones cohort-mean filled.
+    cov <- got$coverage$per_clock[[1]]$DunedinPACE
+    expect_equal(cov$score_imputed_full, 3L)
+    expect_equal(cov$norm_imputed_full, 1003L)
+    expect_equal(cov$score_imputed_partial, 5L)
+    expect_equal(cov$norm_imputed_partial, 10L)
+    expect_equal(cov$score_dropped, 0L)
+    expect_equal(cov$norm_dropped, 0L)
+  })
+}

@@ -1,8 +1,6 @@
 # browsable catalog menu for the clocks= argument
 
-# the default menu. callable is out because it is exactly
-# request_as != clock_id, group_size because the frame already carries it,
-# batch_dependent and normalize because 2 and 3 of 137 clocks set them.
+# default menu columns.
 LIST_CLOCKS_DEFAULT_COLS <- c(
   "clock_id",
   "group_id",

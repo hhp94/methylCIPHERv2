@@ -7,7 +7,6 @@ test_parity <- function(filter = "fixtures-parity", ...) {
 }
 
 # score an mc_sim without unpacking it: sim_DNAm("Hannum", n = 4) |> sim_score()
-# dev only -- calc_clocks() takes a matrix, and that stays its one input shape.
 sim_score <- function(sim, clocks = sim[["clocks"]], ...) {
   calc_clocks(sim[["DNAm"]], clocks, pheno = sim[["pheno"]], ...)
 }
@@ -16,7 +15,6 @@ sim_score <- function(sim, clocks = sim[["clocks"]], ...) {
 WRITE_SIM_EXTS <- c(".csv.gz", ".h5")
 
 # write an n x p u(0,1) cohort for chunked-front-end benchmarks (format from path).
-# not an s3 method (this file is build-ignored).
 write_sim_DNAm <- function(
   n,
   p,
@@ -107,11 +105,9 @@ require_dev_ns <- function(pkg, who = "write_sim_DNAm()") {
 }
 
 # --- roxygen doc lint ------------------------------------------------------
-# Enforces dev/WRITING.md section 4 ("@param form") over the hand-written
-# @param text. An inherited param is checked once at its donor, never at each
-# recipient, because the recipient carries no text of its own.
+# enforces @param form from dev/WRITING.md. inherited params checked at the donor only.
 
-# The type vocabulary. Every @param opens with one of these.
+# the type vocabulary. every @param opens with one of these.
 DOC_TYPES <- c(
   "A numeric matrix.",
   "A character vector.",
@@ -138,8 +134,7 @@ DOC_TYPES <- c(
   "Two or more "
 )
 
-# @returns names the same types but is not held to the opening-fragment form,
-# so it matches on the stem anywhere in the text.
+# @returns names a type somewhere in its text (not held to the opening-fragment form).
 DOC_TYPE_STEMS <- sub("\\.$", "", DOC_TYPES)
 
 DOC_DEFAULT <- "Default is "
@@ -186,8 +181,7 @@ lint_doc_block <- function(block) {
   do.call(rbind, c(rows, list(lint_doc_returns(topic, returns))))
 }
 
-# @returns must name a type somewhere in its text. It is not held to the
-# opening-fragment form, because it describes a value rather than an argument.
+# @returns must name a type somewhere in its text.
 lint_doc_returns <- function(topic, returns) {
   if (!length(returns)) {
     return(NULL)
@@ -269,9 +263,7 @@ doc_squish <- function(x) {
 }
 
 # --- @seealso cross-reference lint -----------------------------------------
-# The groups are closed (dev/WRITING.md section 6) and a topic's @seealso is
-# the union of its groups minus itself, so every link must be two-way. Reads
-# man/, because \link targets only exist after document().
+# closed @seealso groups from dev/WRITING.md. every link must be two-way. reads man/.
 
 # every \link target under a node. the target is in Rd_option for \link[=x]{y}.
 rd_link_targets <- function(node) {
@@ -361,9 +353,7 @@ lint_seealso <- function(path = ".") {
   out
 }
 
-# Render every man page to one text file, for a read-through of the whole
-# surface in one sitting. Rd2txt is what a user sees at the console, so the
-# audit reads the output rather than the source tags.
+# render every man page to one text file (Rd2txt console form).
 dump_roxygen <- function(
   path = ".",
   out = file.path(tempdir(), "roxygen-dump.txt")

@@ -25,14 +25,11 @@ mc_asset <- function(group_id) {
 
 # "all" or a vector of known group ids, deduplicated.
 mc_resolve_groups <- function(groups) {
-  # an empty selection selects nothing. "all" is the only way to say all, so a
-  # filter that came out empty can never trigger a mass download or delete.
+  # empty selection selects nothing. only "all" means all.
   if (is.null(groups) || !length(groups)) {
     return(character(0))
   }
-  # exact match, like list_clocks(tag =). no partial matching: the group set
-  # grows with each sync, so an abbreviation that works today could become
-  # ambiguous later and break calling code.
+  # exact match only, like list_clocks(tag =). no partial matching.
   checkmate::assert_subset(groups, c("all", mc_external_groups()))
   groups <- unique(groups)
   if ("all" %in% groups) {
@@ -158,9 +155,7 @@ get_mc_assets_dir <- function() {
 #'
 #' @export
 set_mc_assets_dir <- function(path = NULL) {
-  # the previous override, not the resolved dir: NULL means "no override was
-  # set", and passing it back restores that state. resolving it here would
-  # pin the option to a path it never held and shadow MC_ASSETS_DIR.
+  # returns the previous override (NULL means no override was set).
   old <- getOption("mc.assets_dir")
   if (is.null(path)) {
     options(mc.assets_dir = NULL)
@@ -210,8 +205,7 @@ mc_pack_paths <- function(dir, rows) {
   as.character(fs::path(dir, files))
 }
 
-# aligned label/size lines (cli_verbatim only, so sprintf is never a template).
-# the consent prompt shows a capped head plus a count of the rest.
+# aligned label/size lines for cli_verbatim. consent prompt shows a capped head.
 mc_manifest_lines <- function(labels, sizes) {
   if (!length(labels)) {
     return(character(0))
@@ -231,8 +225,7 @@ mc_manifest_lines <- function(labels, sizes) {
   out
 }
 
-# one bullet per pack (no alignment). the label is an interpolated value, so a
-# brace in a file name can never become a cli template.
+# one bullet per pack. brace in a file name cannot become a cli template.
 mc_manifest_bullets <- function(labels, sizes) {
   sizes <- as.numeric(sizes)
   human <- trimws(format(fs::fs_bytes(sizes)))
@@ -599,8 +592,7 @@ mc_canonicalize_ext_data <- function(ext_data) {
 #' @export
 load_mc_assets <- function(groups, ext_data = NULL, ask = TRUE) {
   checkmate::assert_flag(ask)
-  # one reading of `groups` for every verb. an ordinary run asks for no external
-  # group at all, so the empty case is the common one and returns nothing.
+  # one reading of `groups` for every verb. empty is the common case.
   groups <- mc_resolve_groups(groups)
   if (!length(groups)) {
     return(stats::setNames(list(), character(0)))

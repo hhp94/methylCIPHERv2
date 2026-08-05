@@ -26,8 +26,7 @@ score_DNAmSex_Wang <- function(id, cpgs, block, results) {
   # per-sample moments over the declared ref, banked by mc_cohort()
   mom <- block_domain_moments(block, id)
 
-  # rearranges to a matmul plus two scalar reductions over present
-  # (same as score_Zhang2019).
+  # matmul plus two scalar reductions over present (same as score_Zhang2019).
   r <- rotation[present]
   lp <- obs[["values"]] %*% r
   # mean/sd are per-sample, so they recycle down the single column

@@ -83,8 +83,7 @@ print.mc_citation <- function(x, ...) {
   )
   cat("\n")
   cli::cli_verbatim(fmt_section("bibtex", plural_count(n_papers, "paper")))
-  # the bibliography is the payload, so it is never capped and never a cli
-  # template. writeLines reproduces what citation() prints.
+  # bibliography is never capped. writeLines, not a cli template.
   writeLines(x[["bibtex"]])
   cat("\n")
   cli::cli_bullets(c(

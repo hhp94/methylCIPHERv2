@@ -3,14 +3,10 @@
 # probe-id prefixes across 450K / EPICv1 / EPICv2 / MSA.
 PROBE_ID_PREFIXES <- c("cg", "ch", "rs", "nv")
 
-# EPICv2 and MSA suffix every probe with its address (cg00002033_TC11) and ship
-# several rows per CpG. Matches all 937055 EPICv2 and all 281806 MSA ids, and
-# nothing on EPICv1/450K, which carry no underscore at all.
+# EPICv2/MSA probe id with address suffix (cg00002033_TC11). no match on EPICv1/450K.
 PROBE_REPLICATE_SUFFIX <- "_[BT][CO][0-9]+$"
 
-# orientation and replicate suffixes are whole-array properties -- every EPICv2
-# and MSA id carries a suffix, no EPICv1/450K id does -- so a bounded stride
-# sample decides both, and the cost does not grow with a 900k-column matrix.
+# orientation and replicate suffixes are whole-array properties. a bounded stride sample decides both.
 id_sample <- function(x, n = 2000L) {
   if (!length(x)) {
     return(character(0))
@@ -31,9 +27,7 @@ has_probe_ids <- function(x) {
 }
 
 check_DNAm <- function(DNAm) {
-  # dim/dimnames work on a data.frame too, so orientation and suffixes are
-  # diagnosed before the matrix refusal -- a data.frame caller gets the real
-  # problem, not just "not a matrix".
+  # diagnose orientation and suffixes before the matrix refusal.
   d <- dim(DNAm)
   if (length(d) != 2L) {
     cli::cli_abort(
@@ -47,8 +41,7 @@ check_DNAm <- function(DNAm) {
   cn_probes <- has_probe_ids(cn)
   rn_probes <- has_probe_ids(rn)
 
-  # probe ids in the rows is decisive; more rows than columns is only
-  # suspicious, since one clock over a large cohort is legitimately tall.
+  # probe ids in the rows is decisive. more rows than columns is only suspicious.
   transposed <- rn_probes && !cn_probes
   if (length(cn) && !cn_probes && (transposed || d[[1L]] > d[[2L]])) {
     cli::cli_warn(
@@ -68,8 +61,7 @@ check_DNAm <- function(DNAm) {
     )
   }
 
-  # EPICv2/MSA replicate probes. Panels are declared on the unsuffixed id, so a
-  # suffixed column matches nothing and is filled or dropped as absent.
+  # EPICv2/MSA replicate probes. panels use the unsuffixed id.
   suffixed <- cn[grepl(PROBE_REPLICATE_SUFFIX, cn)]
   if (length(suffixed)) {
     cli::cli_warn(
@@ -163,8 +155,7 @@ check_pheno <- function(
     return(invisible(NULL))
   }
   checkmate::assert_data_frame(pheno, min.rows = 1)
-  # front-door pheno structure, so cli -- and checkmate's own message here reads
-  # "Assertion on 'ID' failed", naming an argument the caller never typed.
+  # front-door pheno structure (cli).
   if (!ID %in% names(pheno)) {
     cli::cli_abort(
       c(
@@ -175,8 +166,7 @@ check_pheno <- function(
       call = NULL
     )
   }
-  # the expression deparses to pheno[[ID]], which names an internal argument --
-  # so this is one of the few sites that needs .var.name spelled out
+  # deparse names an internal arg. .var.name must be spelled out.
   checkmate::assert_character(
     pheno[[ID]],
     any.missing = FALSE,
@@ -212,25 +202,19 @@ check_pheno <- function(
       null.ok = FALSE,
       any.missing = TRUE
     )
-    # gated on extra_columns, so the units check fires exactly when the age is
-    # consumed -- by a clock here, by type = "diff" or a formula in calc_accel()
+    # gated on extra_columns. units check fires only when age is consumed.
     warn_age_units(pheno, ID, sample_id)
   }
   warn_missing_covariates(pheno, ID, extra_columns, sample_id)
   invisible(NULL)
 }
 
-# a units error is an order-of-magnitude error, so both bounds sit at the edge
-# of biological possibility rather than the edge of typical: a 50-year-old is
-# 600 in months and 18000 in days, so a generous bound still catches every real
-# one and never doubts a real centenarian.
+# age unit bounds at the edge of biological possibility.
 AGE_MAX_YEARS <- 122
-# pre-birth coded as a fraction of a year (-0.5, -1) is a legitimate convention;
-# gestational age in weeks (-40 to 0) is not.
+# pre-birth as a fraction of a year (-0.5, -1) is ok. gestational age in weeks is not.
 AGE_MIN_YEARS <- -2
 
-# rows of pheno that survive the id-join, in sample order. shared by the
-# per-row warners so neither re-derives the join.
+# rows of pheno that survive the id-join, in sample order.
 joined_rows <- function(pheno, ID, sample_id) {
   if (is.null(sample_id)) {
     return(seq_len(nrow(pheno)))
@@ -239,16 +223,12 @@ joined_rows <- function(pheno, ID, sample_id) {
   idx[!is.na(idx)]
 }
 
-# per-row age units gate. per row and not per cohort: a cohort statistic can
-# only fire once most of the cohort is wrong, so it misses the row-wise case --
-# a degenerate ifelse, or a merge of two unit conventions -- which is the one
-# that leaves everything else looking fine. the per-row test also covers every
-# case the cohort test would have caught.
+# per-row age units gate.
 warn_age_units <- function(pheno, ID, sample_id) {
   rows <- joined_rows(pheno, ID, sample_id)
   age <- pheno[["Age"]][rows]
   ids <- as.character(pheno[[ID]][rows])
-  # NA is an unrecorded age, not a units error. Inf cannot reach here.
+  # na is an unrecorded age, not a units error. Inf cannot reach here.
   ok <- !is.na(age)
 
   high <- ok & age > AGE_MAX_YEARS

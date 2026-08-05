@@ -21,8 +21,7 @@ for (pkg in c(
 SYNC_SCRIPT <- file.path("data-raw", "sync.R")
 ACCESSORS_FILE <- file.path("R", "accessors.R")
 
-# shared constants and stack-operand rules from R/accessors.R.
-# sourced into its own env (definitions only).
+# shared constants and stack-operand rules from R/accessors.R (definitions only).
 if (!file.exists(ACCESSORS_FILE)) {
   stop(
     "sync.R runs from the package root; ",
@@ -93,7 +92,6 @@ FIELD_REGISTRY <- c(
 )
 
 # build-time only, stripped after resolution. `n_cpgs` cross-checks the derived panel.
-# `shared` stays: recipe operands resolve name -> file through it.
 CATALOG_BUILD_ONLY_FIELDS <- c("file_refs", "n_cpgs")
 
 trim_build_only_fields <- function(clocks) {
@@ -2016,8 +2014,7 @@ drop_external_probe_cpgs <- function(clocks) {
   clocks
 }
 
-# name items by a declared key, stop on collisions (or missing keys when total).
-# total=FALSE leaves unkeyed elements unnamed.
+# name items by a declared key. stop on collisions. total=FALSE leaves unkeyed elements unnamed.
 key_declarations <- function(items, field, cid, what, total = TRUE) {
   if (!length(items)) {
     return(items)
@@ -2282,9 +2279,7 @@ stable_external_payload <- function(bundle) {
   out[!vapply(out, is.null, logical(1L))]
 }
 
-# Stable across R versions. serialize() writes a 14 byte header whose bytes
-# 7 to 10 carry the writer's R version, so hashing the raw stream re-addressed
-# every pack on an R upgrade. digest's skip = "auto" drops that header.
+# stable across R versions. digest skip = "auto" drops the serialize() version header.
 payload_hash_of <- function(payload) {
   digest::digest(payload, algo = "sha256", serializeVersion = 2L)
 }

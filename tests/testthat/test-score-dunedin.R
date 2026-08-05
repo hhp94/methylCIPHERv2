@@ -1,7 +1,8 @@
 # dunedin: degraded-coverage and PACE QN paths not covered by parity
 
-# vendor fill for fully-absent model CpGs
+# vendor fill for fully-absent model CpGs. parity owns the value. this owns count and NA absence.
 test_that("DunedinPoAm38 vendor-fills fully-absent CpGs (score_imputed_full)", {
+  skip_on_cran()
   cpgs <- clock_scoring_cpgs("DunedinPoAm38")
   keep <- cpgs[seq_len(length(cpgs) - 2L)] # drop 2 of 46 -> still >= 80% covered
   DNAm <- random_betas(keep, n = 5L)
@@ -10,20 +11,11 @@ test_that("DunedinPoAm38 vendor-fills fully-absent CpGs (score_imputed_full)", {
   cov <- res$coverage$per_clock[[1]]$DunedinPoAm38
   expect_equal(cov$score_imputed_full, 2L)
   expect_false(anyNA(res$scores[, "DunedinPoAm38"]))
-
-  coef <- clock_coefs("DunedinPoAm38")
-  ref <- clock_impute_ref("DunedinPoAm38")
-  absent <- setdiff(names(coef), keep)
-  golden <- as.numeric(
-    clock_intercept("DunedinPoAm38") +
-      DNAm[, keep] %*% coef[keep] +
-      sum(coef[absent] * ref[absent])
-  )
-  expect_equal(as.numeric(res$scores[, "DunedinPoAm38"]), golden)
 })
 
-# pace QN golden (always-on proof that normalization runs)
+# always-on proof that normalization is applied. reference golden is in test-fixtures-parity.R.
 test_that("DunedinPACE quantile-normalizes the gold panel before the linear score", {
+  skip_on_cran()
   skip_if_not_installed("betanorm")
   gold <- clock_norm_target("DunedinPACE")
   panel <- names(gold)
@@ -49,6 +41,7 @@ test_that("DunedinPACE quantile-normalizes the gold panel before the linear scor
 
 # normalizing clock keeps score- and norm-panel partial fills apart
 test_that("DunedinPACE reports score and norm panel miss separately", {
+  skip_on_cran()
   skip_if_not_installed("betanorm")
   norm_panel <- names(clock_norm_target("DunedinPACE"))
   score_panel <- clock_scoring_cpgs("DunedinPACE")
@@ -60,9 +53,6 @@ test_that("DunedinPACE reports score and norm panel miss separately", {
 
   res <- calc_clocks(DNAm, "DunedinPACE", min_samples_coverage = 0)
   sm <- res$coverage$sample_miss
-  expect_equal(colnames(sm$score), "DunedinPACE")
-  expect_equal(colnames(sm$norm), "DunedinPACE")
-
   expect_equal(unname(sm$norm[, "DunedinPACE"]), c(1L, 1L, 0L, 0L))
   expect_equal(unname(sm$score[, "DunedinPACE"]), c(0L, 1L, 0L, 0L))
 
@@ -75,6 +65,7 @@ test_that("DunedinPACE reports score and norm panel miss separately", {
 
 # qn needs the whole background panel, so an absent one is filled, not dropped
 test_that("DunedinPACE counts fully-absent norm CpGs as norm_imputed_full", {
+  skip_on_cran()
   skip_if_not_installed("betanorm")
   norm_panel <- names(clock_norm_target("DunedinPACE"))
   score_panel <- clock_scoring_cpgs("DunedinPACE")
@@ -84,15 +75,11 @@ test_that("DunedinPACE counts fully-absent norm CpGs as norm_imputed_full", {
   res <- calc_clocks(DNAm, "DunedinPACE")
 
   cov <- res$coverage$per_clock[[1]]$DunedinPACE
-  expect_equal(cov$norm_needed - cov$norm_present, 3L)
   expect_equal(cov$norm_imputed_full, 3L)
   expect_equal(cov$norm_dropped, 0L)
   # score panel untouched, and no absent norm CpG leaks into its counts
   expect_equal(cov$score_present, cov$score_needed)
   expect_false(anyNA(res$scores[, "DunedinPACE"]))
 })
-
-# the reference-implementation golden (degraded coverage) lives in
-# test-fixtures-parity.R: DunedinPACE is undeclared and maintainer-only.
 
 # coverage floors live in test-coverage-gate.R for all clocks

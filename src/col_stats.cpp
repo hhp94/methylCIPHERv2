@@ -5,13 +5,10 @@
 #include <vector>
 using namespace Rcpp;
 
-// internal kernel: caller validates moment_sets (see check_moment_sets() in R).
+// internal kernel. caller validates moment_sets (see check_moment_sets() in R).
 // moments on iff moment_sets non-NULL. K is 1..8. zero-count rows: mean 0 / m2 0 / count 0.
-// overflow_col is position within cols. on overflow, moments are dropped.
 
-// observed value range over the scanned columns, seeded at the beta bounds so
-// only an out-of-range value moves it. `col` is the 1-based position within
-// `cols`, the same convention overflow_col uses, so R can name the probe.
+// observed value range over scanned columns, seeded at beta bounds. `col` is 1-based within `cols`.
 struct value_range
 {
   double min_val = 0.0;
@@ -31,8 +28,7 @@ static inline void welford_update(int &n, double &mean, double &m2,
   m2 += delta * (v - mean);
 }
 
-// single-column scan. RM=true fuses row moments into the same pass.
-// overlapping sets share one signature block and merge at the end.
+// single-column scan. RM=true fuses row moments. overlapping sets share one signature block.
 template <bool RM>
 static bool scan_col(const double *col, R_xlen_t nr,
                      double *st_pair, int *robs,
@@ -165,8 +161,7 @@ List col_stats(NumericMatrix obj,
   // moments are on iff sets were given. NULL means none at all
   const bool moments = moment_sets.isNotNull();
 
-  // per-column membership mask over the moment sets (1-based indices).
-  // or collapses duplicates within a set. bits encode cross-set overlap.
+  // per-column membership mask over the moment sets (1-based indices). bits encode cross-set overlap.
   int K = 0;
   CharacterVector set_names(0);
   std::vector<uint8_t> mask;
@@ -291,7 +286,6 @@ List col_stats(NumericMatrix obj,
   NumericMatrix M2out(moments ? static_cast<int>(nr) : 0, K);
 
   // expand signatures into per-set outputs via Chan's pairwise combine.
-  // first merge into an empty destination is a plain copy.
   if (moments && nr > 0)
   {
     for (int k = 0; k < K; ++k)

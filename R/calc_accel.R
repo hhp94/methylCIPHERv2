@@ -1,9 +1,7 @@
 MC_ACCEL <- "accel_id"
 
 finalized <- function(x) {
-  # unconditional, and before the pending test: a record whose two batch
-  # counts disagree must not reach an exit, whether or not it has pending
-  # work. `&&` would short-circuit past this on the common path.
+  # n_batches() first. a short-circuit would skip the count check.
   multi <- n_batches(x) > 1L
   pending <- x[["provenance"]][["pending"]]
   if (length(pending) && multi) {

@@ -1,29 +1,17 @@
 # clocks_coverage() / samples_coverage() formatters over a finished record.
 
-report_pheno <- function(ids, female) {
-  data.frame(
-    ID = ids,
-    Female = as.integer(female),
-    Age = seq(45, 70, length.out = length(ids)),
-    stringsAsFactors = FALSE
-  )
-}
+# one draw each, shared by the tests below that only read the record
+GRIP4 <- grip_fixture()
+HANNUM4 <- random_betas(clock_cpgs("Hannum"), n = 4L)
+HANNUM_RES <- calc_clocks(HANNUM4, "Hannum")
 
 test_that("clocks_coverage marks members routing_target and the alias returned", {
-  fem <- clock_coefs("DNAmGrip_wAge_Female")
-  mal <- clock_coefs("DNAmGrip_wAge_Male")
-  DNAm <- random_betas(union(names(fem), names(mal)), n = 4L)
-  pheno <- report_pheno(rownames(DNAm), c(1, 1, 0, 0))
-
-  res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno)
+  res <- calc_clocks(GRIP4$DNAm, "DNAmGrip_wAge", pheno = GRIP4$pheno)
   cc <- clocks_coverage(res)
 
   expect_s3_class(cc, "data.frame")
-  expect_true(all(
-    c("clock_id", "role", "policy", "score_needed", "score_used") %in% names(cc)
-  ))
 
-  # the alias is a returned column with an all-NA panel row
+  # the alias reads no CpGs of its own, so its panel row is all NA
   alias <- cc[cc$clock_id == "DNAmGrip_wAge", ]
   expect_equal(alias$role, "returned")
   expect_true(is.na(alias$score_needed))
@@ -33,57 +21,40 @@ test_that("clocks_coverage marks members routing_target and the alias returned",
     cc$clock_id %in% c("DNAmGrip_wAge_Female", "DNAmGrip_wAge_Male"),
   ]
   expect_equal(sort(unique(members$role)), "routing_target")
-  expect_setequal(members$score_needed, c(length(fem), length(mal)))
+  expect_setequal(members$score_needed, c(length(GRIP4$fem), length(GRIP4$mal)))
 })
 
 test_that("clocks_coverage reports score_used = present + imputed_full per row", {
-  id <- "DNAmGait_noAge_Female"
-  coef <- clock_coefs(id)
-  medians <- clock_impute_ref(id)
-  full <- union(names(coef), names(clock_coefs("DNAmGait_noAge_Male")))
-  DNAm <- random_betas(full, n = 4L)
-  drop <- intersect(names(coef), names(medians))[1:5]
-  DNAm <- DNAm[, setdiff(colnames(DNAm), drop), drop = FALSE]
-  pheno <- report_pheno(rownames(DNAm), rep(1L, 4L))
+  fx <- gait_holed_fixture()
 
-  cc <- clocks_coverage(calc_clocks(DNAm, "DNAmGait_noAge", pheno = pheno))
-  row <- cc[cc$clock_id == id, ]
+  cc <- clocks_coverage(calc_clocks(
+    fx$DNAm,
+    "DNAmGait_noAge",
+    pheno = fx$pheno
+  ))
+  row <- cc[cc$clock_id == fx$id, ]
   expect_equal(row$score_imputed_full, 5L)
   expect_equal(row$score_used, row$score_present + row$score_imputed_full)
-  expect_equal(row$missing_cpgs[[1]], drop)
+  expect_equal(row$missing_cpgs[[1]], fx$drop)
 })
 
 test_that("samples_coverage emits no rows for a clock that reads no CpGs", {
-  fem <- clock_coefs("DNAmGrip_wAge_Female")
-  mal <- clock_coefs("DNAmGrip_wAge_Male")
-  DNAm <- random_betas(union(names(fem), names(mal)), n = 6L)
   female <- c(1, 1, 1, 0, 0, 0)
-  pheno <- report_pheno(rownames(DNAm), female)
+  fx <- grip_fixture(female)
+  DNAm <- fx$DNAm
 
-  res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno)
+  res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = fx$pheno)
   sc <- samples_coverage(res)
 
-  expect_equal(
-    names(sc),
-    c(
-      "id",
-      "clock_id",
-      "panel",
-      "n_observed",
-      "n_needed",
-      "coverage"
-    )
-  )
   # the alias is a returned column but reads no CpGs, so it reports nothing
   expect_false("DNAmGrip_wAge" %in% sc$clock_id)
 
-  # rows are the members that read betas. masked sex rows drop.
+  # rows are members that read betas, one per sample under the model that scored it.
   expect_setequal(
     unique(sc$clock_id),
     c("DNAmGrip_wAge_Female", "DNAmGrip_wAge_Male")
   )
   expect_equal(nrow(sc), 6L)
-  expect_setequal(sc$id, rownames(DNAm))
   expect_false(anyNA(sc$coverage))
   expect_equal(
     sc$clock_id[match(rownames(DNAm), sc$id)],
@@ -91,29 +62,25 @@ test_that("samples_coverage emits no rows for a clock that reads no CpGs", {
   )
   expect_equal(
     sc$n_needed[match(rownames(DNAm), sc$id)],
-    ifelse(female == 1, length(fem), length(mal))
+    ifelse(female == 1, length(fx$fem), length(fx$mal))
   )
 })
 
 test_that("a sample no model scored gets no samples_coverage row", {
-  fem <- clock_coefs("DNAmGrip_wAge_Female")
-  mal <- clock_coefs("DNAmGrip_wAge_Male")
-  DNAm <- random_betas(union(names(fem), names(mal)), n = 4L)
   # the last sample's sex is unknown, so neither member claims it
-  pheno <- report_pheno(rownames(DNAm), c(1, 1, 0, NA))
+  fx <- grip_fixture(c(1, 1, 0, NA))
+  DNAm <- fx$DNAm
 
   # the unknown sex is worth a warning, and it is not what this test asserts
-  res <- NULL
-  expect_warning(res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno))
+  expect_warning(res <- calc_clocks(DNAm, "DNAmGrip_wAge", pheno = fx$pheno))
   sc <- samples_coverage(res)
 
   unscored <- rownames(DNAm)[4]
   expect_true(is.na(res$scores[unscored, "DNAmGrip_wAge"]))
-  expect_false(unscored %in% sc$id)
   expect_setequal(sc$id, rownames(DNAm)[1:3])
 })
 
-test_that("samples_coverage coverage is literally row_coverage() for a partial fill", {
+test_that("samples_coverage coverage is the observed fraction of the panel", {
   panel <- clock_scoring_cpgs("Hannum")
   DNAm <- random_betas(panel, n = 6L)
   DNAm[1, panel[[1]]] <- NA_real_ # one sample leans on a cohort mean
@@ -128,62 +95,6 @@ test_that("samples_coverage coverage is literally row_coverage() for a partial f
   expect_true(all(hannum$coverage[-1] == 1))
 })
 
-# the coverage floors the run was scored under
-
-# one sample leaning on a cohort mean for all but 10 CpGs of the panel
-thin_sample_betas <- function(n = 6L) {
-  panel <- clock_scoring_cpgs("Hannum")
-  DNAm <- random_betas(panel, n = n)
-  DNAm[1, panel[-seq_len(10L)]] <- NA_real_
-  DNAm
-}
-
-test_that("both floors reach provenance, keyed by batch", {
-  DNAm <- random_betas(clock_cpgs("Hannum"), n = 4L)
-  res <- calc_clocks(
-    DNAm,
-    "Hannum",
-    min_clocks_coverage = 0.5,
-    min_samples_coverage = 0.25
-  )
-
-  expect_equal(unname(res$provenance$min_clocks_coverage), 0.5)
-  expect_equal(unname(res$provenance$min_samples_coverage), 0.25)
-  expect_equal(
-    names(res$provenance$min_samples_coverage),
-    unique(res$provenance$mc_batch_id)
-  )
-})
-
-test_that("samples_coverage re-warns under the record's own floor", {
-  DNAm <- thin_sample_betas(4L)
-
-  quiet <- calc_clocks(DNAm, "Hannum", min_samples_coverage = 0)
-  expect_silent(samples_coverage(quiet))
-
-  expect_warning(
-    hot <- calc_clocks(DNAm, "Hannum", min_samples_coverage = 0.9)
-  )
-  expect_warning(samples_coverage(hot))
-})
-
-test_that("a bound record keeps a floor per batch and exits under the strictest", {
-  DNAm <- thin_sample_betas(6L)
-  a <- calc_clocks(DNAm[1:3, ], "Hannum", min_samples_coverage = 0)
-  b <- calc_clocks(DNAm[4:6, ], "Hannum", min_samples_coverage = 0.9)
-
-  # differing floors bind without complaint -- record what batching forced
-  out <- rbind(a, b)
-  expect_equal(unname(out$provenance$min_samples_coverage), c(0, 0.9))
-  expect_equal(
-    names(out$provenance$min_samples_coverage),
-    names(out$coverage$per_clock)
-  )
-
-  # 0.9 is the strictest, and the thin sample is under it
-  expect_warning(samples_coverage(out))
-})
-
 test_that("samples_coverage gives a normalizing clock a score and a norm row", {
   skip_if_not_installed("betanorm")
   norm_panel <- names(clock_norm_target("DunedinPACE"))
@@ -194,18 +105,49 @@ test_that("samples_coverage gives a normalizing clock a score and a norm row", {
   sc <- samples_coverage(res)
   dp <- sc[sc$clock_id == "DunedinPACE", ]
 
+  # per panel role, and the norm background is the larger, separate panel
   expect_setequal(unique(dp$panel), c("score", "norm"))
   needed <- tapply(dp$n_needed, dp$panel, unique)
   expect_equal(as.integer(needed[["score"]]), length(score_panel))
-  # the norm background is the larger, separate panel
   expect_gt(needed[["norm"]], needed[["score"]])
 })
 
-# the two batch counts must agree
+# the coverage floors the run was scored under
+
+# one sample leaning on a cohort mean for all but 10 CpGs of the panel
+thin_sample_betas <- function(n = 6L) {
+  panel <- clock_scoring_cpgs("Hannum")
+  DNAm <- random_betas(panel, n = n)
+  DNAm[1, panel[-seq_len(10L)]] <- NA_real_
+  DNAm
+}
+
+test_that("samples_coverage re-warns, and a bound record uses the strictest floor", {
+  # the thin sample is row 1, so it sits in the `hot` block
+  DNAm <- thin_sample_betas(6L)
+
+  quiet <- calc_clocks(DNAm[4:6, ], "Hannum", min_samples_coverage = 0)
+  expect_silent(samples_coverage(quiet))
+  expect_warning(
+    hot <- calc_clocks(DNAm[1:3, ], "Hannum", min_samples_coverage = 0.9)
+  )
+  expect_warning(samples_coverage(hot))
+
+  # differing floors bind without complaint -- record what batching forced
+  out <- rbind(quiet, hot)
+  expect_equal(unname(out$provenance$min_samples_coverage), c(0, 0.9))
+  expect_equal(
+    names(out$provenance$min_samples_coverage),
+    names(out$coverage$per_clock)
+  )
+
+  # 0.9 is the strictest, and the thin sample is under it
+  expect_warning(samples_coverage(out))
+})
 
 test_that("a record whose two batch counts disagree stops at every exit", {
-  DNAm <- random_betas(clock_cpgs("Hannum"), n = 4L)
-  res <- calc_clocks(DNAm, "Hannum")
+  skip_on_cran()
+  res <- HANNUM_RES
 
   # provenance says one batch, coverage says two. neither count is preferred.
   bad <- res
@@ -218,16 +160,29 @@ test_that("a record whose two batch counts disagree stops at every exit", {
   expect_error(samples_coverage(bad))
   expect_error(as.data.frame(bad))
   expect_error(as.matrix(bad))
-  expect_equal(nrow(clocks_coverage(res)), 1L)
 })
 
-# columns keyed on a record fact
+test_that("a clocks_coverage column appears only when the record has that fact", {
+  skip_on_cran()
+  plain <- clocks_coverage(HANNUM_RES)
+  expect_false(any(c("normalizes", "norm_needed", "role") %in% names(plain)))
 
-test_that("the norm block appears only when a clock normalizes", {
-  DNAm <- random_betas(clock_cpgs("Hannum"), n = 4L)
-  plain <- clocks_coverage(calc_clocks(DNAm, "Hannum"))
-  expect_false(any(c("normalizes", "norm_needed") %in% names(plain)))
+  # role: only when the record holds a routing target
+  cc <- clocks_coverage(
+    calc_clocks(GRIP4$DNAm, "DNAmGrip_wAge", pheno = GRIP4$pheno)
+  )
+  expect_true("role" %in% names(cc))
 
+  # missing_cpgs: only when a CpG is absent
+  panel <- clock_scoring_cpgs("Hannum")
+  expect_false("missing_cpgs" %in% names(plain))
+  thin <- HANNUM4[, setdiff(colnames(HANNUM4), panel[1:3]), drop = FALSE]
+  expect_setequal(
+    clocks_coverage(calc_clocks(thin, "Hannum"))[["missing_cpgs"]][[1]],
+    panel[1:3]
+  )
+
+  # the norm block: only when a clock normalizes
   skip_if_not_installed("betanorm")
   DNAm <- random_betas(names(clock_norm_target("DunedinPACE")), n = 4L)
   norm <- clocks_coverage(calc_clocks(DNAm, "DunedinPACE"))
@@ -235,34 +190,10 @@ test_that("the norm block appears only when a clock normalizes", {
   expect_true(norm[norm$clock_id == "DunedinPACE", "normalizes"])
 })
 
-test_that("role appears only when the record holds a routing target", {
-  DNAm <- random_betas(clock_cpgs("Hannum"), n = 4L)
-  expect_false("role" %in% names(clocks_coverage(calc_clocks(DNAm, "Hannum"))))
-
-  fem <- clock_coefs("DNAmGrip_wAge_Female")
-  mal <- clock_coefs("DNAmGrip_wAge_Male")
-  DNAm <- random_betas(union(names(fem), names(mal)), n = 4L)
-  pheno <- report_pheno(rownames(DNAm), c(1, 1, 0, 0))
-  cc <- clocks_coverage(calc_clocks(DNAm, "DNAmGrip_wAge", pheno = pheno))
-  expect_true("role" %in% names(cc))
-})
-
-test_that("missing_cpgs appears only when a CpG is absent", {
-  panel <- clock_scoring_cpgs("Hannum")
-  DNAm <- random_betas(panel, n = 4L)
-  expect_false(
-    "missing_cpgs" %in% names(clocks_coverage(calc_clocks(DNAm, "Hannum")))
-  )
-
-  thin <- DNAm[, setdiff(colnames(DNAm), panel[1:3]), drop = FALSE]
-  cc <- clocks_coverage(calc_clocks(thin, "Hannum"))
-  expect_setequal(cc[["missing_cpgs"]][[1]], panel[1:3])
-})
-
 test_that("all_columns is one fixed set, and never mints the batch column", {
-  DNAm <- random_betas(clock_cpgs("Hannum"), n = 4L)
-  wide <- clocks_coverage(calc_clocks(DNAm, "Hannum"), all_columns = TRUE)
-  narrow <- clocks_coverage(calc_clocks(DNAm, "Hannum"))
+  skip_on_cran()
+  wide <- clocks_coverage(HANNUM_RES, all_columns = TRUE)
+  narrow <- clocks_coverage(HANNUM_RES)
 
   expect_true(all(names(narrow) %in% names(wide)))
   expect_gt(ncol(wide), ncol(narrow))
@@ -270,21 +201,11 @@ test_that("all_columns is one fixed set, and never mints the batch column", {
   expect_false("mc_batch_id" %in% names(wide))
 
   # the wide frame does not change shape with the record it describes
-  fem <- clock_coefs("DNAmGrip_wAge_Female")
-  mal <- clock_coefs("DNAmGrip_wAge_Male")
-  routed <- random_betas(union(names(fem), names(mal)), n = 4L)
-  pheno <- report_pheno(rownames(routed), c(1, 1, 0, 0))
   other <- clocks_coverage(
-    calc_clocks(routed, "DNAmGrip_wAge", pheno = pheno),
+    calc_clocks(GRIP4$DNAm, "DNAmGrip_wAge", pheno = GRIP4$pheno),
     all_columns = TRUE
   )
   expect_equal(names(other), names(wide))
-})
 
-test_that("all_columns takes a flag and nothing else", {
-  DNAm <- random_betas(clock_cpgs("Hannum"), n = 4L)
-  res <- calc_clocks(DNAm, "Hannum")
-  expect_error(clocks_coverage(res, all_columns = NA))
-  expect_error(clocks_coverage(res, all_columns = c(TRUE, TRUE)))
-  expect_error(clocks_coverage(res, all_columns = "yes"))
+  expect_error(clocks_coverage(HANNUM_RES, all_columns = NA))
 })

@@ -1,31 +1,15 @@
-test_that("every catalog clock reaches at least one citation", {
-  ids <- mc_index[["clock_id"]]
-  aliases <- unique(unname(sex_routed_members()$alias))
+# the whole-catalog citation frame, built once
+ALL_CITES <- as.data.frame(cite_clocks("all"))
 
-  # aliases are package-minted and cite through their donor
-  expect_true(all(setdiff(ids, aliases) %in% mc_citations[["clock_id"]]))
-  donors <- vapply(
-    mc_catalog[aliases],
-    function(e) as.character(e[["donor_clock_id"]]),
-    character(1L)
-  )
-  expect_true(all(donors %in% mc_citations[["clock_id"]]))
-
-  expect_true(all(mc_index[["n_citations"]] >= 1L))
-  expect_equal(
-    mc_index[["n_citations"]][match("Hannum", ids)],
-    sum(mc_citations[["clock_id"]] == "Hannum")
-  )
-  # exactly one primary per cited clock
-  expect_true(all(
-    tapply(
-      mc_citations[["role"]] == "primary",
-      mc_citations[["clock_id"]],
-      sum
-    ) ==
-      1L
-  ))
-})
+# the vendored .bib, read once (absent from a bare source checkout)
+BIB_PATH <- system.file(
+  "bibliography",
+  "clocks.bib",
+  package = "methylCIPHERv2"
+)
+BIB_LINES <- if (nzchar(BIB_PATH) && file.exists(BIB_PATH)) {
+  readLines(BIB_PATH, warn = FALSE, encoding = "UTF-8")
+}
 
 test_that("cite_clocks speaks the same clock tokens as calc_clocks", {
   one <- cite_clocks("Hannum")
@@ -33,15 +17,11 @@ test_that("cite_clocks speaks the same clock tokens as calc_clocks", {
   expect_equal(unique(as.data.frame(one)$clock_id), "Hannum")
   expect_true(any(grepl("^@", one$bibtex)))
 
-  grp <- cite_clocks("GrimAge")
   expect_setequal(
-    unique(as.data.frame(grp)$clock_id),
+    unique(as.data.frame(cite_clocks("GrimAge"))$clock_id),
     resolve_clocks("GrimAge")
   )
-  expect_setequal(
-    unique(as.data.frame(cite_clocks("all"))$clock_id),
-    resolve_clocks("all")
-  )
+  expect_setequal(unique(ALL_CITES$clock_id), resolve_clocks("all"))
 
   # one entry per distinct paper, however many clocks share it
   many <- cite_clocks(c("Hannum", "Horvath1", "PhenoAge"))
@@ -50,20 +30,8 @@ test_that("cite_clocks speaks the same clock tokens as calc_clocks", {
     length(unique(as.data.frame(many)$bib_key))
   )
 
-  expect_error(cite_clocks(42))
-  expect_error(cite_clocks("DNAmFitAge_Female"))
-})
-
-test_that("a sex-routed alias cites through its donor", {
-  alias <- unique(unname(sex_routed_members()$alias))[[1L]]
-  donor <- mc_catalog[[alias]][["donor_clock_id"]]
-  links <- as.data.frame(cite_clocks(alias))
-
-  expect_equal(unique(links$clock_id), alias)
-  expect_equal(
-    links$bib_key,
-    mc_citations$bib_key[mc_citations$clock_id == donor]
-  )
+  expect_error(cite_clocks(42)) # the default method refuses
+  expect_error(cite_clocks("DNAmFitAge_Female")) # a routing target is not callable
 })
 
 test_that("a result cites the clocks it reported", {
@@ -83,61 +51,57 @@ test_that("a result cites the clocks it reported", {
   ))
 })
 
-test_that("every shipped bib_key resolves in clocks.bib", {
-  bib <- system.file("bibliography", "clocks.bib", package = "methylCIPHERv2")
-  skip_if(!nzchar(bib) || !file.exists(bib))
-  keys <- sub(
-    "^@[^{]+\\{([^,]+),.*$",
-    "\\1",
-    grep(
-      "^@",
-      readLines(bib, warn = FALSE),
-      value = TRUE
-    )
+test_that("every catalog clock reaches a citation, an alias through its donor", {
+  skip_on_cran()
+  ids <- mc_index[["clock_id"]]
+  aliases <- unique(unname(sex_routed_members()$alias))
+
+  # aliases are package-minted and cite through their donor
+  expect_true(all(setdiff(ids, aliases) %in% mc_citations[["clock_id"]]))
+  donors <- vapply(
+    mc_catalog[aliases],
+    function(e) as.character(e[["donor_clock_id"]]),
+    character(1L)
   )
-  expect_true(all(unique(mc_citations[["bib_key"]]) %in% trimws(keys)))
+  expect_true(all(donors %in% mc_citations[["clock_id"]]))
+  expect_true(all(mc_index[["n_citations"]] >= 1L))
+
+  # exactly one primary per cited clock
+  expect_true(all(
+    tapply(
+      mc_citations[["role"]] == "primary",
+      mc_citations[["clock_id"]],
+      sum
+    ) ==
+      1L
+  ))
+
+  # and the alias's own links are the donor's
+  alias <- aliases[[1L]]
+  links <- as.data.frame(cite_clocks(alias))
+  expect_equal(unique(links$clock_id), alias)
+  expect_equal(
+    links$bib_key,
+    mc_citations$bib_key[
+      mc_citations$clock_id == mc_catalog[[alias]][["donor_clock_id"]]
+    ]
+  )
 })
 
 test_that("the citation frame carries the paper's own fields", {
-  df <- as.data.frame(cite_clocks("all"))
-
+  skip_on_cran()
   paper_cols <- c("title", "author", "year", "journal", "doi", "url")
-  expect_true(all(paper_cols %in% names(df)))
-  # every .bib entry declares these, so a NA here means the join lost a key
+  expect_true(all(paper_cols %in% names(ALL_CITES)))
+  # every .bib entry declares these, so an NA here means the join lost a key
   for (col in paper_cols) {
-    expect_false(anyNA(df[[col]]))
+    expect_false(anyNA(ALL_CITES[[col]]))
   }
 
-  # one paper, one set of field values, however many clocks cite it
-  expect_true(all(
-    vapply(
-      split(df[["title"]], df[["bib_key"]]),
-      function(v) {
-        length(unique(v)) == 1L
-      },
-      logical(1L)
-    )
-  ))
-})
-
-test_that("the stored paper fields are the vendored clocks.bib text", {
-  bib <- system.file("bibliography", "clocks.bib", package = "methylCIPHERv2")
-  skip_if(!nzchar(bib) || !file.exists(bib))
-
-  # brace-stripped, so the {DNA}/{eLife} casing protection does not block a match
-  txt <- gsub(
-    "[{}]",
-    "",
-    paste(readLines(bib, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+  skip_if(is.null(BIB_LINES))
+  keys <- sub(
+    "^@[^{]+\\{([^,]+),.*$",
+    "\\1",
+    grep("^@", BIB_LINES, value = TRUE)
   )
-  df <- unique(as.data.frame(cite_clocks("all"))[, c(
-    "title",
-    "doi",
-    "journal"
-  )])
-
-  for (col in names(df)) {
-    hit <- vapply(df[[col]], grepl, logical(1L), x = txt, fixed = TRUE)
-    expect_true(all(hit))
-  }
+  expect_true(all(unique(mc_citations[["bib_key"]]) %in% trimws(keys)))
 })

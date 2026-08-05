@@ -7,9 +7,7 @@ SEX_GROUP <- "DNAmSex_Wang"
 RECORDED_SEX <- "recorded_sex"
 SEX_MISMATCH <- "sex_mismatch"
 
-# the two non-aneuploid calls the rule table emits, and the labels a recorded
-# binary Female maps onto. 47,XXY and 45,XO are biology, not a pheno error, so
-# they are shown against the record and never flagged.
+# non-aneuploid calls the rule table emits, and binary Female labels. aneuploid calls are shown, not flagged.
 BINARY_CALLS <- c(female = "Female", male = "Male")
 
 # declared karyotype_call block for SEX_GROUP.
@@ -99,8 +97,7 @@ karyotype_calls <- function(kc) {
   ))
 }
 
-# pheno Female (1/0) -> the rule table's own labels, so the two columns compare
-# directly. anything that is not a 0/1 record is refused rather than guessed at.
+# map pheno Female (1/0) onto the rule table labels. refuse non-0/1 values.
 recorded_from_female <- function(female) {
   checkmate::assert_integerish(
     female,
@@ -118,9 +115,7 @@ recorded_from_female <- function(female) {
   )
 }
 
-# left join the recorded sex onto the calls, by id and never by row order.
-# calc_clocks() has already refused a pheno whose id column is duplicated or
-# does not cover every DNAm row, so this match is total and one-to-one.
+# left join recorded sex onto calls by id, never by row order.
 attach_recorded <- function(out, pheno, pheno_id, pred, kc) {
   if (is.null(pheno) || !"Female" %in% names(pheno)) {
     return(out)
@@ -218,8 +213,7 @@ predict_sex <- function(DNAm, pheno = NULL, ...) {
   pred <- apply_karyotype(scores, kc)
   out[[as.character(kc[["output_column"]])]] <- pred
 
-  # Female is never a required covariate here, so it does not reach the record
-  # -- the comparison reads the caller's own pheno.
+  # the Female covariate is not required. comparison reads the caller's pheno.
   out <- attach_recorded(
     out,
     pheno,

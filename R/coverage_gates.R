@@ -1,7 +1,6 @@
 # pre-score coverage gates over the resolved panels
 
 # requestable token for a compute-sequence id (alias, not routed member).
-# the token alone is marked up, so a reader can tell what to type back.
 gate_label <- function(id, routed = sex_routed_members()) {
   if (!id %in% names(routed[["alias"]])) {
     return(cli::format_inline("{.val {id}}"))
@@ -18,8 +17,7 @@ check_coverage <- function(cpg_list, threshold = 0.75) {
   routed <- sex_routed_members()
   per_clock <- cpg_list[["per_clock"]]
 
-  # the label is an interpolated value, so a brace in an id can never become a
-  # cli template. the two line builders run over the ids that survive the cap.
+  # interpolated labels. braces cannot become a cli template.
   panel_line <- function(id, present, needed, label) {
     cli::format_inline(
       "{gate_label(id, routed)}: {length(present)}/{length(needed)}

@@ -147,7 +147,6 @@ clock_scoring_cpgs <- function(id, packs = NULL) {
 }
 
 # probe_set roles with a background panel plus the target it calibrates onto.
-# lives here so sync.R can source it.
 NORM_ROLES <- c("quantile_normalization_background", "bmiq_gold_standard")
 
 # normalization panel for one clock, character(0) unless it normalizes
@@ -338,8 +337,7 @@ sample_scale_steps <- function(id) {
   recipe_steps_op(id, "sample_scale")
 }
 
-# `ref` a sample_scale step declares, or NULL.
-# use clock_moment_key() to tell no-step from no-ref.
+# sample_scale step ref, or NULL. use clock_moment_key() to tell no-step from no-ref.
 sample_scale_ref_name <- function(id) {
   refs <- unique(unlist(lapply(sample_scale_steps(id), function(s) s[["ref"]])))
   if (!length(refs)) {
@@ -358,8 +356,7 @@ sample_scale_ref_name <- function(id) {
 # whole-matrix domain key when sample_scale has no declared `ref`.
 FULL_MOMENT_KEY <- "full"
 
-# moment domain key: NULL if no sample_scale, FULL_MOMENT_KEY if no `ref`,
-# else derived from the declaration (no tensor load).
+# moment domain key: NULL if no sample_scale, FULL_MOMENT_KEY if no `ref`, else from the declaration.
 clock_moment_key <- function(id) {
   if (!length(sample_scale_steps(id))) {
     return(NULL)
@@ -387,8 +384,7 @@ clock_sample_scale_ref <- function(id) {
   as.character(bundle_tensor(entry[["group_id"]], sh[["file"]]))
 }
 
-# moment domain: NULL if no sample_scale, else key and cpgs
-# (NULL cpgs = every DNAm column).
+# moment domain: NULL if no sample_scale, else key and cpgs (NULL cpgs = every DNAm column).
 clock_moment_domain <- function(id) {
   key <- clock_moment_key(id)
   if (is.null(key)) {
@@ -472,7 +468,6 @@ clock_components <- function(id) {
 }
 
 # a stack step's three operand namespaces, in column order.
-# lives here so sync.R can source it.
 STACK_NAMESPACES <- c("inputs", "internal", "covariates")
 
 # operand -> declaring namespace (inputs / internal / covariates)

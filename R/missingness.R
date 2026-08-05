@@ -1,7 +1,6 @@
 # partial NA -> cohort mean, fully absent -> vendor ref
 
-# a max this far past 1 is an order-of-magnitude error, not a rounding one, so
-# percent methylation is worth naming outright rather than hedging about scale.
+# max this far past 1 is treated as percent methylation.
 PERCENT_SCALE_AT <- 50
 
 # value gates over one col_stats() sweep: overflow stops, everything else warns
@@ -38,10 +37,7 @@ check_col_values <- function(scan, cols) {
     )
   }
 
-  # the range is a running min/max seeded at the beta bounds, so out-of-range
-  # is exactly min_val < 0 / max_val > 1. a matrix can carry both sides. only
-  # the panel columns are scanned, which is enough: scale is a whole-matrix
-  # property, so the panel is a valid sample of it.
+  # range is a running min/max seeded at beta bounds. only panel columns are scanned.
   lo <- scan[["min_val"]]
   if (lo < 0) {
     cli::cli_warn(
@@ -152,9 +148,6 @@ check_score_values <- function(scores) {
 MAX_MOMENT_SETS <- 8L
 
 # moment_sets for col_stats(): NULL, or a list of column-index vectors.
-# the domains are catalog-derived, so a failure here is a package bug -- but it
-# is the guard standing between a bad index and an out-of-bounds kernel read,
-# so it stays. bare stop(), not checkmate: nothing a user typed reaches it.
 check_moment_sets <- function(sets, nc) {
   if (is.null(sets)) {
     return(NULL)
@@ -199,8 +192,7 @@ check_moment_sets <- function(sets, nc) {
   out
 }
 
-# domain cpgs -> column indices. NULL element is the whole matrix.
-# declared refs keep only measured cols.
+# domain cpgs -> column indices. NULL element is the whole matrix. declared refs keep only measured cols.
 resolve_moment_sets <- function(domains, cpgs) {
   if (!length(domains)) {
     return(NULL)

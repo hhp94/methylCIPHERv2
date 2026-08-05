@@ -1,9 +1,6 @@
 # formatters over a finished record's $coverage (no re-touch of beta)
 
-# the norm block, named rather than matched on a "^norm_" prefix: the column
-# set is declared here so a new count cannot join it by being spelled right.
-# normalizes travels with it -- it is the declared fact the block reports on,
-# so where the block says nothing it says nothing either.
+# norm-count columns, listed by name (not matched on a "^norm_" prefix).
 CC_NORM_COLS <- c(
   "normalizes",
   "norm_needed",
@@ -13,9 +10,7 @@ CC_NORM_COLS <- c(
   "norm_dropped"
 )
 
-# columns keyed on a record fact, dropped when the record does not carry it.
-# built on every part and dropped once at the exit: the parts rbind together,
-# so a column cannot be skipped per batch.
+# columns keyed on a record fact. dropped at exit when the record lacks them.
 trim_clock_cols <- function(out, all_columns) {
   if (all_columns) {
     return(out)
@@ -36,8 +31,7 @@ trim_clock_cols <- function(out, all_columns) {
   out[, setdiff(names(out), drop), drop = FALSE]
 }
 
-# every caller is an exported verb taking a user-supplied record, so this is a
-# front-door refusal and reads as cli, not as a developer stop().
+# front-door refusal for a user-supplied record (cli, not stop()).
 check_mc_result <- function(x, arg = "x") {
   if (!inherits(x, "mc_result")) {
     cli::cli_abort(
@@ -71,8 +65,7 @@ miss_vec <- function(x, id, panel = c("score", "norm")) {
   m[, id]
 }
 
-# one batch's rows (aliases have NA panels).
-# batch is NULL when the exit drops the label.
+# one batch's rows (aliases have NA panels). batch is NULL when the exit drops the label.
 batch_coverage <- function(per_clock, batch, returned) {
   ids <- names(per_clock)
 
@@ -179,8 +172,7 @@ clocks_coverage <- function(x, all_columns = FALSE) {
   batches <- x[["coverage"]][["per_clock"]]
   returned <- x[["provenance"]][["clocks"]]
   batch <- x[["provenance"]][[MC_BATCH]]
-  # keyed on provenance's per-sample vector, never on per_clock's names.
-  # n_batches() stops first if the two disagree.
+  # keyed on provenance's per-sample vector. n_batches() stops if the two disagree.
   keep <- n_batches(x) > 1L
   out <- do.call(
     rbind,
@@ -204,8 +196,7 @@ panel_rows <- function(id, panel, batch, ratio, sample_id) {
     stringsAsFactors = FALSE,
     row.names = NULL
   )
-  # last join key, like clocks_coverage().
-  # omitted at single batch so the column is never built.
+  # last join key, like clocks_coverage(). omitted at single batch.
   if (!is.null(batch)) {
     out[[MC_BATCH]] <- batch
   }
@@ -262,8 +253,7 @@ empty_sample_rows <- function(keep_batch) {
   out
 }
 
-# the exit's one gate: the most restrictive floor any bound batch was scored
-# under. rbind keeps them per batch, so a filter on the frame needs one number.
+# most restrictive floor across bound batches.
 finalize_samples_gate <- function(x) {
   max(x[["provenance"]][["min_samples_coverage"]])
 }
@@ -332,9 +322,7 @@ say_low_samples <- function(out, threshold) {
 samples_coverage <- function(x) {
   check_mc_result(x)
   batch <- x[["provenance"]][[MC_BATCH]]
-  # one row per (sample, clock, panel). batch masks rows. label withheld when
-  # single-batch. n_batches() stops first if provenance and per_clock disagree,
-  # which would otherwise drop rows silently in the mask below.
+  # one row per (sample, clock, panel). batch masks rows. label withheld when single-batch.
   keep <- n_batches(x) > 1L
 
   parts <- list()

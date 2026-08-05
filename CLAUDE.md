@@ -32,9 +32,14 @@ devtools::test()       # always-on tiers (cohort parity auto-skips if not staged
 `devtools::check()` / `R CMD check` is **maintainer-on-demand only** -- see the invariant below.
 The package has compiled code (`src/`), so a working toolchain is required -- Rtools on Windows.
 Soft deps back specific paths only and skip when absent. **A dep is declared for code, not for
-tests**: `betanorm` and `DBI` are in `Suggests` because `R/` reads them, while `duckdb` and
-`DunedinPACE` are **not declared at all** -- both are read only by the maintainer-gated parity tier,
-and both are expected to be installed on the maintainer's machine (DECISIONS 2026-08-04).
+tests**: `betanorm` is in `Suggests` because `R/` reads it (guarded by `require_betanorm()` in
+`R/score_normalized.R`), while `duckdb`, `DBI` and `DunedinPACE` are **not declared at all** -- all
+three are read only by `test-fixtures-parity.R`, which is `.Rbuildignore`d and so never reaches a
+tarball for the unstated-dependency scan to see. `DBI` was dropped from `Suggests` on 2026-08-04
+once that was true; it was never read by `R/`, contrary to what this file used to say.
+`withr` stays in `Suggests` for the same static-scan reason but is effectively free -- testthat
+`Imports` it, so anything that can run the suite already has it, and it needs no
+`skip_if_not_installed()` (DECISIONS 2026-08-04).
 
 ## Non-negotiable invariants
 
@@ -428,10 +433,54 @@ output**, not implementation detail (see "Test altitude").
   composites). External-pack scoring is smoke-only here; parity owns those goldens. **Nothing in
   this tier reads a third-party package**: the one golden that did -- the `DunedinPACE` reference --
   moved to the parity tier on 2026-08-04, so what remains here runs anywhere.
+  - **"Always" means every `devtools::test()`, not every CRAN run.** Since the 2026-08-04 trim
+    (1284 -> 799 expectations) the internal half of this tier carries `skip_on_cran()`, so CRAN
+    runs 391: the smoke tier, the front-door refusals, and the `mc_result` contract. **CRAN
+    therefore applies no numeric gate at all** -- parity was already skipped there, so a green
+    CRAN check proves the package loads, refuses correctly and returns a well-formed record, and
+    proves nothing about the scores. Do not read it as more than that, and do not "restore
+    coverage" by ungating: the arithmetic is parity's job.
+  - **`skip_on_cran()` is not "does not run in pre-submission checks".** `NOT_CRAN` is unset on
+    r-hub and on a GitHub Actions `R-CMD-check`, so the gated tier **does** run there; what the
+    flag actually buys is CRAN's own machines not paying for it. Treat r-hub as the place the
+    internal tier gets exercised across platforms, and do not reason about a gated test as though
+    it only ever runs on the maintainer laptop. **`devtools::check()` is the opposite case** --
+    it sets `NOT_CRAN=true`, so it runs the *whole* 799 and a `skip_on_cran()` there is inert.
+    A local `devtools::check()` and a plain `R CMD check` on the tarball therefore run different
+    suites; say which one a result came from.
+  - **The gate is per `test_that`, first line, never at file level** -- testthat runs top-level
+    code at collection, so a file-level skip reads as one skipped file instead of N skipped tests.
+    Under `NOT_CRAN=false` the suite reports 89 skipped blocks across 24 files; a file-level gate
+    would show 24. Anything calling a non-exported function is gated by default.
+  - **Four goldens are kept against "parity owns it", because parity is structurally blind to
+    them**: alias routing (fixtures exist on the 14 routed members, never on the 7 aliases, so
+    *which sex's model scored which sample* is uncovered), DunedinPACE quantile normalization (the
+    only always-on proof normalization is applied), the PhysAge mean-divisor fill offset (parity
+    scores clean panels), and Wang mixed-request domain isolation (parity scores one clock per
+    call). Do not delete these as parity-redundant; they are not (DECISIONS 2026-08-04).
+    The `test-normalize.R` BMIQ golden was the fifth such keep for one day, then **moved into the
+    parity tier** as the `parity (horvath normalized)` block later on 2026-08-04. What stays in
+    `test-normalize.R` is the *record* half -- `provenance$normalized`, `cov$normalizes`, the
+    `sample_miss$norm` column -- which parity does not look at.
+  - `test-sim-smoke.R` is **ungated and untouched** by the trim.
+  - **A test whose subject is the source tree does not ship: `.Rbuildignore` it, do not
+    `skip_on_cran()` it.** Two files qualify and both are ignored as of 2026-08-04 --
+    `test-fixtures-parity.R` and `test-source-hygiene.R` (precedent: `R/dev-utils.R`, ignored
+    already). Any later `lint_roxygen()` / `lint_seealso()` test joins them. `skip_on_cran()` is
+    the wrong tool here for two independent reasons, both measured against a real
+    `devtools::check()` run:
+    - **It does not fire under `devtools::check()`**, which sets `NOT_CRAN=true`. The hygiene
+      scans ran in the installed package and **failed** -- `scan_sources()` returns `NULL`, not
+      `character(0)`, over an empty file list, so they do not even pass vacuously.
+    - **It cannot fix an unstated-dependency WARNING at all.** `checking for unstated
+      dependencies in 'tests'` is a **static scan of the shipped sources**, so a `duckdb::` that
+      never executes still counts. `duckdb` and `DunedinPACE` are deliberately undeclared
+      (maintainer-gated tier), and removing the file from the tarball is the only thing that
+      silences it. `DBI` is in `Suggests` and was never the problem.
 - **Cohort-gated parity fixtures** (science gate; the only clock-golden source for a clean panel):
   run against **every registry cohort** -- `data-raw/methylCIPHER-meta/fixtures/{cohort}/beta.duckdb`
-  for `cohort_EPICv1` and `cohort_450K` -- skipped unless BOTH `MC_PARITY=1` and that cohort is
-  staged (`file.exists()`). Upstream ships one `fixtures[]` block per cohort; each (clock, cohort)
+  for `cohort_EPICv1` and `cohort_450K` -- which need BOTH `MC_PARITY=1` and that cohort staged
+  (`file.exists()`). Upstream ships one `fixtures[]` block per cohort; each (clock, cohort)
   pair is its own test. Run locally via the dev-only `test_parity()` (`R/dev-utils.R`). CRAN skips
   this tier; CI must stage the cohorts, set the flag, **and install `duckdb` itself** -- it is
   undeclared as of 2026-08-04, so DESCRIPTION will not pull it (DECISIONS 2026-08-04).
@@ -439,10 +488,19 @@ output**, not implementation detail (see "Test altitude").
     invocation that sets `MC_PARITY=1`, is minutes-long and reads the staged duckdb cohorts. It is
     not part of "run the tests": the default `devtools::test()` (parity auto-skipped) is. Verify a
     change against the always-on tiers, say that parity was not run, and let the maintainer ask.
+  - **The gate is on the generator, not on the generated test.** `staged_cohorts` is the file's one
+    switch: `parity_targets()` returns nothing for a cohort that is not staged, and the PhysAge,
+    census and Dunedin blocks are guarded the same way, so **a tier that cannot run emits one skip
+    instead of 264**. What was skipped is still reported -- one line for the tier being off, one per
+    unstaged cohort -- because a per-target skip is 263 copies of a reason that is the same every
+    time, and testthat prints every one of them with its location. Do not put the flag test back
+    inside `run_parity_target()`: the count of *generated* blocks is how a maintainer reads a parity
+    run, and it must not silently include tests that never had a cohort to read (DECISIONS
+    2026-08-04).
   - **The tier carries one non-cohort test**: the degraded-coverage golden against the `DunedinPACE`
     reference package (`danbelsky/DunedinPACE`), which builds its own holed panel, so it needs the
     flag but no duckdb and no staged cohort. It is the **only** gate on that path (DECISIONS
-    2026-07-29). It sits behind `skip_if_parity_off()` with **no `skip_if_not_installed()` on the
+    2026-07-29). It is emitted only when the flag is set, with **no `skip_if_not_installed()` on the
     reference**: the tier only ever runs on a maintainer machine that has it, so a skip there would
     hide a silent non-run rather than protect anything (DECISIONS 2026-08-04).
   - **Two axes, both gated.** Every fixture must clear **`max_abs_diff` AND `max_rel_diff`**, not
@@ -465,11 +523,24 @@ output**, not implementation detail (see "Test altitude").
     proves the tensors and the engine are right and puts the divergence in the oracle's input.
     **Do not "fix" this with a tolerance**: the residual spans 4.2e-08 to 2.7e-01, so any bound wide
     enough is vacuous (DECISIONS 2026-07-25). **`Horvath1` is the one exception to that reading**,
-    because it is the one the oracle BMIQ'd: 14 of the 15 declare `scheme = none` and it declares
-    `bmiq`, and parity scores it with `normalize` at its opt-in default of **off**, so its gap is a
-    normalization gap, not a fill gap. The block stays skipped anyway -- admitting it would need a
-    third tolerance regime, which is the maintainer's call and has not been made (DECISIONS
-    2026-07-29).
+    because it is the one the oracle BMIQ'd: of the 15, 13 declare `scheme = none` and `Horvath2`
+    declares the inexpressible `noob`, leaving `Horvath1`'s `bmiq` as the only scheme we can apply.
+    The four-block loop still scores it with `normalize` at its opt-in default of **off**, so its
+    gap there is a normalization gap, not a fill gap.
+  - **That exception is now its own generated block**, `parity (horvath normalized)`, admitted
+    2026-08-04 -- the third tolerance regime CLAUDE.md previously said had not been decided.
+    Membership derives from `is_normalized_horvath()` (horvath-online **and**
+    `clock_norm_scheme() %in% NORM_SCHEMES`), never a clock list, and the block runs the clock with
+    normalization **on**. **The cohort split is data-derived, not declared**: the test skips unless
+    the cohort leaves *zero* scoring probes absent, because only then can the oracle's undisclosed
+    fill not contaminate the comparison. Measured: normalizing takes `cohort_450K` (complete panel)
+    from 7.7 years of disagreement to 0.11, while `cohort_EPICv1` is 19 probes short and stays at
+    4.0 -- which is the fill gap talking, hence the guard rather than a second tolerance.
+    `HORVATH_NORM_TOL` is a **snapshot of that residual, not an agreement target**, keyed
+    `clock@cohort` and sitting just above the measurement (BMIQ is deterministic here -- verified
+    bit-identical across three runs). A pair that clears the absent-probe guard with no entry in
+    the map **fails**: a newly admissible pair needs its residual measured, never defaulted
+    (DECISIONS 2026-08-04).
   - **A fixture is scored on the panel the oracle used, which is not always the scoring panel.** A
     recipe declaring a `sample_scale` op z-scores each sample over **every** probe in the input
     matrix, so feeding it the union of scoring panels moves each sample's mean/sd and the score with
@@ -483,12 +554,18 @@ output**, not implementation detail (see "Test altitude").
     whose 14 members carry them (both halves derived, never listed). It needs no duckdb, so
     `test_parity()` runs it even where nothing is staged -- but it **is** behind `MC_PARITY`, so a
     plain `devtools::test()` does not catch a dropped fixture; CI does (DECISIONS 2026-07-26).
-  - **Standing state, re-measured 2026-08-04: 264 blocks / 32 skip / 0 fail**, which the runner
-    reports as `PASS 707` because testthat counts *expectations*, not `test_that` blocks, and
+  - **Standing state with both cohorts staged: 266 blocks / 0 fail**, the block count raised from
+    264 by the two `parity (horvath normalized)` targets on 2026-08-04 (stage one fewer cohort and
+    it drops, by design). testthat counts *expectations*, not `test_that` blocks, and
     `expect_parity()` carries three (all-finite, abs, rel): 228 targets x 3 + PhysAge 2 x 6 +
-    census 3 + the Dunedin reference golden's 8. Read a parity run by its **fail and skip** counts,
+    census 3 + the Dunedin reference golden's 8 + the normalized-horvath 450K target's 3.
+    **The skip count depends on what else is cached, so check it against a cause before reading
+    anything into it.** With packs cached it was 32 skip / `PASS 707` on 2026-08-02, so 33 / 710
+    now; measured 2026-08-04 on a machine with **no packs cached**: 266 blocks / 91 skip /
+    `PASS 536` / 0 fail, the 91 being 56 packs + 30 horvath-online + 2 Wang gaps + 2 Zhang BLUP +
+    the normalized-horvath EPICv1 guard. Read a parity run by its **fail and skip** counts,
     checked against each other, before concluding anything from the pass number; the fail count is
-    0-or-bust (DECISIONS 2026-08-02).
+    0-or-bust (DECISIONS 2026-08-02, 2026-08-04).
   - `KNOWN_PARITY_GAPS` (clock- or `clock@cohort`-keyed) holds only genuine skips -- **two** today,
     both `DNAmSex_Wang_*@cohort_450K`, whose deposited matrix carries no sex-chromosome probes, so
     the panel is 0% present and the fixture is the oracle's empty-panel `0`. **Do not relax
@@ -502,6 +579,13 @@ output**, not implementation detail (see "Test altitude").
 Assert what `calc_clocks()` *produces*, not how it is wired. A test that breaks on a no-behavior
 refactor is too tight -- loosen or delete it.
 
+- **The suite has a budget, and adding to it is a cost.** It reached 1284 expectations and was cut
+  to 801 on 2026-08-04; the failure mode is a routine change touching a dozen files without buying
+  proportional safety. Before adding a test, ask what it catches that parity, the smoke tier and
+  the existing block do not. **Delete on sight**: a golden for a clock that has a parity fixture, a
+  loop restating one invariant over many clocks (assert it over a representative shape instead), a
+  block whose only failure mode is R itself being broken, and a second entry point to a path that
+  provably calls the first (DECISIONS 2026-08-04).
 - **Only `R/` is under test.** `tests/` covers package code and the data it ships, never
   `data-raw/`. `sync.R` is maintainer-side tooling against an upstream contract that upstream gates
   in its own suite, and reaching it means sourcing a file the package does not ship. Do not source,
@@ -525,14 +609,16 @@ refactor is too tight -- loosen or delete it.
   `res$coverage$per_clock[["Hannum"]]$score_imputed_full` or `res$provenance$dependencies` is fair
   game.
 - **Minimize test-helper files.** A fixture builder/mock lives atop the one test file that uses it;
-  promote to `helper-*.R` only when >= 2 files genuinely share it (currently none). `sim_DNAm` /
-  `random_betas` are package functions in `R/`, not test helpers.
+  promote to `helper-*.R` only when >= 2 files genuinely share it. `helper-fixtures.R` is the one
+  such file: `mc_pheno()` / `mc_ages()` (9 files), `mc_fake_cpgs()`, and the `grip_fixture()` /
+  `gait_holed_fixture()` pair shared by `test-coverage-report.R` and `test-score-fitage.R`.
+  `sim_DNAm` / `random_betas` are package functions in `R/`, not test helpers.
 - **Cohort/duckdb parity lives in one file** (`test-fixtures-parity.R`): one file-scoped read-only
   connection **per staged cohort** behind the `MC_PARITY` + `file.exists()` guard, torn down with
   `withr::defer(..., testthat::teardown_env())` -- not a module-global caching env. The file also
   holds the one test that needs the tier flag but no connection (the Dunedin reference golden), so
-  the two guards are separate: `skip_if_parity_off()` is the flag alone, `skip_if_no_cohort()` calls
-  it and then demands a staged cohort.
+  the two gates are separate: `parity_on` is the flag alone, `staged_cohorts` is the flag plus a
+  connection, and each generator picks the one it needs.
 - **Random inputs are unseeded.** Build DNAm with `random_betas()` (no seed); goldens are computed
   in-test from that same matrix, so they are seed-invariant. Derive the golden from the input, do
   not add a seed to pin a value.
