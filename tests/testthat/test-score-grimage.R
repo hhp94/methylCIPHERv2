@@ -49,11 +49,15 @@ test_that("a component coefficient outside the declared panel is a hard stop", {
   cpgs <- list(
     clock_id = "fake",
     score_needed = c("cg1", "cg2", "cg3"),
-    score_present = c("cg1", "cg3")
+    score_present = c("cg1", "cg3"),
+    score_present_idx = c(1L, 3L)
   )
   coef <- c(cg1 = 0.5, cg3 = -0.5)
 
-  expect_equal(unname(component_present(coef, cpgs, "fake")), c("cg1", "cg3"))
+  got <- component_present(coef, cpgs, "fake")
+  expect_equal(got[["cols"]], c("cg1", "cg3"))
+  # the panel's positions come through with it, for block_cols()
+  expect_equal(got[["idx"]], c(1L, 3L))
   expect_error(component_present(c(coef, cg9 = 1), cpgs, "fake"))
 })
 

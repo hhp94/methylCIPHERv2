@@ -94,30 +94,15 @@ either has to be carried into the sentences.
 
 ## Open questions
 
-### Q1. `collapse` as a dependency
-
-Not for speed. For correctness: the package performs several id-keyed left joins by hand, each one
-a `match()` plus a duplicate-id guard plus a no-matching-row warning, in `merge_accel_data()` and
-`calc_accel()` ([R/calc_accel.R](R/calc_accel.R)), `resolve_pheno()`
-([R/validate_inputs.R](R/validate_inputs.R)) and `attach_recorded()`
-([R/predict_sex.R](R/predict_sex.R)). Each re-derives the same three checks, and they are correct
-today only because the checks upstream of them line up. One join verb with explicit join-type
-semantics and a built-in account of unmatched and many-to-many rows would make that guarantee
-uniform. The same argument covers the set operations over large character vectors in
-`missingness.R` and `clock_cpgs.R`.
-
-To settle before it lands, since this is a new hard dependency carrying compiled code:
-
-- what it buys, measured at the sites above, against one small internal `left_join_by_id()` that
-  centralizes the same three checks with no new dependency;
-- whether its join diagnostics are the ones to raise, or whether it would be wrapped anyway to get
-  the package's own;
-- install weight and CRAN submission surface, given `Rcpp` is already present.
-
-### Q2. Chunked front end. PARKED
+### Q1. Chunked front end. PARKED
 
 Every piece exists: batch-wise fill regimes, derived batch labels, `rbind`, retained `pending`,
 `refinalize_clocks()`. Parked because the usage does not yet justify the front-end surface.
+
+Both axes now refuse a per-chunk re-derivation rather than scoring it (DECISIONS 2026-08-05):
+a `usable_cols` that is not the one the panels were resolved against stops in `mc_block()`, and a
+chunk row the cohort facts do not carry stops in `block_rows()`. Read those two before designing
+the chunk loop -- they are the constraints it has to satisfy.
 
 The alternative works today: score each cohort separately, save each `mc_result`, and `rbind` once
 at the end. One wrinkle, worth deciding rather than leaving to chance: two cohorts with the same

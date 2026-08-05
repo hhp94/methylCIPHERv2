@@ -34,7 +34,7 @@ panel_ratio <- function(present, miss, needed) {
 # per-sample partial-fill count over a panel's cached (partly filled) CpGs
 panel_sample_miss <- function(cached, block) {
   # counted on the raw matrix -- the cache has the NAs already filled
-  count_sample_miss(block[["DNAm"]], block_cols(cached, block))
+  count_sample_miss(block[["DNAm"]], block_cols(cached[["idx"]], block))
 }
 
 # a routed member's count on a row its sex did not score is not its count
@@ -91,13 +91,13 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
   # one cached-column set per distinct panel, shared by both axes
   score_cached <- lapply(
     pidx[["score"]][["parts"]],
-    function(p) cached_cols(p[["present"]], block[["partial_cache"]])
+    function(p) cached_cols(p[["present"]], p[["present_idx"]], block)
   )
   norm_cached <- lapply(pidx[["norm"]][["parts"]], function(p) {
     if (!length(p[["needed"]])) {
       NULL
     } else {
-      cached_cols(p[["present"]], block[["partial_cache"]])
+      cached_cols(p[["present"]], p[["present_idx"]], block)
     }
   })
 
@@ -107,8 +107,9 @@ compute_coverage <- function(clock_sequence, cpg_list, block) {
     if (is.null(cc)) NULL else panel_sample_miss(cc, block)
   })
   # probe axis: a panel CpG that was filled for any sample (NULL panel -> 0)
-  score_part_cpgs <- lengths(score_cached)
-  norm_part_cpgs <- lengths(norm_cached)
+  n_cached <- function(cc) if (is.null(cc)) 0L else length(cc[["cols"]])
+  score_part_cpgs <- vapply(score_cached, n_cached, integer(1L))
+  norm_part_cpgs <- vapply(norm_cached, n_cached, integer(1L))
 
   per_clock <- stats::setNames(
     vector("list", length(clock_sequence)),

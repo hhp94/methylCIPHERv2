@@ -219,8 +219,7 @@ joined_rows <- function(pheno, ID, sample_id) {
   if (is.null(sample_id)) {
     return(seq_len(nrow(pheno)))
   }
-  idx <- match(sample_id, pheno[[ID]])
-  idx[!is.na(idx)]
+  id_index(sample_id, pheno[[ID]], "joined_rows", unmatched = "drop")
 }
 
 # per-row age units gate.
@@ -324,7 +323,13 @@ resolve_pheno <- function(DNAm, pheno, pheno_id, keep) {
   out <- if (is.null(pheno)) {
     stats::setNames(data.frame(sample_id, stringsAsFactors = FALSE), pheno_id)
   } else {
-    missing <- setdiff(sample_id, pheno[[pheno_id]])
+    idx <- id_index(
+      sample_id,
+      pheno[[pheno_id]],
+      "resolve_pheno",
+      unmatched = "na"
+    )
+    missing <- sample_id[is.na(idx)]
     if (length(missing)) {
       cli::cli_abort(
         c(
@@ -338,11 +343,7 @@ resolve_pheno <- function(DNAm, pheno, pheno_id, keep) {
       )
     }
     # id column + required covariates only
-    pheno[
-      match(sample_id, pheno[[pheno_id]]),
-      unique(c(pheno_id, keep)),
-      drop = FALSE
-    ]
+    pheno[idx, unique(c(pheno_id, keep)), drop = FALSE]
   }
   # keyed by the id column, never by row names
   rownames(out) <- NULL

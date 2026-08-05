@@ -19,7 +19,11 @@ score_Dunedin <- function(id, cpgs, block, results) {
     ncol = length(needed),
     dimnames = list(sample_id, needed)
   )
-  obs <- observed_panel(cpgs[["norm_present"]], block)
+  obs <- observed_panel(
+    cpgs[["norm_present"]],
+    cpgs[["norm_present_idx"]],
+    block
+  )
   if (length(obs[["cols"]])) {
     panel[, obs[["cols"]]] <- obs[["values"]]
   }

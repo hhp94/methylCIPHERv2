@@ -167,8 +167,13 @@ merge_accel_data <- function(pheno, data, pheno_id) {
     )
   }
 
-  idx <- match(as.character(pheno[[pheno_id]]), ids)
   # data says nothing about a sample it does not carry
+  idx <- id_index(
+    as.character(pheno[[pheno_id]]),
+    ids,
+    "merge_accel_data",
+    unmatched = "na"
+  )
   seen <- !is.na(idx)
   shared <- setdiff(intersect(names(pheno), names(data)), pheno_id)
   bad <- unlist(lapply(shared, function(cl) {
@@ -397,7 +402,7 @@ calc_accel <- function(
 
   pheno <- merge_accel_data(x[["pheno"]], data, pheno_id)
   pheno[[MC_BATCH]] <- x[["provenance"]][[MC_BATCH]][
-    match(pheno[[pheno_id]], sample_id)
+    id_index(pheno[[pheno_id]], sample_id, "calc_accel batch")
   ]
   need <- setdiff(vars, names(pheno))
   if (length(need)) {
@@ -413,7 +418,11 @@ calc_accel <- function(
   }
   check_pheno(pheno, ID = pheno_id, extra_columns = vars, sample_id = sample_id)
   # by id, never by row order
-  ph <- pheno[match(sample_id, pheno[[pheno_id]]), , drop = FALSE]
+  ph <- pheno[
+    id_index(sample_id, pheno[[pheno_id]], "calc_accel pheno"),
+    ,
+    drop = FALSE
+  ]
 
   resp <- x[["scores"]]
   if (type == "diff") {

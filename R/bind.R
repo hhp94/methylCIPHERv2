@@ -323,7 +323,12 @@ refinalize_clocks <- function(x) {
   for (id in ids) {
     col <- done[[id]]
     # match by name, not row order
-    x[["scores"]][, id] <- col[rownames(x[["scores"]]), 1L]
+    rows <- id_index(
+      rownames(x[["scores"]]),
+      rownames(col),
+      "refinalize_clocks"
+    )
+    x[["scores"]][, id] <- col[rows, 1L]
   }
   cli::cli_inform(c(
     "v" = "{cli::qty(ids)}{?Column/Columns} {.val {ids}}

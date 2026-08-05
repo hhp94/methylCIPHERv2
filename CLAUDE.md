@@ -194,6 +194,20 @@ Do not reverse these without a `dev/DECISIONS.md` entry explaining why.
   or `rbind`. `rbind` adds no reset of its own. Align pheno by sample id, never row order.
 - **Imputation in one place, never crossing sources.** Partial NA on a present probe -> cohort mean
   (shared cache); a fully absent probe -> the clock's vendored ref, or drop by policy.
+- **A resolved panel is positions, and `facts[["usable_cols"]]` is the one axis.** Every
+  `score_present_idx` / `norm_present_idx` is a position in that vector, `block[["usable_idx"]]`
+  maps the same axis to the block's columns, and nothing in the scoring path looks a CpG up by name
+  -- that lookup was 1.15s of a 3.0s run at 414k columns. A position is a bare integer, so **the
+  wrong vector still yields valid positions**: code that sorts, uniques or subsets `usable_cols`
+  between `resolve_cpgs()` and `mc_block()` scores the wrong CpGs and **returns a number**. Three
+  rules keep that from happening, and a chunked front end is where they will be tested.
+  `resolve_cpgs()` carries the vector it resolved against and `mc_block()` refuses one that is not
+  `identical()` to it -- free, because R compares interned strings by pointer, and exact where a
+  hash is not. `block_cols()` guards the positions themselves before indexing, because a `0`
+  silently drops an element rather than erroring. And a subset filters names and positions with
+  **one** mask, never two (`component_present()` in `R/score_default.R` is the pattern to copy);
+  its `cols` follows the panel's order, not the coefficient vector's, and every consumer indexes by
+  name off it (DECISIONS 2026-08-05).
 - **Accessors are the executable schema.** `calc_clocks` consumes accessors (`get_clock`,
   `clock_coefs`, ...), never raw nested catalog lists. No hand-written `schema.md`.
 - **Never `$` in `R/`. Always `[[`.** `$` partial-matches on lists, so a missing exact field

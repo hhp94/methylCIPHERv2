@@ -235,32 +235,34 @@ scan_missing_cpgs <- function(
   score_cpgs,
   moment_domains = NULL
 ) {
-  present_needed <- intersect(needed_cpgs, colnames(DNAm))
+  cn <- colnames(DNAm)
+  # one hash of the column names, and the positions it found are kept
+  hit <- match(needed_cpgs, cn, 0L)
+  ok <- hit > 0L
+  present_needed <- needed_cpgs[ok]
   # unique by construction, or a repeated index double-counts the column stats
-  needed_idx <- match(present_needed, colnames(DNAm))
+  needed_idx <- hit[ok]
   nr <- nrow(DNAm)
 
   # domains index DNAm directly and are validated before the kernel sees them
-  sets <- check_moment_sets(
-    resolve_moment_sets(moment_domains, colnames(DNAm)),
-    ncol(DNAm)
-  )
+  sets <- check_moment_sets(resolve_moment_sets(moment_domains, cn), ncol(DNAm))
 
   # index into dnam, not a slice.
   scan <- col_stats(DNAm, needed_idx, sets)
   check_col_values(scan, present_needed)
 
   # dead samples checked on scoring panels only.
-  present_score <- if (identical(score_cpgs, needed_cpgs)) {
-    present_needed
+  score_idx <- if (identical(score_cpgs, needed_cpgs)) {
+    needed_idx
   } else {
-    intersect(score_cpgs, colnames(DNAm))
+    s <- match(score_cpgs, cn, 0L)
+    s[s > 0L]
   }
-  if (length(present_score)) {
-    obs <- if (identical(present_score, present_needed)) {
+  if (length(score_idx)) {
+    obs <- if (identical(score_idx, needed_idx)) {
       scan[["row_obs"]]
     } else {
-      row_observed(DNAm, match(present_score, colnames(DNAm)))
+      row_observed(DNAm, score_idx)
     }
     dead <- rownames(DNAm)[obs == 0L]
     if (length(dead)) {

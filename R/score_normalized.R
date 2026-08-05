@@ -27,7 +27,11 @@ score_normalized <- function(id, cpgs, block, results) {
   scheme <- clock_norm_scheme(id)
   target <- clock_norm_target(id)
   # scoring CpGs are a subset of the background panel
-  obs <- observed_panel(cpgs[["norm_present"]], block)
+  obs <- observed_panel(
+    cpgs[["norm_present"]],
+    cpgs[["norm_present_idx"]],
+    block
+  )
 
   # unimplemented scheme already stopped in score_type()
   calibrated <- switch(

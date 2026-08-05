@@ -233,7 +233,7 @@ mc_cohort <- function(DNAm, spec, pheno = NULL, min_clocks_coverage = 0.75) {
 
 # cohort-wide per-sample facts are narrowed to the rows in hand by this index
 block_rows <- function(DNAm, facts) {
-  match(rownames(DNAm), facts[["sample_id"]])
+  id_index(rownames(DNAm), facts[["sample_id"]], "block_rows")
 }
 
 # pheno follows facts$sample_id. never NULL.
@@ -296,9 +296,19 @@ collect_notes <- function(notes) {
 # per-block view: DNAm + its usable column index, partial cache, pheno, notes
 mc_block <- function(DNAm, spec, facts) {
   usable <- facts[["usable_cols"]]
-  # cpg name -> column position, one named vector resolved once
+  # cpg_list's positions index this vector, in this order
+  if (!identical(usable, facts[["cpg_list"]][["usable_cols"]])) {
+    stop(
+      paste0(
+        "mc_block: usable_cols is not the vector the CpG panels were resolved ",
+        "against. This is a package bug -- please report it."
+      ),
+      call. = FALSE
+    )
+  }
+
+  # usable position -> column position. unnamed: callers hold positions, not names
   usable_idx <- match(usable, colnames(DNAm))
-  names(usable_idx) <- usable
   if (anyNA(usable_idx)) {
     stop(
       sprintf(
@@ -312,6 +322,28 @@ mc_block <- function(DNAm, spec, facts) {
     )
   }
 
+  # the cohort-mean columns, on the usable axis every panel is resolved against
+  fill <- facts[["partial_fill"]]
+  fill_idx <- match(names(fill), usable)
+  if (anyNA(fill_idx)) {
+    stop(
+      sprintf(
+        paste0(
+          "mc_block: %d cohort-mean CpG(s) are outside the usable set. ",
+          "This is a package bug -- please report it."
+        ),
+        sum(is.na(fill_idx))
+      ),
+      call. = FALSE
+    )
+  }
+  # a panel's cached CpGs are read off this by position, never by name
+  cached_mask <- NULL
+  if (length(fill_idx)) {
+    cached_mask <- logical(length(usable))
+    cached_mask[fill_idx] <- TRUE
+  }
+
   # one cohort-row index, shared by every per-sample fact narrowed below
   rows <- block_rows(DNAm, facts)
   block <- list(
@@ -321,14 +353,14 @@ mc_block <- function(DNAm, spec, facts) {
     sample_moments = block_moments(facts, rows),
     packs = spec[["packs"]],
     usable_idx = usable_idx,
+    cached_mask = cached_mask,
     sample_id = rownames(DNAm),
     # write-only collector for scoring-time failures
     notes = new_notes()
   )
-  fill <- facts[["partial_fill"]]
   block[["partial_cache"]] <- build_partial_cache(
     DNAm,
-    block_cols(names(fill), block),
+    block_cols(fill_idx, block),
     fill
   )
   block

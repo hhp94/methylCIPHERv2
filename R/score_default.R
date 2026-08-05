@@ -1,42 +1,43 @@
 # shared linear scorers
 
-# present CpGs covered by the cohort-mean cache
-cached_cols <- function(present, partial_cache) {
-  if (is.null(partial_cache)) {
-    character(0)
-  } else {
-    intersect(present, colnames(partial_cache))
+# present CpGs covered by the cohort-mean cache, as names and usable positions
+cached_cols <- function(present, present_idx, block) {
+  mask <- block[["cached_mask"]]
+  # null when nothing was partly missing -- no panel has a cached column
+  if (is.null(mask)) {
+    return(list(cols = character(0), idx = integer(0)))
   }
+  keep <- mask[present_idx]
+  list(cols = present[keep], idx = present_idx[keep])
 }
 
-# column positions in the block matrix for CpGs the block declares usable
-block_cols <- function(cols, block) {
-  idx <- block[["usable_idx"]][cols]
-  # a name outside `usable` would index an NA column, not error -- say so loudly
-  if (anyNA(idx)) {
-    bad <- cols[is.na(idx)]
+# column positions in the block matrix for usable positions the caller resolved
+block_cols <- function(pos, block) {
+  # 0 silently drops an element and a high position yields NA -- say so loudly
+  bad <- is.na(pos) | pos < 1L | pos > length(block[["usable_idx"]])
+  if (any(bad)) {
     stop(
       sprintf(
         paste0(
-          "block_cols: %d CpG(s) outside the block's usable set: %s. ",
+          "block_cols: %d position(s) outside the block's usable set: %s. ",
           "This is a package bug -- please report it."
         ),
-        length(bad),
-        paste(utils::head(bad, 5L), collapse = ", ")
+        sum(bad),
+        paste(utils::head(pos[bad], 5L), collapse = ", ")
       ),
       call. = FALSE
     )
   }
-  unname(idx)
+  block[["usable_idx"]][pos]
 }
 
 # observed betas for present: one subset, then cohort-mean columns on top
-observed_panel <- function(present, block) {
-  cache <- block[["partial_cache"]]
-  cached <- cached_cols(present, cache)
-  values <- block[["DNAm"]][, block_cols(present, block), drop = FALSE]
-  if (length(cached)) {
-    values[, cached] <- cache[, cached, drop = FALSE]
+observed_panel <- function(present, present_idx, block) {
+  cached <- cached_cols(present, present_idx, block)
+  values <- block[["DNAm"]][, block_cols(present_idx, block), drop = FALSE]
+  if (length(cached[["cols"]])) {
+    cache <- block[["partial_cache"]]
+    values[, cached[["cols"]]] <- cache[, cached[["cols"]], drop = FALSE]
   }
   list(cols = present, values = values)
 }
@@ -52,7 +53,13 @@ component_present <- function(coef, cpgs, label) {
       paste(utils::head(extra, 5L), collapse = ", ")
     )
   }
-  intersect(names(coef), cpgs[["score_present"]])
+  # hash the component, not the panel. cols follows the panel's order, which
+  # is what keeps it aligned with idx.
+  keep <- cpgs[["score_present"]] %in% names(coef)
+  list(
+    cols = cpgs[["score_present"]][keep],
+    idx = cpgs[["score_present_idx"]][keep]
+  )
 }
 
 # vendor-mean fill for fully absent CpGs
@@ -123,12 +130,13 @@ linear_predictor <- function(
   intercept,
   cov_coefs,
   score_present,
+  score_idx,
   block,
   observed = NULL
 ) {
   # observed lets a pre-transform branch supply already-normalized betas
   obs <- if (is.null(observed)) {
-    observed_panel(score_present, block)
+    observed_panel(score_present, score_idx, block)
   } else {
     observed
   }
@@ -168,17 +176,20 @@ component_linpred <- function(
   reduction = c("sum", "mean")
 ) {
   reduction <- match.arg(reduction)
-  fill <- absent_fill(id, coef, setdiff(names(coef), present), label = label)
+  # present is the component's resolved panel: names plus usable positions
+  cols <- present[["cols"]]
+  fill <- absent_fill(id, coef, setdiff(names(coef), cols), label = label)
   lp <- linear_predictor(
     coef = coef,
     intercept = intercept,
     cov_coefs = cov_coefs,
-    score_present = present,
+    score_present = cols,
+    score_idx = present[["idx"]],
     block = block
   )
   if (identical(reduction, "mean")) {
     as.numeric(
-      mean_cpg_contrib(lp, fill, length(present)) +
+      mean_cpg_contrib(lp, fill, length(cols)) +
         lp[["cov_contrib"]] +
         intercept
     )
@@ -201,6 +212,7 @@ linear_score <- function(cpgs, block, observed = NULL) {
     intercept = intercept,
     cov_coefs = clock_covariates_coefs(id),
     score_present = cpgs[["score_present"]],
+    score_idx = cpgs[["score_present_idx"]],
     block = block,
     observed = observed
   )

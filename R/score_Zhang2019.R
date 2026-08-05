@@ -13,6 +13,7 @@ score_Zhang2019 <- function(id, cpgs, block, results) {
     intercept = 0,
     cov_coefs = numeric(0),
     score_present = present,
+    score_idx = cpgs[["score_present_idx"]],
     block = block
   )
   csum <- sum(coef[present])

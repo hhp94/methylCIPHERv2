@@ -14,6 +14,196 @@ Older dated citations in `CLAUDE.md` resolve there. Do not restate that history 
 
 ---
 
+## 2026-08-05 -- `id_index()`: one id join, and the survey that shrank the site list
+
+The last open half of the `collapse` audit below. It asked for "one helper carrying key uniqueness,
+an explicit unmatched policy and a row-count check, applied at all ten". The survey found a
+different set than the one the to-do listed, and a different shape of helper.
+
+**Seven of the ten listed sites are id joins, not ten, and there is an eighth the list missed.**
+`assoc_report()` is a scalar one-row lookup inside a per-clock `lapply`, and `new_mc_citation()` /
+`bind_by_key()` are list-name lookups (`entries[[k]]`, `e[[id]]`). None of the three takes an index
+without being contorted, and none of them can silently misalign a sample. Unlisted and genuine:
+`refinalize_clocks()` (`R/bind.R`), where `col[rownames(x[["scores"]]), 1L]` yields a silent `NA`
+score for an id the pending block does not carry.
+
+**An index, not a join.** The to-do's name was `left_join_by_id()`, returning a reindexed table.
+That fits four of the eight; the rest index a plain vector (`mc_batch_id[...]`,
+`pheno[["Female"]][idx]`) or need the index for something else (`merge_accel_data()` reuses it for
+its column-conflict check). So the primitive is `id_index(key, id, what, unmatched)`, returning an
+integer, and `R/utils.R` is where it lives. There is no row-count check to write: `match()` returns
+`length(key)` by construction, and the one policy that does not (`"drop"`) is the one that means it.
+
+**The unmatched policy is the point, not the uniqueness check.** Taking only `anyDuplicated()` was
+considered and rejected: three sites -- `calc_accel()`'s batch column, `block_rows()` and
+`refinalize_clocks()` -- turn an unmatched id into a **silent NA**, which is the failure the audit
+actually names, and a duplicate check does nothing about it. So `unmatched` is explicit at every
+call site: `"stop"` at six, `"drop"` at `joined_rows()` (which runs inside `check_pheno()`, before
+`resolve_pheno()` raises the user-facing refusal), `"na"` at the two that raise their own cli
+message about the user's own input (`resolve_pheno()`, `merge_accel_data()`).
+
+**Each `"stop"` was justified before it was written, and none of them is `check_pheno()`.**
+`check_pheno()` asserts the id column is unique but never refuses a `sample_id` with no pheno row,
+so the reasoning for `calc_accel()`'s two sites is different and is now in a comment there:
+`merge_accel_data()` only ever **adds columns** to `x[["pheno"]]`, which `resolve_pheno()` already
+aligned one row per sample, so its id column still is `sample_id`. `block_rows()` takes a row subset
+of the cohort its facts were built from. `attach_recorded()` was already a hand-written defect stop.
+Verified by tracing a live run: all eight sites are reached, and no `"stop"` branch fires.
+
+**`resolve_pheno()` got shorter, not just guarded.** It hashed the same key set twice --
+`setdiff(sample_id, pheno[[pheno_id]])` to build the refusal, then `match()` to build the index. It
+now reads the missing ids off the index, so the cli message is unchanged and there is one lookup.
+
+The tests are four expectations on the helper's own branches, which nothing else reaches: a repeated
+right key, an unmatched key under `"stop"`, and the two return shapes under `"drop"` and `"na"`.
+
+**Parity passed** (maintainer run, 2026-08-05). `R CMD check` was not run. No roxygen or exports
+changed.
+
+---
+
+## 2026-08-05 -- the positional axis is guarded with `identical()`, and `scan_missing_cpgs()` was measured before it was changed
+
+Follow-on to the positions entry below, closing the session hand-off it left behind. One item was
+taken as recommended, one was reversed by measurement, and one was declined.
+
+**Why a guard and not a test.** The positions change bought 1.25s by trusting a bare integer. Its
+worst failure mode is code that has not been written yet: anything that sorts, uniques or subsets
+`usable_cols` between `resolve_cpgs()` and `mc_block()` leaves every position in range,
+`block_cols()`'s bounds guard passes, and the run scores **the wrong CpGs and returns a number**.
+The parked chunked front end is exactly that shape, since a per-chunk `usable` is a different
+axis from the cohort-wide one the panels were resolved against. No test can cover future code; a
+runtime check can, and the package already prefers a cheap greppable `stop()` for a defect class.
+
+**`identical()`, not a hash.** The hand-off recommended hashing `usable_cols`, with the note that
+`batch_hash()`'s canonical form is wrong here because order is exactly what must be preserved.
+Reversed on measurement. `digest(algo = "xxhash64")` over the 414k vector is 1.5ms, so cost was
+never the objection -- but `identical()` is **0.000ms per call at 200 reps** in every case measured
+(same object, equal-content rebuild, differs only at the last element, one element shorter),
+because R interns strings and compares `CHARSXP`s by pointer. So `resolve_cpgs()` returns the
+vector it resolved against and `mc_block()` refuses anything not `identical()` to it. That is exact
+rather than probabilistic, needs no `digest` round-trip, and stores a reference rather than a copy.
+Verified it fires on a reordered axis and on a filtered one, and passes an equal-content rebuild.
+
+**Three tests, nine expectations, 803 -> 812.** The alignment invariant stated directly
+(`usable[present_idx] == present`, one assertion per panel role over the whole request rather than a
+loop per clock, on a request carrying a real 20k norm panel). The guards: `block_cols()` on a `0`
+and on an out-of-range position, plus `mc_block()` on a reordered axis. And the end of the chain,
+which is what a wrong position actually corrupts -- `colnames(observed_panel(...)$values)` equals
+the panel, so the positions handed to the matrix resolve to the CpGs the coefficients are named
+for, plus `cached_cols()`'s pair on a cohort carrying partial NA. All confirmed non-vacuous by
+mutation: shifting one position breaks the first, the guard message is the one that fires in the
+second, and a one-element rotation of `usable_idx` breaks the third.
+
+**The third proposed test is declined as covered.** "Two clocks whose panels overlap partially"
+would catch a `dedup_panels()` or `panel_index` change fanning the wrong panel's positions to the
+wrong clock -- which is what `test-score-wang.R`'s mixed-request golden already does: two clocks in
+one call, each score compared against its single-clock value. `dedup_panels()` compares panels with
+`identical()`, so a partial overlap and a disjoint pair take the same path and the overlap adds no
+distinct failure mode.
+
+**`scan_missing_cpgs()` did not cost what the hand-off said.** The claim was 0.59s of a 1.75s run,
+"mostly the `intersect()` calls". Measured on the real 413k-column request: the whole function is
+**78ms of a 1.85s run**, and `intersect()` is 40ms of that. The change is still worth taking, for a
+reason that is not speed. `present_needed` and `needed_idx` were two separate lookups of the same
+key set, which is failure mode 2 (one panel, two masks) waiting to be introduced. One
+`match(needed_cpgs, cn, 0L)` now yields both, the score panel resolves the same way, and
+`row_observed()` takes those positions instead of re-resolving names. 78ms -> 52ms, and the output
+is `identical()` to the old formulation across four shapes, including the `score != needed` branch
+that a norm panel triggers.
+
+**`setdiff(present_needed, all_na)` stays**, though `present_needed[n_obs > 0]` would be equivalent
+and save another 10ms. It is the one thing that makes `usable_cols` unique whatever upstream does,
+and `resolve_cpgs()`'s comment cites it by name. Trading the sole enforcement of the axis's
+uniqueness for 0.5% of a run is the wrong side of this change.
+
+**Parity passed on the change** (maintainer run, 2026-08-05), alongside the `identical()`
+equivalence check above. `R CMD check` was not run. No roxygen or exports changed.
+
+---
+
+## 2026-08-05 -- a resolved panel carries positions, not names, and `collapse` is declined
+
+Two halves of one audit. The question was whether to take `collapse` as a hard dependency for its
+join verb and its set operations. The measurement said the cost it was meant to fix was
+not a set-operation cost at all.
+
+**What the profile found.** 32 requested clocks (SystemsAge, Zhang2019, PCClocks, PCBrainAge plus
+the 25 smallest bundled clocks), `sim_DNAm(n = 30)`, DNAm 30 x 414110, packs warm. `Rprof` is
+useless here -- it sampled 0.35s of a 3.2s run -- so these are wrapper timers around the internals.
+`block_cols()` was **1.15s of a 3.0s run** across 82 calls. The line was
+`block[["usable_idx"]][cols]`, and its cost is flat in the number of keys: 14ms for 1000 names,
+17ms for 20000. What is being paid 82 times is R hashing the **414k names of the table**, not the
+lookup. `match(cols, usable)` costs the same, for the same reason.
+
+**Why positions and not a faster match.** Three alternatives were measured against the same 82
+panels (1.46M keys total):
+
+| | cost |
+| --- | --- |
+| 82 x `idx[names]` (what shipped) | 1687 ms |
+| environment table, build + 82 x `mget()` | 690 + 1777 ms |
+| 82 x `match(panel, usable)` up front | 1720 ms |
+| **one `match()` over the concatenated panels** | **130 ms** |
+| then 82 x `idx[pos]` | 47 ms |
+
+An environment is worse than the named vector, and resolving each panel separately just moves the
+same 82 hashes earlier. The only thing that helps is hashing `usable` **once** for every panel at
+the same time -- which `resolve_cpgs()`'s `split_panels()` already did, at
+`match(unlist(panels), usable, 0L) > 0L`, and then threw the positions away to keep a logical.
+
+**So the change is to keep what was already computed.** `split_panels()` retains the integer, every
+clock's entry gains `score_present_idx` / `norm_present_idx` (positions in `usable_cols`), and
+`block_cols()` / `observed_panel()` take positions. `usable_idx` loses its names. Measured after:
+`block_cols()` 1.15s -> 0.01s, the whole call 3.00s -> 1.75s; on a 138k-column panel set,
+1.11s -> 0.67s at n = 30 and 2.53s -> 1.87s at n = 300.
+
+**The axis is `facts[["usable_cols"]]`, and it has one owner.** `resolve_cpgs()` used to take
+`unique(usable_cols)` while `mc_block()` keyed on the raw vector. That was a no-op only because
+`scan_missing_cpgs()` builds it with `setdiff()`, and once positions cross between them a silent
+re-`unique()` would shift every index. The `unique()` is gone and the coupling is stated at
+`resolve_cpgs()`.
+
+**Parity passed on the change** (2026-08-05), which is what makes the swap safe to keep: a desync
+between the two consumers of the axis would surface there as a wrong score, not as an error.
+
+**Two guards changed shape rather than going away.** `block_cols()` used to catch a name outside
+`usable`, where the symptom was an NA column. The positional failures are different and worse: a
+`0` **silently drops** an element and shrinks the panel, so the guard now tests the positions
+themselves (`is.na | < 1 | > length(usable_idx)`) before indexing. `mc_block()` gained the matching
+check for the cohort-mean columns, which is where the one remaining name lookup lives, paid once.
+
+**`cached_cols()` stopped searching too.** It was `intersect(present, colnames(partial_cache))`,
+i.e. a second name hash per panel, invisible in the profile only because simulated betas have no
+NAs. It now reads a logical mask over `usable`, built once in `mc_block()`. The mask is `NULL`
+when nothing was partly missing, which keeps the old short-circuit -- without it, `compute_coverage`
+went from 0.04s to 0.17s paying mask lookups on cohorts that have no cache at all.
+
+**`component_present()` returns a pair now**, `list(cols, idx)`, and selects with
+`score_present %in% names(coef)` instead of `intersect(names(coef), score_present)`. Same set, but
+it hashes the **component** (hundreds of coefficients) rather than the panel, and it keeps the
+panel's own order so the positions stay aligned. The order of `obs[["cols"]]` therefore follows the
+panel rather than the coefficient vector. Nothing downstream depends on it: every consumer indexes
+by name off `obs[["cols"]]`.
+
+**Why `collapse` is declined.** Its `join()` defaults are exactly the silence the dependency was
+meant to remove -- `validate = "m:m"` performs no check and `multiple = FALSE` takes the first
+match in `y` -- so every site would carry `validate = "1:1"` plus a `require` list, and would be
+wrapped anyway to raise the package's own cli text. Its `pivot()` has nothing to accelerate: no
+exit here reshapes, `shape_scores()` builds the long frame with `rep()` and `as.vector()` straight
+off the score matrix, and `samples_coverage()` is 0.10s at n = 300. And `fmatch` would at best
+shave a constant off the line that positions delete outright. The install weight, the GPL-2 | GPL-3
+terms and a second Rcpp-linking dependency buy nothing measured.
+
+**`merge(sort = FALSE)` was the other candidate and is also declined.** It does fail loudly on a
+duplicated right key, because the result gains rows and an `nrow()` check catches it. But at
+10k x 10k it costs 6.5ms against 0.5ms for `right[match(...), ]`, its row order under
+`sort = FALSE` is documented as unspecified, and `anyDuplicated()` on the key is free. The
+guarantee is worth having; `merge` is not how to buy it. The remaining work is one internal
+`left_join_by_id()`, which shipped as `id_index()` in the entry above.
+
+---
+
 ## 2026-08-05 -- two settled word choices in user-facing text: "confirm", and how a clock is named
 
 Both are vocabulary, so neither can be linted and both drift silently. They are written into

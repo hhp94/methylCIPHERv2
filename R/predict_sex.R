@@ -129,15 +129,11 @@ attach_recorded <- function(out, pheno, pheno_id, pred, kc) {
     )
   }
 
-  idx <- match(out[[pheno_id]], as.character(pheno[[pheno_id]]))
-  if (anyNA(idx)) {
-    stop(
-      "predict_sex: a scored sample has no pheno row. This is a package bug --
-       please report it.",
-      call. = FALSE
-    )
-  }
-
+  idx <- id_index(
+    out[[pheno_id]],
+    as.character(pheno[[pheno_id]]),
+    "attach_recorded"
+  )
   recorded <- recorded_from_female(pheno[["Female"]][idx])
   out[[RECORDED_SEX]] <- recorded
   # an aneuploid or unscored call is never a disagreement

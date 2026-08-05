@@ -173,6 +173,77 @@ test_that("coverage assembles from blocks by concatenate, never by sum", {
   }
 })
 
+test_that("a resolved panel's positions index the usable set they came from", {
+  skip_on_cran()
+  # DunedinPACE brings a norm panel, so both roles are non-empty
+  spec <- mc_spec(c("Hannum", "DunedinPACE"))
+  DNAm <- random_betas(panels_union(spec$panels), n = 4L)
+  facts <- mc_cohort(DNAm, spec)
+  usable <- facts$usable_cols
+
+  # one assertion per panel role over the whole request, not a loop per clock
+  pull <- function(field) {
+    unlist(
+      lapply(facts$cpg_list$per_clock, function(x) x[[field]]),
+      use.names = FALSE
+    )
+  }
+  expect_equal(usable[pull("score_present_idx")], pull("score_present"))
+  expect_equal(usable[pull("norm_present_idx")], pull("norm_present"))
+  expect_true(length(pull("norm_present")) > 0L)
+})
+
+test_that("a position outside its axis is refused rather than indexed", {
+  skip_on_cran()
+  # 0 would silently drop an element and a high position yields NA
+  block <- list(usable_idx = 1:5)
+  expect_error(block_cols(0L, block))
+  expect_error(block_cols(6L, block))
+
+  fx <- chunk_run()
+  # same CpGs, different order: every position stays in range
+  desynced <- fx$run$facts
+  desynced$usable_cols <- rev(desynced$usable_cols)
+  expect_error(mc_block(fx$cohort$DNAm, fx$cohort$spec, desynced))
+})
+
+test_that("a panel's positions resolve to the panel's own CpGs in the block", {
+  skip_on_cran()
+  fx <- chunk_run()
+  facts <- fx$run$facts
+  block <- mc_block(fx$cohort$DNAm, fx$cohort$spec, facts)
+  parts <- facts$cpg_list$panel_index$score$parts
+  pull <- function(x, f) unlist(lapply(x, function(p) p[[f]]), use.names = FALSE)
+
+  # the matmul reads coef by name off cols, so the columns must be those CpGs
+  got <- lapply(parts, function(p) {
+    colnames(observed_panel(p$present, p$present_idx, block)$values)
+  })
+  expect_equal(unlist(got, use.names = FALSE), pull(parts, "present"))
+
+  # the cohort-mean overlay filters names and positions with one mask
+  cached <- lapply(parts, function(p) {
+    cached_cols(p$present, p$present_idx, block)
+  })
+  # the cohort carries partial NA, so this is not vacuous
+  expect_true(length(pull(cached, "cols")) > 0L)
+  expect_equal(facts$usable_cols[pull(cached, "idx")], pull(cached, "cols"))
+})
+
+test_that("an id join refuses a repeated key and an unmatched one", {
+  skip_on_cran()
+  # a repeated right key silently takes the first match
+  expect_error(id_index("a", c("a", "a"), "T"))
+  # an unmatched key silently yields an NA row
+  expect_error(id_index(c("a", "b"), "a", "T"))
+  # and the two policies that are not a defect
+  expect_equal(id_index(c("b", "a", "c"), c("a", "b"), "T", "drop"), c(2L, 1L))
+  expect_equal(
+    id_index(c("b", "a", "c"), c("a", "b"), "T", "na"),
+    c(2L, 1L, NA)
+  )
+})
+
 test_that("the clocks gate throws out of mc_cohort, before anything is scored", {
   skip_on_cran()
   spec <- mc_spec("Hannum")

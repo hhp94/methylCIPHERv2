@@ -4,7 +4,7 @@
 pack_design <- function(id, cpgs, block) {
   present <- cpgs[["score_present"]]
   absent <- cpgs[["score_absent"]]
-  obs <- observed_panel(present, block)
+  obs <- observed_panel(present, cpgs[["score_present_idx"]], block)
   list(
     present = present,
     absent = absent,

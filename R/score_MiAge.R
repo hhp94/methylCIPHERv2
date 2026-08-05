@@ -47,7 +47,11 @@ miage_fit <- function(betaj, b, cc, d) {
 score_MiAge <- function(id, cpgs, block, results) {
   sample_id <- block[["sample_id"]]
   params <- miage_params(id)
-  obs <- observed_panel(cpgs[["score_present"]], block)
+  obs <- observed_panel(
+    cpgs[["score_present"]],
+    cpgs[["score_present_idx"]],
+    block
+  )
   betas <- obs[["values"]]
   panel <- obs[["cols"]]
 

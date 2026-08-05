@@ -34,6 +34,43 @@ capped <- function(x, n = MC_MSG_CAP) {
   paste(utils::head(x, n), collapse = ", ")
 }
 
+# index that reindexes an id-keyed right side into `key`'s order. `what` names
+# the call site for the defect message.
+# unmatched: "stop" a package bug, "drop" keep the matches, "na" caller's own.
+id_index <- function(key, id, what, unmatched = c("stop", "drop", "na")) {
+  unmatched <- match.arg(unmatched)
+  bug <- function(fmt, ...) {
+    stop(
+      sprintf(
+        paste0(
+          "id_index(%s): ",
+          fmt,
+          " This is a package bug -- please report it."
+        ),
+        what,
+        ...
+      ),
+      call. = FALSE
+    )
+  }
+
+  dup <- anyDuplicated(id)
+  if (dup) {
+    bug("the join key repeats id %s.", id[[dup]])
+  }
+  idx <- match(key, id)
+  miss <- is.na(idx)
+  if (!any(miss)) {
+    return(idx)
+  }
+  switch(
+    unmatched,
+    stop = bug("%d id(s) have no row: %s.", sum(miss), capped(key[miss])),
+    drop = idx[!miss],
+    na = idx
+  )
+}
+
 # polynomial eval, lowest degree first (horner-style, 1-row safe)
 poly_eval <- function(x, coef) {
   out <- rep(0, length(x))

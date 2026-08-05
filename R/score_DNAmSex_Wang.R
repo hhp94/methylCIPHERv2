@@ -20,8 +20,9 @@ score_DNAmSex_Wang <- function(id, cpgs, block, results) {
   }
 
   # the declared panel, never the block's usable set
-  present <- component_present(rotation, cpgs, id)
-  obs <- observed_panel(present, block)
+  panel <- component_present(rotation, cpgs, id)
+  present <- panel[["cols"]]
+  obs <- observed_panel(present, panel[["idx"]], block)
 
   # per-sample moments over the declared ref, banked by mc_cohort()
   mom <- block_domain_moments(block, id)
