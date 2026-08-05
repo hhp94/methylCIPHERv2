@@ -113,10 +113,11 @@ Some clocks need a `Female` covariate. If not readily available, `predict_sex()`
 # The betas are random here, so the mismatches are expected.
 sex_sim <- sim_DNAm("DNAmSex_Wang", n = 6, Female = TRUE)
 
-predict_sex(sex_sim[["DNAm"]], sex_sim[["pheno"]])
-#>        ID DNAmSex_Wang_ChrX DNAmSex_Wang_ChrY predicted_sex recorded_sex
-#> 1 sample1          37.76046         -4.768303        Female       Female
-#> 2 sample2          35.86986         -4.877966        Female       Female
+predict_sex(sex_sim[["DNAm"]], sex_sim[["pheno"]])[1:3, ]
+#        ID DNAmSex_Wang_ChrX DNAmSex_Wang_ChrY predicted_sex recorded_sex sex_mismatch
+# 1 sample1          38.03396         -4.118079        Female         Male         TRUE
+# 2 sample2          36.36661         -4.152196        Female         Male         TRUE
+# 3 sample3          37.47450         -3.756762        Female       Female        FALSE
 ```
 
 Clock calculation is performed by the `calc_clocks()` function.
